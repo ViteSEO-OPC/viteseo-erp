@@ -189,8 +189,23 @@ export function FollowUpsWorkspace({ leadId }: FollowUpsWorkspaceProps) {
     }
   };
 
+  // `h-full` WITHOUT `overflow-hidden`. Both halves carry weight:
+  //
+  // The height must stay DEFINITE. `flex-1` on the row below resolves against it, and that is what
+  // bounds the inbox card so its list (`flex-1 overflow-y-auto`) can scroll inside a fixed frame.
+  // Under `min-h-full` the height became content-driven instead: the row then contributes its
+  // MAX-CONTENT height, and `min-h-[24rem]` is only a floor, never a cap — so 15 follow-ups grew
+  // the row to 1238px, the list had nothing to scroll against, and the composer's action bar sat
+  // 489px below the fold at 1440x900.
+  //
+  // Dropping `overflow-hidden` is what keeps short viewports usable. `h-full` is a height, not a
+  // maximum, so when the row's 24rem floor needs more than the viewport leaves, the workspace
+  // overflows <main> — which (already `flex-1 overflow-y-auto`) scrolls to reach it. With the old
+  // `overflow-hidden` the panels were capped at `viewportHeight - 267` (topbar + <main>'s
+  // pt-8/pb-24 + the tabs + this gap) with nothing able to scroll, so a short window clamped both
+  // cards to a sliver — 53px at 320px tall — and the clipped content was simply unreachable.
   return (
-    <div className="flex h-full min-h-0 flex-1 flex-col gap-4 overflow-hidden">
+    <div className="flex h-full flex-col gap-4">
       <OutreachTabs
         active={activeTab}
         onChange={setActiveTab}
@@ -198,8 +213,14 @@ export function FollowUpsWorkspace({ leadId }: FollowUpsWorkspaceProps) {
         draftsCount={drafts.data?.length ?? 0}
       />
 
+      {/* `min-h-[24rem]` below is the floor that stops the panels collapsing, replacing the
+          `min-h-0` that let them shrink to nothing. The composer's non-scrolling chrome — header,
+          AI-suggestion banner, action bar — measures 283px, so below roughly that the card clips
+          its own furniture however its inner scroller behaves; 24rem clears it with usable room
+          for the body left over. Above the floor the row still resolves to the same `flex-1`
+          remainder as before, so viewports that were already fine are unchanged. */}
       {activeTab === "followups" ? (
-        <div className="flex min-h-0 flex-1 gap-4 overflow-hidden lg:gap-6">
+        <div className="flex min-h-[24rem] flex-1 gap-4 overflow-hidden lg:gap-6">
           <FollowUpInbox
             items={items}
             selectedId={selectedId}
