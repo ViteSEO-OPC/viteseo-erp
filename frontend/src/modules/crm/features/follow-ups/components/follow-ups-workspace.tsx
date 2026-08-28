@@ -8,7 +8,6 @@ import { EmptyPanel } from "@/modules/crm/features/follow-ups/components/empty-p
 import { DraftsList } from "@/modules/crm/features/follow-ups/components/drafts-list";
 import { SchedulerPanel } from "@/modules/crm/features/follow-ups/components/scheduler-panel";
 import { OutreachTabs, type OutreachTab } from "@/modules/crm/features/follow-ups/components/outreach-tabs";
-import { CopilotWidget } from "@/modules/crm/features/copilot/components/copilot-widget";
 import { ConfirmDialog } from "@/modules/crm/components/shared/confirm-dialog/confirm-dialog";
 import { notify as toast } from "@/core/lib/notify";
 import { businessLocalToUtcIso } from "@/modules/crm/lib/timezone";
@@ -287,8 +286,6 @@ export function FollowUpsWorkspace({ leadId }: FollowUpsWorkspaceProps) {
         onDatetimeChange={setScheduleDatetime}
         onClose={() => setSchedulerOpen(false)}
       />
-
-      <CopilotWidget />
     </div>
   );
 }
