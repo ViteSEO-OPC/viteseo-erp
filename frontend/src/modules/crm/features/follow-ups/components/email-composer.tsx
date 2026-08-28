@@ -1,6 +1,7 @@
 "use client";
 
-import { Zap } from "lucide-react";
+import { useState } from "react";
+import { ChevronDown, Zap } from "lucide-react";
 import { cn } from "@/modules/crm/lib/utils";
 import { FormField } from "@/modules/crm/components/forms/form-field/form-field";
 import { Input } from "@/modules/crm/components/ui/input";
@@ -64,6 +65,12 @@ export function EmailComposer({
   // field update if no selector was provided).
   const purposes = Array.from(new Set([...(purposeOptions ?? []), draft.purpose].filter(Boolean)));
   const tones = Array.from(new Set([...(toneOptions ?? []), draft.tone].filter(Boolean)));
+  // Collapse state for the AI banner below. Local and presentational only — it touches no draft
+  // field and fires no request. Deliberately NOT keyed to the selected item: a BD who collapses the
+  // banner is expressing a preference about the banner, not about one follow-up, so it stays
+  // collapsed while they work down the inbox.
+  const [suggestionExpanded, setSuggestionExpanded] = useState(true);
+
   const handlePurpose = (v: string | null) => (onSelectPurpose ?? ((p: string) => onUpdateDraft({ purpose: p })))(v ?? "");
   const handleTone = (v: string | null) => (onSelectTone ?? ((t: string) => onUpdateDraft({ tone: t })))(v ?? "");
 
@@ -71,16 +78,40 @@ export function EmailComposer({
     <div className={cn("flex flex-1 flex-col overflow-hidden rounded-xl border border-border bg-card shadow-card", className)}>
       <ComposerHeader item={item} onBack={onBack} />
 
+      {/*
+        The whole banner is the toggle, following the same idiom as the shared AlertBanner: a plain
+        <button> carrying `aria-expanded`, with a ChevronDown that rotates 180° when open. Expanded
+        is the default, so the chevron starts pointing up — "click to collapse".
+
+        `block` (not the button default inline-block) is load-bearing: an inline-block button would
+        sit on a line box and inherit its descender space, adding a few pixels under the banner that
+        are not there today. The chevron matches the Zap's `h-3.5 w-3.5` for the same reason —
+        a 16px icon would grow the 11px label row. Collapsed, the banner loses only the <p>.
+      */}
       <div className="px-4 pt-4 md:px-6">
-        <div className="rounded-xl border border-teal-400/30 bg-[var(--color-ai-banner-bg)] px-4 py-3">
+        <button
+          type="button"
+          onClick={() => setSuggestionExpanded((v) => !v)}
+          aria-expanded={suggestionExpanded}
+          className="block w-full rounded-xl border border-teal-400/30 bg-[var(--color-ai-banner-bg)] px-4 py-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+        >
           <div className="flex items-center gap-1.5">
             <span className="text-[11px] font-bold uppercase tracking-[0.08em] text-teal-900 dark:text-teal-400">
               AI Suggested Next Action
             </span>
             <Zap className="h-3.5 w-3.5 shrink-0 text-teal-500" />
+            <ChevronDown
+              className={cn(
+                "ml-auto h-3.5 w-3.5 shrink-0 text-teal-900 transition-transform dark:text-teal-400",
+                suggestionExpanded && "rotate-180",
+              )}
+              aria-hidden
+            />
           </div>
-          <p className="mt-1.5 text-sm text-teal-900 dark:text-teal-400">{draft.aiSuggestion}</p>
-        </div>
+          {suggestionExpanded ? (
+            <p className="mt-1.5 text-sm text-teal-900 dark:text-teal-400">{draft.aiSuggestion}</p>
+          ) : null}
+        </button>
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 py-4 md:px-6">
