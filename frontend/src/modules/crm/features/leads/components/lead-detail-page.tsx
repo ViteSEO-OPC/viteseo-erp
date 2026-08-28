@@ -45,8 +45,8 @@ export function LeadDetailPage() {
   const updateLead = useUpdateLead();
   const { hasMinRole, can } = usePermissions();
   const canAssign = hasMinRole("crm_admin");
-  // Mirror the backend authorization: DELETE /leads/{id} requires leads.delete (BDMs lack it).
-  const canDelete = can("leads.delete");
+  // Mirror the backend authorization: DELETE /leads/{id} requires crm.leads.delete (BDMs lack it).
+  const canDelete = can("crm.leads.delete");
   // Attachments are not permission-gated in the UI: Admin and BD have identical rights over the
   // files on a lead they can already open, so the modal renders the same controls for both.
   // Shared with the BD table's row action — one hook, one endpoint, one PDF implementation.

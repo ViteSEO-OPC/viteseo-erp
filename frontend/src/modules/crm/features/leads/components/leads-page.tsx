@@ -21,11 +21,15 @@ import { ALL_SCOPE } from "@/modules/crm/features/performance/lib/performance-sc
 import type { PerformanceScope } from "@/modules/crm/features/performance/lib/performance-scope";
 import { useNicheDistribution } from "@/modules/crm/features/leads/hooks/use-niche-distribution";
 import { useExportLeads } from "@/modules/crm/features/leads/hooks/use-export-leads";
+import { downloadLeadsCsv } from "@/modules/crm/features/leads/lib/leads-csv";
+import { notify as toast } from "@/core/lib/notify";
 import { BulkAssignBdModal } from "@/modules/crm/features/leads/components/bulk-assign-bd-modal";
+import { BulkStatusModal } from "@/modules/crm/features/leads/components/bulk-status-modal";
 import {
   useDeleteLead,
   useBulkDeleteLeads,
   useBulkAssignLeads,
+  useBulkUpdateLeadStatus,
 } from "@/modules/crm/features/leads/hooks/use-lead-mutations";
 import { useHeaderSearch } from "@/modules/crm/providers/header-search-provider";
 import type { Lead } from "@/modules/crm/features/leads/types/lead-types";
@@ -40,6 +44,7 @@ export function LeadsPageLayout() {
   // page — the reset effect below clears it whenever the page or filters change.
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkStatusOpen, setBulkStatusOpen] = useState(false);
   // Bulk Assign BD is a two-step flow: confirm the intent, THEN pick the BD. Two flags rather than
   // one so Cancel on the confirmation never opens the picker.
   const [bulkAssignConfirmOpen, setBulkAssignConfirmOpen] = useState(false);
@@ -47,6 +52,7 @@ export function LeadsPageLayout() {
   const deleteLead = useDeleteLead();
   const bulkDelete = useBulkDeleteLeads();
   const bulkAssign = useBulkAssignLeads();
+  const bulkStatus = useBulkUpdateLeadStatus();
   // Assign/Reassign ownership is Admin/SA only (leads.assign is not held by BD).
   const { hasMinRole } = usePermissions();
   const canAssign = hasMinRole("crm_admin");
@@ -84,6 +90,49 @@ export function LeadsPageLayout() {
         setBulkOpen(false);
       },
     });
+  };
+
+  // Export the CURRENT SELECTION, as distinct from the toolbar Export above it, which walks every
+  // page of the active filter. Purely client-side: the rows are already in `data`, so this reuses
+  // the same downloadLeadsCsv the filtered export uses and issues no request at all. Nothing is
+  // exported that the caller could not already read — `GET /leads` is ownership-scoped server-side,
+  // so a BD's selection can only ever contain their own leads.
+  //
+  // Selection stays page-scoped (unchanged), so this exports the ticked rows on this page and the
+  // selection is deliberately left intact afterwards — an export is not destructive and re-exporting
+  // or continuing to act on the same rows is the likelier next step.
+  const handleBulkExport = () => {
+    const rows = (data ?? []).filter((lead) => selectedIds.has(lead.id));
+    if (rows.length === 0) return;
+    const today = new Date().toISOString().slice(0, 10);
+    downloadLeadsCsv(rows, `leads-selected-${today}.csv`);
+    toast.success(`Exported ${rows.length} lead${rows.length === 1 ? "" : "s"}.`);
+  };
+
+  // Set one status across the selection. Mirrors handleBulkDelete/handleBulkAssign exactly: the
+  // mutation fans out the existing PATCH /leads/{id} per lead, and only the ids that actually took
+  // the new status leave the selection — any that failed stay ticked for a retry.
+  //
+  // The per-lead fan-out is intentional. `status` is a LeadObserver SCORING_INPUT, so each PATCH
+  // re-runs LeadScorer::refresh and writes its own `updated` Activity. A bulk change therefore
+  // leaves exactly the scores and audit trail that changing the leads one by one would — nothing
+  // is bypassed, batched away, or written directly.
+  const handleBulkStatus = (status: string) => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    bulkStatus.mutate(
+      { ids, status },
+      {
+        onSuccess: ({ succeeded }) => {
+          setSelectedIds((prev) => {
+            const next = new Set(prev);
+            succeeded.forEach((id) => next.delete(id));
+            return next;
+          });
+          setBulkStatusOpen(false);
+        },
+      },
+    );
   };
 
   const handleBulkAssign = (bdId: string, bdName: string) => {
@@ -321,6 +370,8 @@ export function LeadsPageLayout() {
             onToggleSelectAll={toggleSelectAll}
             onClearSelection={clearSelection}
             onBulkDelete={() => setBulkOpen(true)}
+            onBulkExport={handleBulkExport}
+            onBulkStatus={() => setBulkStatusOpen(true)}
             bulkDeleting={bulkDelete.isPending}
             onBulkAssign={() => setBulkAssignConfirmOpen(true)}
             bulkAssigning={bulkAssign.isPending}
@@ -412,6 +463,18 @@ export function LeadsPageLayout() {
           count={selectedIds.size}
           onConfirm={handleBulkAssign}
           pending={bulkAssign.isPending}
+        />
+      ) : null}
+
+      {/* Bulk status picker (BD only — the button that opens it is gated in the bulk bar). Mounted
+          only while open so it starts empty on every run, same as the bulk-assign picker above. */}
+      {bulkStatusOpen ? (
+        <BulkStatusModal
+          open={bulkStatusOpen}
+          onOpenChange={setBulkStatusOpen}
+          count={selectedIds.size}
+          onConfirm={handleBulkStatus}
+          pending={bulkStatus.isPending}
         />
       ) : null}
 

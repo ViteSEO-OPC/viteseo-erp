@@ -7,7 +7,6 @@ import { PlannerModeBar, type PlannerMode } from "@/modules/crm/features/calenda
 import { PlannerBoard } from "@/modules/crm/features/calendar/components/board/planner-board";
 import { PlannerHistoryWorkspace } from "@/modules/crm/features/calendar/components/planner-history-workspace";
 import { EventFormDialog } from "@/modules/crm/features/calendar/components/event-form-dialog";
-import { CopilotWidget } from "@/modules/crm/features/copilot/components/copilot-widget";
 import { useCalendarData } from "@/modules/crm/features/calendar/hooks/use-calendar-data";
 import type { PlannerEvent, PlannerEventStatus } from "@/modules/crm/features/calendar/types/calendar-types";
 
@@ -57,7 +56,6 @@ export function CalendarLayout() {
       </div>
 
       {mode === "calendar" && <UpcomingList items={upcoming} />}
-      <CopilotWidget />
 
       <EventFormDialog
         open={dialogOpen}

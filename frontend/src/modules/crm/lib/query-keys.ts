@@ -9,10 +9,6 @@ export const queryKeys = {
   dashboard: {
     all: ["dashboard"] as const,
     kpis: () => [...queryKeys.dashboard.all, "kpis"] as const,
-    // `filters` keeps the Leads workspace's filtered buckets cached separately from the Dashboard's
-    // unfiltered ones. The Dashboard passes nothing, so its key is unchanged.
-    priorityBuckets: (filters: Record<string, string> = {}) =>
-      [...queryKeys.dashboard.all, "priority-buckets", filters] as const,
     recentLeads: () =>
       [...queryKeys.dashboard.all, "recent-leads"] as const,
     // `scope` keeps the Reports & Performance per-BD / All-Reports feeds cached separately from the
@@ -129,8 +125,6 @@ export const queryKeys = {
      * read-only and cached per scope ("all" | "bd:<id>"), leaving the live cache untouched.
      */
     history: (scope: string) => [...queryKeys.planner.all, "history", scope] as const,
-    events: (dateRange: { start: string; end: string }) =>
-      [...queryKeys.planner.all, "events", dateRange] as const,
   },
   me: {
     // The authenticated user's own profile (GET /me) — powers the BD self-service Settings page.

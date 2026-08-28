@@ -9,6 +9,7 @@ use App\Modules\Crm\Models\Lead;
 use App\Modules\Crm\Models\NotificationDelivery;
 use App\Modules\Crm\Notifications\InboundReplyMailNotification;
 use App\Modules\Crm\Notifications\InboundReplyNotification;
+use App\Modules\Crm\Services\CrmAccessService;
 use App\Modules\Crm\Services\Mail\Inbound\InboundMessage;
 use App\Modules\Crm\Services\Outreach\InboundEmailService;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -206,7 +207,12 @@ class InboundReplyInternalMailTest extends TestCase
     {
         Notification::fake();
         $this->enableMailChannel();
-        [$bd, $lead, $outbound] = $this->scenario(['status' => 'inactive']);
+        // CRM suspension now lives in `crm_user_access`, not the shared `users.status` column, so the
+        // fixture has to create the row the dispatcher actually reads. Setting `users.status` alone
+        // no longer suspends anyone in Zerem: that column is shared with TeamOra and Sprintly, and a
+        // colleague can be inactive there for reasons that say nothing about their CRM access.
+        [$bd, $lead, $outbound] = $this->scenario();
+        app(CrmAccessService::class)->suspend($bd);
 
         app(InboundEmailService::class)->ingest($this->reply($lead, $outbound));
 
