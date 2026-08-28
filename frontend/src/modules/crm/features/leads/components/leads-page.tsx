@@ -21,6 +21,8 @@ import { ALL_SCOPE } from "@/modules/crm/features/performance/lib/performance-sc
 import type { PerformanceScope } from "@/modules/crm/features/performance/lib/performance-scope";
 import { useNicheDistribution } from "@/modules/crm/features/leads/hooks/use-niche-distribution";
 import { useExportLeads } from "@/modules/crm/features/leads/hooks/use-export-leads";
+import { downloadLeadsCsv } from "@/modules/crm/features/leads/lib/leads-csv";
+import { notify as toast } from "@/core/lib/notify";
 import { BulkAssignBdModal } from "@/modules/crm/features/leads/components/bulk-assign-bd-modal";
 import {
   useDeleteLead,
@@ -84,6 +86,23 @@ export function LeadsPageLayout() {
         setBulkOpen(false);
       },
     });
+  };
+
+  // Export the CURRENT SELECTION, as distinct from the toolbar Export above it, which walks every
+  // page of the active filter. Purely client-side: the rows are already in `data`, so this reuses
+  // the same downloadLeadsCsv the filtered export uses and issues no request at all. Nothing is
+  // exported that the caller could not already read — `GET /leads` is ownership-scoped server-side,
+  // so a BD's selection can only ever contain their own leads.
+  //
+  // Selection stays page-scoped (unchanged), so this exports the ticked rows on this page and the
+  // selection is deliberately left intact afterwards — an export is not destructive and re-exporting
+  // or continuing to act on the same rows is the likelier next step.
+  const handleBulkExport = () => {
+    const rows = (data ?? []).filter((lead) => selectedIds.has(lead.id));
+    if (rows.length === 0) return;
+    const today = new Date().toISOString().slice(0, 10);
+    downloadLeadsCsv(rows, `leads-selected-${today}.csv`);
+    toast.success(`Exported ${rows.length} lead${rows.length === 1 ? "" : "s"}.`);
   };
 
   const handleBulkAssign = (bdId: string, bdName: string) => {
@@ -321,6 +340,7 @@ export function LeadsPageLayout() {
             onToggleSelectAll={toggleSelectAll}
             onClearSelection={clearSelection}
             onBulkDelete={() => setBulkOpen(true)}
+            onBulkExport={handleBulkExport}
             bulkDeleting={bulkDelete.isPending}
             onBulkAssign={() => setBulkAssignConfirmOpen(true)}
             bulkAssigning={bulkAssign.isPending}

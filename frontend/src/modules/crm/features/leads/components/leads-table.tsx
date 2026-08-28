@@ -156,6 +156,8 @@ type LeadsTableProps = {
   onClearSelection: () => void;
   /** Open the (reused) delete confirmation for the selected leads. */
   onBulkDelete: () => void;
+  /** Download the ticked rows as CSV. Client-side and read-only, so it is not role-gated. */
+  onBulkExport: () => void;
   /** True while a bulk delete is in flight — locks the checkboxes + bar. */
   bulkDeleting: boolean;
   /** Open the Assign BD confirmation for the selected leads. Rendered only when `canAssign`. */
@@ -206,6 +208,7 @@ export function LeadsTable({
   onToggleSelectAll,
   onClearSelection,
   onBulkDelete,
+  onBulkExport,
   bulkDeleting,
   onBulkAssign,
   bulkAssigning,
@@ -433,6 +436,19 @@ export function LeadsTable({
                       {bulkAssigning ? "Reassigning…" : `Reassign Selected (${selectedCount})`}
                     </Button>
                   ) : null}
+                  {/* Not role-gated, unlike the two actions above it: exporting is reading, and
+                      the rows are already on screen. `GET /leads` is ownership-scoped server-side,
+                      so a BD's selection can only contain their own leads. Placed after Reassign so
+                      Delete and Reassign keep the exact positions Admin/SA already know. */}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={onBulkExport}
+                    disabled={bulkBusy}
+                  >
+                    Export Selected
+                  </Button>
                   <Button
                     type="button"
                     variant="ghost"
