@@ -5,6 +5,7 @@ namespace Tests\Feature\Crm;
 use App\Models\User;
 use App\Modules\Crm\Models\Lead;
 use App\Modules\Crm\Models\LeadWebsiteCandidate;
+use App\Modules\Crm\Resources\NearbyClientResource;
 use App\Modules\Crm\Services\Website\WebsiteEvidenceService;
 use Database\Seeders\RolesAndPermissionsSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -54,6 +55,7 @@ class WebsiteEvidenceTierGateTest extends TestCase
             'business_name' => 'Vigan Dental Care',
             'contact_name' => 'Vigan Dental Care',
             'city' => 'Vigan',
+            'phone' => '+63 77 722 1234',
             'email' => null,
             'website' => null,
             'website_status' => 'website-unknown',
@@ -67,6 +69,32 @@ class WebsiteEvidenceTierGateTest extends TestCase
     private function service(): WebsiteEvidenceService
     {
         return app(WebsiteEvidenceService::class);
+    }
+
+    private function strongFindings(string $url = 'https://vigandentalcare.ph'): array
+    {
+        return [
+            'website_reachable' => true,
+            'website_title' => 'Vigan Dental Care — Dentist in Vigan',
+            'website_description' => 'Family dentistry in Vigan.',
+            'final_url' => $url,
+            'canonical_url' => $url,
+            'phones_found' => ['+63 77 722 1234'],
+            'emails_found' => [],
+        ];
+    }
+
+    private function weakFindings(string $url = 'https://unrelated-shop.example'): array
+    {
+        return [
+            'website_reachable' => true,
+            'website_title' => 'Welcome to our store',
+            'website_description' => 'General merchandise.',
+            'final_url' => $url,
+            'canonical_url' => $url,
+            'phones_found' => [],
+            'emails_found' => [],
+        ];
     }
 
     // --- the gate itself --------------------------------------------------------
@@ -138,18 +166,6 @@ class WebsiteEvidenceTierGateTest extends TestCase
         $this->assertSame('website-unknown', $lead->refresh()->website_status);
     }
 
-    public function test_a_complete_search_still_needs_a_human_to_conclude_absence(): void
-    {
-        // The gate tightens exhaustion; it must not have handed the machine a new way to conclude.
-        $lead = $this->discoveredLead();
-
-        $this->service()->recordCandidates($lead, [], WebsiteEvidenceService::REQUIRED_TIERS);
-        $this->service()->markExhausted($lead);
-
-        $this->assertTrue($this->service()->searchFor($lead)->isExhausted());
-        $this->assertSame('website-unknown', $lead->refresh()->website_status);
-    }
-
     public function test_a_bd_confirming_a_complete_search_still_produces_no_website(): void
     {
         // The happy path must survive the new guard: a refusal that also blocks legitimate use is
@@ -181,6 +197,105 @@ class WebsiteEvidenceTierGateTest extends TestCase
         $this->service()->markExhausted($lead);
 
         $this->assertFalse($this->service()->searchFor($lead)->isExhausted());
+    }
+
+    // --- automatic determination ------------------------------------------------
+
+    public function test_a_genuinely_exhausted_search_determines_absence_by_itself(): void
+    {
+        // The product change: the BD consumes a classification, they do not adjudicate DNS answers.
+        $lead = $this->discoveredLead();
+
+        $this->service()->recordCandidates($lead, [], WebsiteEvidenceService::REQUIRED_TIERS);
+        $this->service()->markExhausted($lead);
+
+        $this->assertSame('no-website', $lead->refresh()->website_status);
+        $this->assertSame('high', (new NearbyClientResource($lead))->toArray(request())['priority']);
+    }
+
+    public function test_the_determination_is_attributed_to_nobody(): void
+    {
+        // NULL `confirmed_by` is the marker distinguishing a machine determination from a signature.
+        $lead = $this->discoveredLead();
+
+        $this->service()->recordCandidates($lead, [], WebsiteEvidenceService::REQUIRED_TIERS);
+        $search = $this->service()->markExhausted($lead);
+
+        $this->assertNotNull($search->confirmed_absent_at);
+        $this->assertNull($search->confirmed_by);
+    }
+
+    public function test_an_incomplete_search_determines_nothing(): void
+    {
+        // The guard that matters most: a missing tier must leave the lead exactly where it was.
+        $lead = $this->discoveredLead();
+
+        $this->service()->recordCandidates($lead, [], ['osm_tag', 'wikidata']);
+        $this->service()->markExhausted($lead);
+
+        $this->assertSame('website-unknown', $lead->refresh()->website_status);
+    }
+
+    public function test_an_unchecked_candidate_prevents_any_determination(): void
+    {
+        $lead = $this->discoveredLead();
+
+        $this->service()->recordCandidates($lead, [
+            ['url' => 'https://vigandental.example', 'source' => LeadWebsiteCandidate::SOURCE_PROBE],
+        ], WebsiteEvidenceService::REQUIRED_TIERS);
+        $this->service()->markExhausted($lead);
+
+        $this->assertSame('website-unknown', $lead->refresh()->website_status);
+    }
+
+    public function test_a_refused_candidate_still_yields_a_determination(): void
+    {
+        // A candidate that was found and DISPROVED is stronger evidence than none at all; it must not
+        // block the conclusion the way an unchecked one does.
+        $lead = $this->discoveredLead();
+
+        $this->service()->recordCandidates($lead, [
+            ['url' => 'https://unrelated-shop.example', 'source' => LeadWebsiteCandidate::SOURCE_PROBE],
+        ], WebsiteEvidenceService::REQUIRED_TIERS);
+        $candidate = LeadWebsiteCandidate::query()->where('lead_id', $lead->id)->firstOrFail();
+        $this->service()->recordVerification($candidate, $this->weakFindings());
+
+        $this->service()->markExhausted($lead);
+
+        $this->assertFalse($candidate->refresh()->verified);
+        $this->assertSame('no-website', $lead->refresh()->website_status);
+    }
+
+    public function test_it_never_overwrites_a_status_somebody_else_set(): void
+    {
+        // A lead that is not `website-unknown` holds a human's or an audit's answer. Filling a gap is
+        // not the same as settling a disagreement.
+        $lead = $this->discoveredLead();
+        $lead->update(['website_status' => 'needs-redesign']);
+
+        $this->service()->recordCandidates($lead, [], WebsiteEvidenceService::REQUIRED_TIERS);
+        $this->service()->markExhausted($lead);
+
+        $this->assertSame('needs-redesign', $lead->refresh()->website_status);
+    }
+
+    public function test_a_later_verified_website_withdraws_the_automatic_determination(): void
+    {
+        // What makes an automatic conclusion safe to make at all: it is reversible by evidence.
+        $lead = $this->discoveredLead();
+        $this->service()->recordCandidates($lead, [], WebsiteEvidenceService::REQUIRED_TIERS);
+        $this->service()->markExhausted($lead);
+        $this->assertSame('no-website', $lead->refresh()->website_status);
+
+        $this->service()->recordCandidates($lead, [
+            ['url' => 'https://vigandentalcare.ph', 'source' => LeadWebsiteCandidate::SOURCE_PROBE],
+        ], WebsiteEvidenceService::REQUIRED_TIERS);
+        $candidate = LeadWebsiteCandidate::query()
+            ->where('lead_id', $lead->id)->where('verified', null)->firstOrFail();
+        $this->service()->recordVerification($candidate, $this->strongFindings('https://vigandentalcare.ph'));
+
+        $this->assertTrue($candidate->refresh()->verified);
+        $this->assertSame('website-unknown', $lead->refresh()->website_status);
     }
 
     // --- the new tier's provenance ----------------------------------------------

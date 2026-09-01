@@ -21,7 +21,8 @@ namespace App\Modules\Crm\Services;
  * `no-website` — "this business genuinely has no website" — is deliberately NOT reachable from here.
  * An audit can only ever prove that a *given URL* is or isn't theirs; proving that *no* website exists
  * requires having looked for one, which is candidate discovery (Step 3, not built). Until then
- * `no-website` is only ever set by a human who checked, or carried in by an import. Previously this
+ * `no-website` is set by the evidence chain once every required tier has run and verified nothing
+ * (WebsiteEvidenceService), by a human who checked, or carried in by an import. Previously this
  * class returned `no-website` for an unreachable URL, which conflated "we couldn't reach it" with
  * "it doesn't exist" and awarded the +25 greenfield-prospect signal on no evidence.
  *

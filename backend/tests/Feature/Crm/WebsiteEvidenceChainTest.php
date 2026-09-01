@@ -286,16 +286,19 @@ class WebsiteEvidenceChainTest extends TestCase
 
     // --- exhaustion is evidence, not a verdict -------------------------------
 
-    public function test_exhaustion_never_changes_website_status_by_itself(): void
+    public function test_a_genuine_exhaustion_concludes_absence_by_itself(): void
     {
         $lead = $this->discoveredLead();
         $this->service()->recordCandidates($lead, [], WebsiteEvidenceService::REQUIRED_TIERS);
 
         $this->service()->markExhausted($lead);
 
-        // THE CENTRAL GUARANTEE. Searching and finding nothing is not a conclusion.
-        $this->assertSame('website-unknown', $lead->refresh()->website_status);
+        // THE CENTRAL GUARANTEE, INVERTED BY DESIGN. Searching every required tier and verifying
+        // nothing IS the conclusion — the BD consumes it rather than adjudicating the evidence.
+        $this->assertSame('no-website', $lead->refresh()->website_status);
         $this->assertTrue($this->service()->searchFor($lead)->isExhausted());
+        // Nobody signed it: NULL `confirmed_by` marks a determination rather than a signature.
+        $this->assertNull($this->service()->searchFor($lead)->confirmed_by);
     }
 
     public function test_exhaustion_is_refused_while_a_candidate_is_unchecked(): void
@@ -422,8 +425,11 @@ class WebsiteEvidenceChainTest extends TestCase
         $this->service()->recordCandidates($lead, [], WebsiteEvidenceService::REQUIRED_TIERS);
         $this->service()->markExhausted($lead);
 
+        // The system already concluded, so there is nothing left for a person to confirm — which is
+        // the point: the BD is not asked to adjudicate DNS answers and identity confidences.
         $this->getJson("/api/v1/crm/leads/{$lead->id}/website-evidence")->assertOk()
-            ->assertJsonPath('data.search.canConfirmAbsence', true);
+            ->assertJsonPath('data.search.confirmedAbsent', true)
+            ->assertJsonPath('data.search.canConfirmAbsence', false);
     }
 
     // --- boundaries ----------------------------------------------------------
@@ -906,21 +912,16 @@ class WebsiteEvidenceChainTest extends TestCase
         $this->assertSame($scoreBefore, $lead->score);
     }
 
-    public function test_no_website_still_requires_the_human_confirmation_path(): void
+    public function test_absence_is_concluded_without_promoting_any_url(): void
     {
-        // Promotion changes nothing about how absence is concluded. confirmAbsent() remains the only
-        // writer of `no-website`, and it still refuses until the search is exhausted.
+        // Promotion changes nothing about how absence is concluded: a search that verified nothing
+        // promotes nothing, and the exhausted search reaches `no-website` on its own.
         $bd = $this->user('crm_bd');
         Sanctum::actingAs($bd);
         $lead = $this->discoveredLead();
 
         $this->service()->recordCandidates($lead, [], WebsiteEvidenceService::REQUIRED_TIERS);
         $this->service()->markExhausted($lead);
-
-        $this->assertNull($lead->refresh()->website);
-        $this->assertSame('website-unknown', $lead->website_status);
-
-        $this->postJson("/api/v1/crm/leads/{$lead->id}/website-absence")->assertOk();
 
         $lead->refresh();
         $this->assertSame('no-website', $lead->website_status);
