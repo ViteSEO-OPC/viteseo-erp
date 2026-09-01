@@ -32,6 +32,12 @@ use Illuminate\Support\Facades\Log;
  * a business may hold a site no tier surfaced — so {@see markExhausted()} sets a timestamp and stops.
  * Nothing downstream treats it as a status, and there is deliberately no code path from exhaustion
  * to `no-website` that does not pass through a person.
+ *
+ * AND EXHAUSTION IS RELATIVE TO WHERE THERE WAS TO LOOK. {@see REQUIRED_TIERS} is the second half of
+ * that claim: a search may only call itself exhausted once every required tier has actually run.
+ * Without it "found nothing" and "barely looked" were recorded identically, which is the one way an
+ * honest human confirmation can still produce a wrong answer — the person is shown a complete trail
+ * and has no way to tell it was never filled in.
  */
 class WebsiteEvidenceService
 {
@@ -54,6 +60,27 @@ class WebsiteEvidenceService
      * whichever candidate happened to sort first.
      */
     public const ACCEPT_MARGIN = 15;
+
+    /**
+     * The tiers a search must have run before it may call itself exhausted.
+     *
+     * The tier names are the candidate SOURCE values because a tier is identified by the kind of
+     * evidence it produces — the two vocabularies are deliberately the same one, so a tier cannot be
+     * recorded as run under a name no candidate could ever carry.
+     *
+     * Adding a tier here makes every existing exhausted search incomplete BY DESIGN: the claim
+     * "we looked everywhere" is relative to where there was to look, and widening that set must
+     * reopen the question rather than grandfather an answer given before the new place existed.
+     * Existing rows are not rewritten — {@see markExhausted()} simply stops re-confirming them, and
+     * a lead re-enters the queue the moment its stale `exhausted_at` is cleared.
+     *
+     * @var list<string>
+     */
+    public const REQUIRED_TIERS = [
+        LeadWebsiteCandidate::SOURCE_OSM_TAG,
+        LeadWebsiteCandidate::SOURCE_WIKIDATA,
+        LeadWebsiteCandidate::SOURCE_PROBE,
+    ];
 
     public function __construct(private readonly WebsiteIdentityVerifier $verifier) {}
 
@@ -395,6 +422,19 @@ class WebsiteEvidenceService
             ->where('lead_id', $lead->id)->where('verified', true)->exists();
 
         if ($pending || $verified) {
+            return $search;
+        }
+
+        // EVERY REQUIRED TIER MUST HAVE RUN. `tiers_run` was recorded from the start but nothing
+        // enforced it, so a run that only read OSM tags and Wikidata could claim exhaustion — and
+        // those two tiers are LOOKUPS, not searches: measured, `brand:wikidata` covers 0% of
+        // dentists, clinics and salons, which is exactly where genuine absences live. Letting that
+        // count as "we looked everywhere" is what put a human in front of an empty trail and invited
+        // them to confirm `no-website` on the strength of a search that never happened.
+        //
+        // Refused silently, like the guards above: the caller re-declares exhaustion on its next
+        // pass, and a lead that is not yet exhausted simply stays in the queue.
+        if (array_diff(self::REQUIRED_TIERS, $search->tiers_run ?? []) !== []) {
             return $search;
         }
 

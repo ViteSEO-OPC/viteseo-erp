@@ -85,7 +85,8 @@ class WebsiteEvidenceController extends Controller
         );
 
         // The caller may declare it has nothing further to try; the service still refuses to mark
-        // exhaustion while any candidate is unchecked or verified.
+        // exhaustion while any candidate is unchecked or verified, or while a required tier has not
+        // run. A scraper that skipped a tier re-declares on its next pass and succeeds then.
         if ($request->boolean('exhausted')) {
             $search = $this->evidence->markExhausted($lead);
         }

@@ -125,7 +125,7 @@ class WebsiteEvidenceChainTest extends TestCase
     {
         Sanctum::actingAs($this->user('crm_admin'));
         $lead = $this->discoveredLead();
-        $this->service()->recordCandidates($lead, [], ['osm_tag', 'wikidata']);
+        $this->service()->recordCandidates($lead, [], WebsiteEvidenceService::REQUIRED_TIERS);
         $this->service()->markExhausted($lead);
 
         $this->getJson('/api/v1/crm/website-evidence/queue')->assertOk()->assertJsonCount(0, 'data');
@@ -289,7 +289,7 @@ class WebsiteEvidenceChainTest extends TestCase
     public function test_exhaustion_never_changes_website_status_by_itself(): void
     {
         $lead = $this->discoveredLead();
-        $this->service()->recordCandidates($lead, [], ['osm_tag', 'wikidata']);
+        $this->service()->recordCandidates($lead, [], WebsiteEvidenceService::REQUIRED_TIERS);
 
         $this->service()->markExhausted($lead);
 
@@ -304,7 +304,7 @@ class WebsiteEvidenceChainTest extends TestCase
         $lead = $this->discoveredLead();
         $this->service()->recordCandidates($lead, [
             ['url' => 'https://a.example', 'source' => 'wikidata'],
-        ], ['wikidata']);
+        ], WebsiteEvidenceService::REQUIRED_TIERS);
 
         $this->service()->markExhausted($lead);
 
@@ -314,7 +314,7 @@ class WebsiteEvidenceChainTest extends TestCase
     public function test_a_new_candidate_reopens_an_exhausted_search(): void
     {
         $lead = $this->discoveredLead();
-        $this->service()->recordCandidates($lead, [], ['osm_tag']);
+        $this->service()->recordCandidates($lead, [], WebsiteEvidenceService::REQUIRED_TIERS);
         $this->service()->markExhausted($lead);
         $this->assertTrue($this->service()->searchFor($lead)->isExhausted());
 
@@ -366,7 +366,7 @@ class WebsiteEvidenceChainTest extends TestCase
         // A candidate was found, checked, and refused. Then the tiers ran out.
         $this->service()->recordCandidates($lead, [
             ['url' => 'https://unrelated-shop.example', 'source' => 'search'],
-        ], ['osm_tag', 'wikidata', 'search']);
+        ], [...WebsiteEvidenceService::REQUIRED_TIERS, 'search']);
         $candidate = LeadWebsiteCandidate::query()->where('lead_id', $lead->id)->firstOrFail();
         $this->service()->recordVerification($candidate, $this->weakFindings());
         $this->service()->markExhausted($lead);
@@ -390,7 +390,7 @@ class WebsiteEvidenceChainTest extends TestCase
         Sanctum::actingAs($bd);
         $lead = $this->discoveredLead($bd);
 
-        $this->service()->recordCandidates($lead, [], ['osm_tag', 'wikidata']);
+        $this->service()->recordCandidates($lead, [], WebsiteEvidenceService::REQUIRED_TIERS);
         $this->service()->markExhausted($lead);
         $this->postJson("/api/v1/crm/leads/{$lead->id}/website-absence")->assertOk();
 
@@ -419,7 +419,7 @@ class WebsiteEvidenceChainTest extends TestCase
     {
         Sanctum::actingAs($this->user('crm_admin'));
         $lead = $this->discoveredLead();
-        $this->service()->recordCandidates($lead, [], ['osm_tag']);
+        $this->service()->recordCandidates($lead, [], WebsiteEvidenceService::REQUIRED_TIERS);
         $this->service()->markExhausted($lead);
 
         $this->getJson("/api/v1/crm/leads/{$lead->id}/website-evidence")->assertOk()
@@ -464,7 +464,7 @@ class WebsiteEvidenceChainTest extends TestCase
         $lead = $this->discoveredLead($bd);
         $before = ['priority' => $lead->priority, 'status' => $lead->status, 'score' => $lead->score];
 
-        $this->service()->recordCandidates($lead, [], ['osm_tag']);
+        $this->service()->recordCandidates($lead, [], WebsiteEvidenceService::REQUIRED_TIERS);
         $this->service()->markExhausted($lead);
         $this->postJson("/api/v1/crm/leads/{$lead->id}/website-absence")->assertOk();
 
@@ -490,7 +490,7 @@ class WebsiteEvidenceChainTest extends TestCase
 
         $this->getJson("/api/v1/crm/leads/{$lead->id}/website-evidence")->assertOk();
 
-        $this->service()->recordCandidates($lead, [], ['osm_tag', 'wikidata']);
+        $this->service()->recordCandidates($lead, [], WebsiteEvidenceService::REQUIRED_TIERS);
         $this->service()->markExhausted($lead);
 
         $this->postJson("/api/v1/crm/leads/{$lead->id}/website-absence")->assertOk();
@@ -547,7 +547,7 @@ class WebsiteEvidenceChainTest extends TestCase
         $lead = $this->discoveredLead();
 
         // 1. Searched, nothing found, human confirms.
-        $this->service()->recordCandidates($lead, [], ['osm_tag', 'wikidata']);
+        $this->service()->recordCandidates($lead, [], WebsiteEvidenceService::REQUIRED_TIERS);
         $this->service()->markExhausted($lead);
         $this->postJson("/api/v1/crm/leads/{$lead->id}/website-absence")->assertOk();
 
@@ -583,7 +583,7 @@ class WebsiteEvidenceChainTest extends TestCase
         Sanctum::actingAs($bd);
         $lead = $this->discoveredLead();
 
-        $this->service()->recordCandidates($lead, [], ['osm_tag']);
+        $this->service()->recordCandidates($lead, [], WebsiteEvidenceService::REQUIRED_TIERS);
         $this->service()->markExhausted($lead);
         $this->postJson("/api/v1/crm/leads/{$lead->id}/website-absence", ['note' => 'Called them.'])
             ->assertOk();
@@ -614,7 +614,7 @@ class WebsiteEvidenceChainTest extends TestCase
         Sanctum::actingAs($bd);
         $lead = $this->discoveredLead();
 
-        $this->service()->recordCandidates($lead, [], ['osm_tag']);
+        $this->service()->recordCandidates($lead, [], WebsiteEvidenceService::REQUIRED_TIERS);
         $this->service()->markExhausted($lead);
         $this->postJson("/api/v1/crm/leads/{$lead->id}/website-absence")->assertOk();
 
@@ -641,7 +641,7 @@ class WebsiteEvidenceChainTest extends TestCase
         Sanctum::actingAs($bd);
         $lead = $this->discoveredLead();
 
-        $this->service()->recordCandidates($lead, [], ['osm_tag']);
+        $this->service()->recordCandidates($lead, [], WebsiteEvidenceService::REQUIRED_TIERS);
         $this->service()->markExhausted($lead);
         $this->postJson("/api/v1/crm/leads/{$lead->id}/website-absence")->assertOk();
         $this->assertSame('no-website', $lead->refresh()->website_status);
@@ -675,7 +675,7 @@ class WebsiteEvidenceChainTest extends TestCase
         Sanctum::actingAs($bd);
         $lead = $this->discoveredLead();
 
-        $this->service()->recordCandidates($lead, [], ['osm_tag']);
+        $this->service()->recordCandidates($lead, [], WebsiteEvidenceService::REQUIRED_TIERS);
         $this->service()->markExhausted($lead);
         $this->postJson("/api/v1/crm/leads/{$lead->id}/website-absence")->assertOk();
 
@@ -914,7 +914,7 @@ class WebsiteEvidenceChainTest extends TestCase
         Sanctum::actingAs($bd);
         $lead = $this->discoveredLead();
 
-        $this->service()->recordCandidates($lead, [], ['osm_tag', 'wikidata']);
+        $this->service()->recordCandidates($lead, [], WebsiteEvidenceService::REQUIRED_TIERS);
         $this->service()->markExhausted($lead);
 
         $this->assertNull($lead->refresh()->website);

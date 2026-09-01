@@ -35,7 +35,9 @@ class StoreWebsiteCandidatesRequest extends FormRequest
             'tiers_run' => ['required', 'array', 'min:1'],
             'tiers_run.*' => ['string', 'max:40'],
             // The caller declaring it has nothing further to try. Exhaustion is still refused
-            // server-side if any candidate is unchecked or verified.
+            // server-side if any candidate is unchecked or verified, or if `tiers_run` does not yet
+            // cover every WebsiteEvidenceService::REQUIRED_TIERS — a caller cannot exhaust a search
+            // by declaring it finished before it ran.
             'exhausted' => ['sometimes', 'boolean'],
         ];
     }
