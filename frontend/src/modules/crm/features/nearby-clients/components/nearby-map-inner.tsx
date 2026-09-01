@@ -21,13 +21,21 @@ const PIN_COLOR: Record<NearbyPriority, string> = {
   low: "#3b82f6",
 };
 
-// Keyless CARTO basemaps — theme-aware (Positron light / Dark Matter dark). OSM + CARTO attribution.
+// CARTO basemaps — theme-aware (Positron light / Dark Matter dark). OSM + CARTO attribution.
 // The map provider lives entirely behind this component (see nearby-map.tsx): the rest of the Nearby
 // module speaks only in coordinates + NearbyClient, so this Leaflet/OSM layer can be swapped for
 // another provider (e.g. Google Maps) without touching the hook, filters, list, or page.
+//
+// CARTO ended keyless raster access and now stamps "API KEY REQUIRED" into the tile image itself
+// (a 200 with a defaced PNG, not an error), so the free basemap key is appended when configured.
+// Absent the key the URLs stay byte-identical to before rather than requesting `?key=undefined`,
+// mirroring how echo.ts declines to start realtime when its key is missing.
+const CARTO_KEY_PARAM = process.env.NEXT_PUBLIC_CARTO_BASEMAP_KEY
+  ? `?key=${process.env.NEXT_PUBLIC_CARTO_BASEMAP_KEY}`
+  : "";
 const TILES = {
-  light: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
-  dark: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+  light: `https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png${CARTO_KEY_PARAM}`,
+  dark: `https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png${CARTO_KEY_PARAM}`,
 };
 const ATTRIBUTION =
   '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>';
