@@ -86,6 +86,103 @@ class LeadQualificationTest extends TestCase
         $this->postJson("/api/v1/crm/leads/{$prospect->id}/qualify")->assertStatus(409);
     }
 
+    // ── 2b. The 409 names the BD who won, so the loser knows the pool moved ─────────────────────
+
+    /**
+     * The refusal has to be actionable. "Already qualified" tells a BD nothing about WHY the row they
+     * were looking at is gone; naming the winner does. The name comes from the existing
+     * `qualified_by` relation — no new column, projection or claiming concept.
+     */
+    public function test_the_409_names_the_bd_who_qualified_it_first(): void
+    {
+        $winner = $this->bd();
+        $winner->update(['name' => 'Jhamire Aranda']);
+        $loser = $this->bd();
+
+        Sanctum::actingAs($loser);
+        $prospect = $this->prospect();
+        $prospect->update([
+            'qualified_at' => now(),
+            'qualified_by' => $winner->id,
+            'assigned_to' => $winner->id,
+        ]);
+
+        $this->postJson("/api/v1/crm/leads/{$prospect->id}/qualify")
+            ->assertStatus(409)
+            ->assertJsonPath('message', 'Already added to CRM by Jhamire Aranda.');
+    }
+
+    /** Re-pressing your OWN claim must not report a stranger took it — that reads as a bug. */
+    public function test_the_409_addresses_the_actor_when_they_are_the_claimant(): void
+    {
+        $bd = $this->bd();
+        Sanctum::actingAs($bd);
+        $prospect = $this->prospect();
+        $prospect->update(['qualified_at' => now(), 'qualified_by' => $bd->id, 'assigned_to' => $bd->id]);
+
+        $this->postJson("/api/v1/crm/leads/{$prospect->id}/qualify")
+            ->assertStatus(409)
+            ->assertJsonPath('message', 'You have already added this prospect to the CRM.');
+    }
+
+    /** An unresolvable claimant degrades to a generic sentence rather than leaking a raw id. */
+    public function test_the_409_falls_back_when_the_claimant_cannot_be_resolved(): void
+    {
+        Sanctum::actingAs($this->bd());
+        $prospect = $this->prospect();
+        // qualified_by NULL is reachable: the column is nullable and a claimant can be removed later.
+        $prospect->update(['qualified_at' => now(), 'qualified_by' => null]);
+
+        $this->postJson("/api/v1/crm/leads/{$prospect->id}/qualify")
+            ->assertStatus(409)
+            ->assertJsonPath('message', 'Already added to CRM by another BD.');
+    }
+
+    // ── 2c. A stale client hammering the dead row changes nothing ───────────────────────────────
+
+    /**
+     * The stale-client scenario the Nearby UX fix targets. A BD whose list predates the claim can
+     * press the button repeatedly; every attempt must be refused identically and must not disturb the
+     * winner's ownership, attribution, or the Activity trail.
+     */
+    public function test_repeated_attempts_on_a_claimed_prospect_never_steal_it(): void
+    {
+        $winner = $this->bd();
+        $winner->update(['name' => 'Jhamire Aranda']);
+        $loser = $this->bd();
+
+        Sanctum::actingAs($loser);
+        $prospect = $this->prospect();
+        $qualifiedAt = now()->subMinute();
+        $prospect->update([
+            'qualified_at' => $qualifiedAt,
+            'qualified_by' => $winner->id,
+            'assigned_to' => $winner->id,
+        ]);
+
+        $activitiesBefore = Activity::query()->where('lead_id', $prospect->id)->count();
+
+        foreach (range(1, 3) as $attempt) {
+            $this->postJson("/api/v1/crm/leads/{$prospect->id}/qualify")
+                ->assertStatus(409)
+                ->assertJsonPath('message', 'Already added to CRM by Jhamire Aranda.');
+        }
+
+        $fresh = $prospect->fresh();
+        $this->assertSame($winner->id, $fresh->qualified_by, 'attribution moved');
+        $this->assertSame($winner->id, $fresh->assigned_to, 'ownership moved');
+        $this->assertSame(
+            $qualifiedAt->toDateTimeString(),
+            $fresh->qualified_at->toDateTimeString(),
+            'the claim timestamp was rewritten',
+        );
+        $this->assertSame(
+            $activitiesBefore,
+            Activity::query()->where('lead_id', $prospect->id)->count(),
+            'a refused attempt wrote an Activity',
+        );
+    }
+
     // ── 3 + 4. Ownership and attribution go to the ACTING user ──────────────────────────────────
 
     public function test_ownership_and_attribution_are_the_acting_user(): void

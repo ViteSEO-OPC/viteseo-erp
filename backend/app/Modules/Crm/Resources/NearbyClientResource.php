@@ -61,6 +61,17 @@ class NearbyClientResource extends JsonResource
             'priority' => $this->prospectingPriority(),
             // A discovered business is "active" unless it has been declined.
             'active' => $this->status !== 'declined',
+            // CLAIM STATE — read-only, derived from the existing qualification columns. `qualified`
+            // drives the "Already added to CRM" chip and the disabled Accept action; it is never the
+            // thing that ENFORCES the claim (the locked transaction in LeadQualificationController
+            // is, and stays so). Only the claimant's name is exposed, exactly as LeadResource already
+            // exposes `assignedTo.name`; a lead whose claimant was removed degrades to null.
+            'qualified' => $this->qualified_at !== null,
+            'qualifiedAt' => $this->qualified_at?->toIso8601String(),
+            'qualifiedBy' => $this->whenLoaded('qualifiedBy', fn () => $this->qualifiedBy ? [
+                'id' => (string) $this->qualifiedBy->id,
+                'name' => $this->qualifiedBy->name,
+            ] : null),
             // Real coordinates (WGS84) captured at discovery, consumed by the interactive map.
             'latitude' => $this->latitude,
             'longitude' => $this->longitude,

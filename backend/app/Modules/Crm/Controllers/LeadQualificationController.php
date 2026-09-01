@@ -68,7 +68,7 @@ class LeadQualificationController extends Controller
 
             if ($locked->qualified_at !== null) {
                 return response()->json([
-                    'message' => 'This prospect has already been qualified into the CRM.',
+                    'message' => $this->alreadyQualifiedMessage($locked, (int) $request->user()->id),
                 ], 409);
             }
 
@@ -116,5 +116,29 @@ class LeadQualificationController extends Controller
                 'data' => new LeadResource($locked->refresh()),
             ], 201);
         });
+    }
+
+    /**
+     * The 409 sentence for a prospect another BD already claimed.
+     *
+     * Names the winner so the loser knows the pool moved rather than that something broke. The name
+     * comes from the existing `qualified_by` relation — no new column, projection or claiming
+     * concept — and only `name` is read: a scalar select on the 409 path, never the user record.
+     *
+     * This discloses nothing new. Every caller here has already passed `can('qualify', $lead)`, and
+     * LeadResource already shows peers their names through `assignedTo.name` on the Leads list. A
+     * deleted or unresolvable claimant degrades to "another BD" rather than leaking an id.
+     */
+    private function alreadyQualifiedMessage(Lead $lead, int $actorId): string
+    {
+        if ($lead->qualified_by === $actorId) {
+            return 'You have already added this prospect to the CRM.';
+        }
+
+        $name = $lead->qualifiedBy()->value('name');
+
+        return $name !== null
+            ? "Already added to CRM by {$name}."
+            : 'Already added to CRM by another BD.';
     }
 }

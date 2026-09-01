@@ -73,6 +73,8 @@ type Props = {
   onPlanVisit: (client: NearbyClient) => void;
   onDirections: (client: NearbyClient) => void;
   onQualify: (client: NearbyClient) => void;
+  /** Id of the prospect whose claim is in flight — guards the popup button, as the list card does. */
+  qualifyingId: string | null;
 };
 
 /**
@@ -164,7 +166,7 @@ function SelectionController({
   return null;
 }
 
-export function NearbyMapInner({ clients, origin, radiusKm, selectedId, onSelect, onPlanVisit, onDirections, onQualify }: Props) {
+export function NearbyMapInner({ clients, origin, radiusKm, selectedId, onSelect, onPlanVisit, onDirections, onQualify, qualifyingId }: Props) {
   const { theme } = useTheme();
   const markerRefs = useRef<Record<string, L.Marker>>({});
   const clusterRef = useRef<L.MarkerClusterGroup | null>(null);
@@ -250,8 +252,26 @@ export function NearbyMapInner({ clients, origin, radiusKm, selectedId, onSelect
                       <WebsiteIntelBadge website={c.website} compact />
                     </div>
                   )}
+                  {c.qualified && (
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      Already added to CRM
+                      {c.qualifiedBy ? <> · Added by: <span className="font-medium">{c.qualifiedBy.name}</span></> : null}
+                    </p>
+                  )}
                   <div className="mt-2 flex flex-wrap items-center gap-2">
-                    <Button variant="default" size="sm" onClick={() => onQualify(c)}>Accept into CRM</Button>
+                    <Button
+                      variant="default"
+                      size="sm"
+                      disabled={qualifyingId === c.id || c.qualified}
+                      onClick={() => onQualify(c)}
+                      title={
+                        c.qualified
+                          ? `Already accepted into the CRM${c.qualifiedBy ? ` by ${c.qualifiedBy.name}` : " by another BD"} — it can no longer be accepted.`
+                          : "Accept this prospect into your CRM leads"
+                      }
+                    >
+                      {c.qualified ? "Already in CRM" : qualifyingId === c.id ? "Accepting…" : "Accept into CRM"}
+                    </Button>
                     <Button variant="outline" size="sm" onClick={() => onPlanVisit(c)}>Plan visit</Button>
                     <Button variant="ghost" size="sm" onClick={() => onDirections(c)}>Directions</Button>
                   </div>
