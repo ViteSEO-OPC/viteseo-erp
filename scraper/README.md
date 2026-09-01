@@ -100,8 +100,13 @@ cd apps/scraper
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt      # runtime
 .venv/bin/python -m pip install -r requirements-dev.txt  # + pytest
-cp .env.example .env    # then set CRM_TOKEN (a Sanctum token for an Admin/Super Admin user)
+cp .env.example .env    # then set CRM_TOKEN — issue one from the backend with:
+                        #   php artisan crm:scraper-token
 ```
+
+> **The token is per-database.** `migrate:fresh` truncates `personal_access_tokens`, so a reseed
+> invalidates it and every call starts returning 401. Re-run `php artisan crm:scraper-token` (add
+> `--rotate` to revoke the previous one first) and paste the new value into `CRM_TOKEN`.
 
 > On Debian/Ubuntu without `ensurepip`, bootstrap pip once:
 > `curl -sS https://bootstrap.pypa.io/get-pip.py | .venv/bin/python`
@@ -241,7 +246,7 @@ provider supplies one — it is the audit's input, not a verdict.
 |---|---|---|
 | `DISCOVERY_PROVIDER` | Active provider | `openstreetmap` |
 | `CRM_BASE_URL` | CRM API base (unified platform: `…/api/v1/crm`) | `http://localhost:8001/api/v1/crm` |
-| `CRM_TOKEN` | Sanctum token (user with `import` permission) | — |
+| `CRM_TOKEN` | Sanctum token for the scoped service account (`php artisan crm:scraper-token`) | — |
 | `OVERPASS_URL` | Overpass endpoint | `https://overpass-api.de/api/interpreter` |
 | `NOMINATIM_URL` | Nominatim endpoint | `https://nominatim.openstreetmap.org` |
 | `USER_AGENT` | HTTP User-Agent | `CRM-Enterprise-Scraper/1.0` |

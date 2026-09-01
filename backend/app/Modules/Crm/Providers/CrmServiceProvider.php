@@ -10,6 +10,7 @@ use App\Modules\Crm\Console\Commands\N8nTokenCommand;
 use App\Modules\Crm\Console\Commands\PruneReadNotifications;
 use App\Modules\Crm\Console\Commands\PruneXlsImportsCommand;
 use App\Modules\Crm\Console\Commands\RecomputeLeadScoresCommand;
+use App\Modules\Crm\Console\Commands\ScraperTokenCommand;
 use App\Modules\Crm\Events\DealWon;
 use App\Modules\Crm\Events\FollowUpCompleted;
 use App\Modules\Crm\Events\InboundReplyReceived;
@@ -246,6 +247,9 @@ class CrmServiceProvider extends ServiceProvider
                 SyncMailboxesCommand::class,
                 RecomputeLeadScoresCommand::class,
                 N8nTokenCommand::class,
+                // The scraper's scoped service credential. Re-run after any `migrate:fresh` — Sanctum
+                // tokens are per-database and do not survive a reseed.
+                ScraperTokenCommand::class,
                 PruneReadNotifications::class,
                 // One-shot Business Niche registry backfill. Not scheduled — run manually once the
                 // canonical built-in list is approved and NicheSeeder has been run.
