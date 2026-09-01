@@ -93,9 +93,15 @@ function providerState(
 }
 
 const STATE_CLASS: Record<ProviderState["tone"], string> = {
-  active: "bg-teal-600 text-white",
-  ready: "border-teal-600 text-teal-800",
-  pending: "border-amber-300 text-amber-800",
+  // teal-600 (#009588) under white is 3.7:1 — below the 4.5:1 AA floor for this 12px label.
+  // teal-700 takes it to 5.2:1 while staying the same solid teal chip. Dark only; light is unchanged.
+  active: "bg-teal-600 text-white dark:bg-teal-700",
+  // `ready`/`pending` were written as OUTLINE chips — border + text, no surface. The call sites use
+  // Badge's default variant, whose `bg-primary` (bright cyan) therefore survives tailwind-merge and
+  // ends up under this text. Amber-on-cyan measured 1.17:1. Each state now carries its own surface,
+  // using the same amber/teal chip pattern as website-intel-badge.tsx.
+  ready: "border-teal-600 bg-teal-100 text-teal-800 dark:border-teal-700 dark:bg-teal-950/50 dark:text-teal-300",
+  pending: "border-amber-300 bg-amber-100 text-amber-800 dark:border-amber-800 dark:bg-amber-950/50 dark:text-amber-300",
   idle: "border-border text-muted-foreground",
 };
 
@@ -127,7 +133,7 @@ export function NerbyIntegrationCard() {
         <header className="flex items-start justify-between gap-4">
           <div className="flex items-start gap-3">
             <span className="mt-0.5 flex size-9 items-center justify-center rounded-lg bg-muted">
-              <Radar className="size-4 text-teal-700" aria-hidden />
+              <Radar className="size-4 text-teal-700 dark:text-teal-400" aria-hidden />
             </span>
             <div>
               <h3 className="text-base font-semibold text-foreground">Nearby Lead Generation</h3>
@@ -212,7 +218,9 @@ function EffectiveProviderSummary({ integration }: { integration: NerbyIntegrati
         <div
           className={cn(
             "flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2",
-            isFallback ? "border-amber-300 bg-amber-50/50" : "border-teal-600/40 bg-teal-50/40",
+            isFallback
+              ? "border-amber-300 bg-amber-50/50 dark:border-amber-700/60 dark:bg-muted/40"
+              : "border-teal-600/40 bg-teal-50/40 dark:border-teal-700/60 dark:bg-muted/40",
           )}
         >
           <span className="text-xs font-semibold uppercase tracking-[0.06em] text-muted-foreground">
@@ -235,7 +243,7 @@ function EffectiveProviderSummary({ integration }: { integration: NerbyIntegrati
       {isFallback ? (
         <div
           role="status"
-          className="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2.5 text-sm text-amber-900"
+          className="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2.5 text-sm text-amber-900 dark:border-amber-700/60 dark:bg-amber-950/20 dark:text-amber-200"
         >
           <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />
           <p>{fallbackMessage(integration)}</p>
@@ -283,9 +291,9 @@ function ProviderOption({
       className={cn(
         "rounded-lg border p-4 transition-colors",
         selectedButIdle
-          ? "border-amber-300 bg-amber-50/40"
+          ? "border-amber-300 bg-amber-50/40 dark:border-amber-700/60 dark:bg-card"
           : isSelected
-            ? "border-teal-600 bg-teal-50/40"
+            ? "border-teal-600 bg-teal-50/40 dark:border-teal-700/60 dark:bg-card"
             : "border-border bg-card",
       )}
     >
@@ -294,7 +302,7 @@ function ProviderOption({
           <input
             type="radio"
             name="nerby-provider"
-            className="mt-1 size-4 accent-teal-700"
+            className="mt-1 size-4 accent-teal-700 dark:accent-teal-400"
             checked={isSelected}
             disabled={select.isPending}
             onChange={() => select.mutate(provider.provider)}
@@ -322,7 +330,7 @@ function ProviderOption({
                 </Badge>
               ) : null}
               {isSelected && !isRunning ? (
-                <Badge variant="outline" className="border-amber-300 text-amber-800">
+                <Badge variant="outline" className="border-amber-300 text-amber-800 dark:border-amber-800 dark:text-amber-300">
                   Selected, not running
                 </Badge>
               ) : null}
@@ -485,7 +493,7 @@ function CredentialPanel({ provider }: { provider: NerbyProviderConfig }) {
       ) : null}
 
       {/* --- Connection status --- */}
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-muted/40 px-3 py-2.5">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-muted/40 px-3 py-2.5 dark:bg-muted/60">
         <div className="flex flex-col gap-0.5">
           <span className="flex items-center gap-2 text-sm text-foreground">
             <TestStatusChip provider={provider} />
@@ -531,7 +539,7 @@ function TestStatusChip({ provider }: { provider: NerbyProviderConfig }) {
   if (status === "ok") {
     return (
       <Badge variant="secondary" className="gap-1">
-        <CheckCircle2 className="size-3 text-teal-700" aria-hidden />
+        <CheckCircle2 className="size-3 text-teal-700 dark:text-teal-400" aria-hidden />
         {testStatusLabel(status)}
       </Badge>
     );
@@ -539,7 +547,7 @@ function TestStatusChip({ provider }: { provider: NerbyProviderConfig }) {
 
   if (status === "auth_failed" || status === "unreachable" || status === "rate_limited") {
     return (
-      <Badge variant="outline" className="gap-1 border-amber-300 text-amber-800">
+      <Badge variant="outline" className="gap-1 border-amber-300 text-amber-800 dark:border-amber-800 dark:text-amber-300">
         <AlertTriangle className="size-3" aria-hidden />
         {testStatusLabel(status)}
       </Badge>
@@ -586,7 +594,7 @@ function ComingSoonOption({ label, description }: { label: string; description: 
 const CAPABILITY_TIERS: { title: string; tone: string; items: string[] }[] = [
   {
     title: "Available now",
-    tone: "text-teal-800",
+    tone: "text-teal-800 dark:text-teal-300",
     items: [
       "Provider architecture and switching",
       "Secure server-side credential storage",
@@ -595,7 +603,7 @@ const CAPABILITY_TIERS: { title: string; tone: string; items: string[] }[] = [
   },
   {
     title: "Requires an API key",
-    tone: "text-amber-800",
+    tone: "text-amber-800 dark:text-amber-300",
     items: [
       "Broader business and niche discovery",
       "Natural-language discovery",
@@ -618,7 +626,7 @@ const CAPABILITY_TIERS: { title: string; tone: string; items: string[] }[] = [
 
 function CapabilityTiers() {
   return (
-    <section className="rounded-lg border border-border-subtle bg-muted/20 p-4">
+    <section className="rounded-lg border border-border-subtle bg-muted/20 p-4 dark:border-border dark:bg-muted/40">
       <h4 className="text-sm font-semibold text-foreground">AI-powered discovery</h4>
       <p className="mt-1 text-xs text-muted-foreground">
         These capabilities are potential advantages, not measured ones. No provider comparison has
@@ -628,7 +636,7 @@ function CapabilityTiers() {
       {/* The distinction that matters commercially AND for trust: a provider supplies FACTS, it does
           not supply judgements. Better facts may lead the existing scorer to a different answer; the
           scorer's rules never move, and no provider can hand the CRM a score or a priority. */}
-      <p className="mt-2 rounded-lg bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+      <p className="mt-2 rounded-lg bg-muted/50 px-3 py-2 text-xs text-muted-foreground dark:bg-muted/70">
         <span className="font-medium text-foreground">No provider sets Lead Score or Priority.</span>{" "}
         Discovery supplies candidate and fit data only, which is deterministically verified before a
         lead exists. The existing scoring rules — formulas, weights and caps — are unchanged and are
