@@ -2,6 +2,7 @@
 
 import { RotateCcw } from "lucide-react";
 import { Badge } from "@/modules/crm/components/ui/badge";
+import { EmptyState } from "@/modules/crm/components/shared/empty-state/empty-state";
 import { Button } from "@/modules/crm/components/ui/button";
 import {
   Table,
@@ -34,6 +35,10 @@ type Props = {
 
 /** Read-only, append-only version timeline. Archived versions offer a forward-only rollback. */
 export function VersionHistory({ versions, canManage, onRollback }: Props) {
+  if (versions.length === 0) {
+    return <EmptyState message="No versions yet" />;
+  }
+
   return (
     <div className="overflow-x-auto rounded-lg border border-border">
       <Table>
@@ -42,6 +47,7 @@ export function VersionHistory({ versions, canManage, onRollback }: Props) {
             <TableHead className="w-20">Version</TableHead>
             <TableHead className="w-28">State</TableHead>
             <TableHead>Reason</TableHead>
+            <TableHead className="w-48">Created</TableHead>
             <TableHead className="w-48">Published</TableHead>
             <TableHead className="w-28 text-right">Actions</TableHead>
           </TableRow>
@@ -52,7 +58,14 @@ export function VersionHistory({ versions, canManage, onRollback }: Props) {
               <TableCell className="font-mono tabular-nums">v{v.versionNumber}</TableCell>
               <TableCell>{stateBadge(v.state)}</TableCell>
               <TableCell className="text-sm text-muted-foreground">{v.reasonForChange ?? "—"}</TableCell>
-              <TableCell className="text-sm text-muted-foreground">{fmt(v.publishedAt)}</TableCell>
+              <TableCell className="text-sm text-muted-foreground">
+                {fmt(v.createdAt)}
+                {v.creator ? <span className="block text-xs">by {v.creator.name}</span> : null}
+              </TableCell>
+              <TableCell className="text-sm text-muted-foreground">
+                {fmt(v.publishedAt)}
+                {v.publisher ? <span className="block text-xs">by {v.publisher.name}</span> : null}
+              </TableCell>
               <TableCell className="text-right">
                 {canManage && v.state === "archived" ? (
                   <Button variant="outline" size="sm" onClick={() => onRollback(v)}>
