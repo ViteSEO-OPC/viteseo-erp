@@ -240,7 +240,13 @@ def test_state_survives_a_round_trip_and_tolerates_corruption(tmp_path):
     assert load_state(path)["cursor"] == 3
 
     path.write_text("{corrupt", encoding="utf-8")
-    assert load_state(path) == {"cursor": 0, "last_run": {}}, "corruption must not fail the run"
+    # Asserted by MEANING rather than by dict identity: a healed state is "rotation at the start,
+    # no history", and that is what must survive corruption. Pinning the exact key set made the
+    # test fail when per-group cursors were added, which is not a behaviour change.
+    healed = load_state(path)
+    assert healed["cursor"] == 0, "corruption must not fail the run"
+    assert healed["cursors"] == {}
+    assert healed["last_run"] == {}
 
     assert load_state(tmp_path / "absent.json")["cursor"] == 0
 

@@ -163,10 +163,24 @@ a server). Each entry expands to one pair per category:
 `CATEGORY_SELECTORS`) or a raw `key=value` selector. These are **provider** categories, deliberately
 separate from the CRM's Business Niche registry.
 
+**Groups** (optional) bucket targets for the rotation — island groups in practice:
+
+```json
+{ "group": "visayas", "area": "Cebu City, Philippines", "categories": ["pharmacy", "dentist"] }
+```
+
+A run then takes **one pair per group in turn**, so a national target list spreads each night across
+Luzon, Visayas and Mindanao instead of draining the first group in the file before the others are
+ever visited. `defaults.group` sets it for a whole file. The names are the file's vocabulary —
+`targets.py` hardcodes none of them, so adding a group needs no Python change. A file that declares
+no groups is unchanged: everything lands in one implicit group and the rotation is the original flat
+round-robin.
+
 **Rotation state** lives in `.discovery-state.json` beside it — runtime state, git-ignored, and
-self-healing (a missing or corrupt file simply restarts the rotation). It holds the cursor plus each
-pair's last run. Round-robin guarantees **no pair is queried again until every other pair has had a
-turn**.
+self-healing (a missing or corrupt file simply restarts the rotation). It holds a cursor per group
+(plus a legacy flat `cursor`, still written so a rollback resumes rather than restarts) and each
+pair's last run. Round-robin guarantees **no pair is queried again until every other pair in its
+group has had a turn**.
 
 **Volume** is `targets_per_run × limit`. Shipped defaults are **3 × 30 = up to 90 businesses/run**,
 and fewer in practice because the CRM dedups on `place_id`/email — the pool is meant to build
