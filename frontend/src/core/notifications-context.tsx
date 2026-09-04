@@ -34,10 +34,18 @@ const Ctx = createContext<NotificationCenter | null>(null);
 
 // Read/dismissed state lives client-side (no notifications table — Tier 2),
 // namespaced per user so shared browsers don't leak state between accounts.
-export function NotificationProvider({ children }: { children: React.ReactNode }) {
+export function NotificationProvider({
+  children,
+  enabled = true,
+}: {
+  children: React.ReactNode;
+  /** False in portals with no HR feed — the context still exists (the shared
+      TopBar/Sidebar always read it) but nothing is fetched. */
+  enabled?: boolean;
+}) {
   const { user } = useAuth();
   const [limit, setLimit] = useState(20);
-  const { data } = useNotifications(limit, 0);
+  const { data } = useNotifications(limit, 0, enabled);
 
   const [readIds, setReadIds] = useState<Set<string>>(new Set());
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set());
@@ -48,6 +56,10 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
   useEffect(() => {
     if (!readKey || !dismissKey) return;
     try {
+      // localStorage is an external system read after mount (never during SSR),
+      // which is exactly what an effect is for — the keys only become real once
+      // the signed-in user resolves.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setReadIds(new Set(JSON.parse(localStorage.getItem(readKey) ?? "[]")));
       setDismissedIds(new Set(JSON.parse(localStorage.getItem(dismissKey) ?? "[]")));
     } catch {

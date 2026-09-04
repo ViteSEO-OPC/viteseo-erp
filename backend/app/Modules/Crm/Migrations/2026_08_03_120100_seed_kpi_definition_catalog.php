@@ -1,5 +1,6 @@
 <?php
 
+use App\Modules\Crm\Support\CrmRuleDefaults;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Support\Facades\DB;
 
@@ -41,58 +42,8 @@ return new class extends Migration
 
     public function up(): void
     {
-        DB::transaction(function (): void {
-            // Idempotency guard, as the lead_scoring baseline does: re-running migrate or
-            // re-provisioning must never duplicate or overwrite an edited catalog.
-            if (DB::table('crm_business_rule_versions')->where('module', 'kpi')->where('version_number', 1)->exists()) {
-                return;
-            }
-
-            $now = now();
-
-            $versionId = DB::table('crm_business_rule_versions')->insertGetId([
-                'module' => 'kpi',
-                'version_number' => 1,
-                'state' => 'active',
-                'computation_spec_version' => self::SPEC_VERSION,
-                'reason_for_change' => 'System baseline: the frozen M-01…M-06 KPI catalog. Definition metadata only — formulas remain code-defined.',
-                'created_by' => null,
-                'published_by' => null,
-                'published_at' => $now,
-                'created_at' => $now,
-                'updated_at' => $now,
-            ]);
-
-            $order = 0;
-            $rows = [];
-            foreach ($this->catalog() as [$ruleKey, $description, $isEnabled]) {
-                $rows[] = [
-                    'version_id' => $versionId,
-                    'rule_key' => $ruleKey,
-                    'description' => $description,
-                    'category' => null, // not applicable to a KPI — see catalog() docblock
-                    'point_value' => null, // not applicable to a KPI — see the class docblock
-                    'is_enabled' => $isEnabled,
-                    'display_order' => ++$order,
-                    'created_at' => $now,
-                    'updated_at' => $now,
-                ];
-            }
-            DB::table('crm_business_rules')->insert($rows);
-
-            DB::table('crm_business_rule_audit')->insert([
-                'module' => 'kpi',
-                'action' => 'seed',
-                'rule_key' => null,
-                'previous_value' => null,
-                'new_value' => null,
-                'version_number' => 1,
-                'computation_spec_version' => self::SPEC_VERSION,
-                'reason_for_change' => 'System baseline seed of the KPI definition catalog (M-01…M-06).',
-                'user_id' => null,
-                'created_at' => $now,
-            ]);
-        });
+        // See the lead_scoring baseline migration: one home for the catalogue.
+        CrmRuleDefaults::installKpiFor(null);
     }
 
     public function down(): void

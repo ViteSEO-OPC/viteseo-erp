@@ -8,19 +8,22 @@ import { SearchInput } from "@/modules/crm/components/shared/search-input/search
 import { ThemeToggle } from "@/modules/crm/components/layout/topbar/theme-toggle";
 import { NotificationBell } from "@/modules/crm/features/notifications/components/notification-bell";
 import { UserMenu } from "@/modules/crm/components/layout/user-menu/user-menu";
+import { AppSwitcher } from "@/core/components/app-switcher";
 import { useHeaderSearch } from "@/modules/crm/providers/header-search-provider";
 import { useLeadSearch } from "@/modules/crm/features/leads/hooks/use-lead-search";
 
 type PageHeaderProps = {
   title: string;
   onMenuClick?: () => void;
+  /** Drawer state, so the hamburger can report it to assistive tech. */
+  menuOpen?: boolean;
   className?: string;
 };
 
 /** Where a search with no page-specific handler goes — the CRM's existing results surface. */
 const LEADS_ROUTE = "/zerem/leads";
 
-export function PageHeader({ title, onMenuClick, className }: PageHeaderProps) {
+export function PageHeader({ title, onMenuClick, menuOpen = false, className }: PageHeaderProps) {
   const { value, setValue, registered, onSubmit } = useHeaderSearch();
   const router = useRouter();
   const pathname = usePathname();
@@ -92,8 +95,10 @@ export function PageHeader({ title, onMenuClick, className }: PageHeaderProps) {
           <button
             type="button"
             onClick={onMenuClick}
-            className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:hidden"
-            aria-label="Open navigation menu"
+            className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring lg:hidden"
+            aria-label="Open navigation"
+            aria-haspopup="dialog"
+            aria-expanded={menuOpen}
           >
             <Menu className="h-5 w-5" />
           </button>
@@ -127,8 +132,11 @@ export function PageHeader({ title, onMenuClick, className }: PageHeaderProps) {
           >
             <Search className="h-4 w-4" />
           </button>
+          {/* One order across every portal (see core/components/top-bar.tsx):
+              notifications → theme → app switcher → account. */}
           <NotificationBell />
           <ThemeToggle />
+          <AppSwitcher current="crm" />
           <UserMenu />
         </div>
       </div>

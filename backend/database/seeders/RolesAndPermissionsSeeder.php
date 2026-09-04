@@ -229,6 +229,32 @@ class RolesAndPermissionsSeeder extends Seeder
             'crm.dashboard.view',
         ]);
 
+        /*
+         * The Accounting, Inventory and Booking blocks lived here -- their roles and
+         * permissions, ~90 lines of them. Those modules are Kiplo's product and were
+         * removed from this repo on 2026-09-03, and a role nothing can hold is a role
+         * that only shows up in a picker to confuse whoever reads it.
+         *
+         * They stayed in this seeder rather than in the modules on the argument that
+         * roles are a shared platform concern. That argument was right about WHERE
+         * they live and wrong about WHOSE they are, which is why removing a module
+         * left them behind.
+         */
+
+        // --- Kiosk (internal website configurator — BD lead-gen tool) ---
+        // Not a sold product, so it's gated by these permissions, not an org
+        // entitlement. `configure` = run the wizard + save a selection;
+        // `selections.*` = see/manage saved leads + issue temp client access.
+        $kioskPermissions = ['kiosk.configure', 'kiosk.selections.view', 'kiosk.selections.manage'];
+        foreach ($kioskPermissions as $name) {
+            Permission::firstOrCreate(['name' => $name, 'guard_name' => 'web']);
+        }
+        $kioskBd = Role::firstOrCreate(['name' => 'kiosk_bd', 'guard_name' => 'web']);        // BD — full kiosk
+        $kioskClient = Role::firstOrCreate(['name' => 'kiosk_client', 'guard_name' => 'web']); // Temp client — configure only
+        $kioskBd->syncPermissions($kioskPermissions);
+        $kioskClient->syncPermissions(['kiosk.configure']);
+        $superAdmin->givePermissionTo($kioskPermissions);
+
         // --- Business Rules Administration (Settings → Business Rules) ---
         // Two permissions: `.view` (read rules + version history + audit history) and `.manage`
         // (edit / enable-disable / reorder / publish / rollback / discard — a superset of `.view`).

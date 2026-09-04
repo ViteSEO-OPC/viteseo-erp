@@ -101,9 +101,25 @@ export async function getEmployee(id: number): Promise<Employee> {
   return res.data.data;
 }
 
-export async function createEmployee(input: EmployeeInput): Promise<Employee> {
+/**
+ * A hire, and the password that lets them in.
+ *
+ * The password sits BESIDE the envelope's `data`, not inside it, because it is not
+ * part of the resource: the server keeps only the hash, so this is the one response
+ * that will ever carry it.
+ */
+export interface CreatedEmployee {
+  employee: Employee;
+  /**
+   * Optional on purpose — an older backend or a proxy that strips unknown keys
+   * leaves it undefined, and the caller has to cope rather than show a blank one.
+   */
+  temporary_password?: string;
+}
+
+export async function createEmployee(input: EmployeeInput): Promise<CreatedEmployee> {
   const res = await apiClient.post("/hr/employees", input);
-  return res.data.data;
+  return { employee: res.data.data, temporary_password: res.data.temporary_password };
 }
 
 /** Partial by design: only the fields sent are written (see EmployeeUpdateInput). */

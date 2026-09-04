@@ -27,6 +27,16 @@ return Application::configure(basePath: dirname(__DIR__))
             'role' => \Spatie\Permission\Middleware\RoleMiddleware::class,
             'permission' => \Spatie\Permission\Middleware\PermissionMiddleware::class,
             'role_or_permission' => \Spatie\Permission\Middleware\RoleOrPermissionMiddleware::class,
+            // Pins the tenant org from the authenticated user; apply after auth:sanctum.
+            'set-current-org' => \App\Http\Middleware\SetCurrentOrg::class,
+            // Gates a route behind an availed feature (feature:<key>); apply after set-current-org.
+            'feature' => \App\Http\Middleware\EnsureFeature::class,
+            // Gates a bridge route behind an ENABLED cross-module connection (connection:<key>); apply after set-current-org.
+            'connection' => \App\Http\Middleware\EnsureConnectionEnabled::class,
+            // Prepaid gate — blocks the product unless the org's subscription is paid & current.
+            'subscription-active' => \App\Http\Middleware\EnsureSubscriptionActive::class,
+            // Enforces the 24h expiry on temp kiosk client logins (kiosk_client role).
+            'kiosk-access' => \App\Modules\Kiosk\Middleware\EnsureKioskAccess::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

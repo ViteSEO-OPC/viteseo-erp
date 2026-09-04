@@ -2,12 +2,14 @@
 
 namespace App\Modules\Hr\Models;
 
+use App\Models\Concerns\BelongsToOrg;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class ReportExport extends Model
 {
+    use BelongsToOrg;
     protected $table = 'hr_report_exports';
 
     protected $fillable = ['report_key', 'params', 'generated_by'];

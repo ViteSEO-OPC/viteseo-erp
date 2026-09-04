@@ -2,12 +2,14 @@
 
 namespace App\Modules\Hr\Models;
 
+use App\Models\Concerns\BelongsToOrg;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Attendance extends Model
 {
+    use BelongsToOrg;
     /**
      * The statuses HR may set on a day. Each one has a defined pay meaning in
      * AttendanceService::unpaidDaysDetailFor() — adding a value here without teaching that loop

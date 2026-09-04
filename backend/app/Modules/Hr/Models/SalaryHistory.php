@@ -2,12 +2,14 @@
 
 namespace App\Modules\Hr\Models;
 
+use App\Models\Concerns\BelongsToOrg;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class SalaryHistory extends Model
 {
+    use BelongsToOrg;
     protected $table = 'hr_salary_histories';
 
     protected $fillable = [

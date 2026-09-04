@@ -2,12 +2,14 @@
 
 namespace App\Modules\Hr\Models;
 
+use App\Models\Concerns\BelongsToOrg;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 class HolidaySet extends Model
 {
+    use BelongsToOrg;
     use SoftDeletes;
 
     protected $table = 'hr_holiday_sets';

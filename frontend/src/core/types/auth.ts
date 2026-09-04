@@ -4,7 +4,21 @@
 // Platform/HRIS core roles used by the shared shell (the CRM & PMS modules carry
 // their own per-system role unions). Per-system model: hr_employee = base HRIS
 // self-service, hr_officer = HRIS management, super_admin = all modules.
-export type Role = "hr_employee" | "hr_officer" | "super_admin";
+export type Role =
+  | "hr_employee"
+  | "hr_officer"
+  | "super_admin"
+  | "acc_admin"
+  | "acc_accountant"
+  | "acc_viewer"
+  | "inv_admin"
+  | "inv_staff"
+  | "inv_viewer"
+  | "kiosk_bd"
+  | "kiosk_client"
+  | "booking_admin"
+  | "booking_staff"
+  | "booking_viewer";
 
 export interface AuthUser {
   id: number;

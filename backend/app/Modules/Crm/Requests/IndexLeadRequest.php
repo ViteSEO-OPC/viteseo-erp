@@ -55,7 +55,7 @@ class IndexLeadRequest extends FormRequest
                     return;
                 }
 
-                if (! ctype_digit((string) $value) || ! User::query()->whereKey($value)->exists()) {
+                if (! ctype_digit((string) $value) || ! User::query()->inCurrentOrg()->whereKey($value)->exists()) {
                     $fail('The selected assigned to is invalid.');
                 }
             }],

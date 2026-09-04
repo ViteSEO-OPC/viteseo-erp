@@ -28,6 +28,9 @@ class StoreEmployeeRequest extends FormRequest
             'middle_name' => ['nullable', 'string', 'max:255'],
             'name_extension' => ['nullable', 'string', 'max:50'],
             'email' => ['required', 'email', 'max:255', 'unique:users,email'],
+            // Optional: the controller generates one when it is absent. Either way
+            // the value comes back ONCE in the response so HR can hand it over.
+            'password' => ['nullable', 'string', 'min:8', 'max:255'],
             // Job fields.
             'department_id' => ['required', 'integer', 'exists:hr_departments,id'],
             'manager_id' => ['nullable', 'integer', 'exists:hr_employees,id'],

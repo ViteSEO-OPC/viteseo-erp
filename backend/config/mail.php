@@ -164,6 +164,13 @@ return [
             'reply_to' => env('PMS_MAIL_REPLY_TO_ADDRESS'),
         ],
 
+        // Booking — customer-facing confirmations, notices, and reminders.
+        'booking' => [
+            'address' => env('BOOKING_MAIL_FROM_ADDRESS', env('MAIL_FROM_ADDRESS')),
+            'name' => env('BOOKING_MAIL_FROM_NAME', env('MAIL_FROM_NAME')),
+            'reply_to' => env('BOOKING_MAIL_REPLY_TO_ADDRESS'),
+        ],
+
     ],
 
 ];

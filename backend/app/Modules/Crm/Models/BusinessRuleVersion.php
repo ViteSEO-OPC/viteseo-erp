@@ -2,6 +2,7 @@
 
 namespace App\Modules\Crm\Models;
 
+use App\Models\Concerns\BelongsToOrg;
 use App\Models\User;
 use App\Modules\Crm\Enums\BusinessRuleModule;
 use App\Modules\Crm\Enums\BusinessRuleState;
@@ -39,6 +40,7 @@ use Illuminate\Support\Carbon;
 ])]
 class BusinessRuleVersion extends Model
 {
+    use BelongsToOrg;
     protected $table = 'crm_business_rule_versions';
 
     protected function casts(): array

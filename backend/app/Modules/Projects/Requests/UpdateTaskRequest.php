@@ -11,6 +11,7 @@ use App\Modules\Projects\Models\Group;
 use App\Modules\Projects\Models\ProjectStatus;
 use App\Modules\Projects\Models\Task;
 use App\Modules\Projects\Support\PublicId;
+use App\Support\OrgUserRule;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -92,7 +93,7 @@ class UpdateTaskRequest extends FormRequest
                 'nullable',
                 'prohibited_unless:assignment_type,individual',
                 'integer',
-                'exists:users,id',
+                OrgUserRule::exists(),
             ],
             // Effort runs on a fixed 0–10 scale (matches the UI slider).
             'effort_score' => [

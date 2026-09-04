@@ -2,6 +2,7 @@
 
 namespace App\Modules\Crm\Models;
 
+use App\Models\Concerns\BelongsToOrg;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -31,6 +32,7 @@ use Illuminate\Support\Carbon;
 ])]
 class LeadWebsiteCandidate extends Model
 {
+    use BelongsToOrg;
     protected $table = 'crm_lead_website_candidates';
 
     /** Refusal reasons. Codes, never prose — machines read them and the UI renders them. */

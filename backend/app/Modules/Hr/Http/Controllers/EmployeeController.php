@@ -20,6 +20,7 @@ use App\Modules\Hr\Models\EmployeeDocument;
 use App\Modules\Hr\Services\DocumentRequestService;
 use App\Modules\Hr\Services\EmployeeService;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Str;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 
@@ -66,9 +67,20 @@ class EmployeeController extends Controller
     // POST /api/v1/hr/employees — creates user + employee + leave balances.
     public function store(StoreEmployeeRequest $request): JsonResponse
     {
-        $employee = $this->service->create($request->validated());
+        $data = $request->validated();
+
+        // A new hire has to be able to sign in on their first day. Without this the
+        // service set an unusable random password and nothing ever showed it, so the
+        // only way in was a password-reset email -- and People, the screen an HR
+        // officer actually hires through, offered no way to hand over a login at all.
+        // Returned once, never stored in plaintext, exactly as the Team screen does.
+        $temporaryPassword = $data['password'] ?? Str::password(16);
+        $data['password'] = $temporaryPassword;
+
+        $employee = $this->service->create($data);
 
         return EmployeeResource::make($employee)
+            ->additional(['temporary_password' => $temporaryPassword])
             ->response()
             ->setStatusCode(Response::HTTP_CREATED);
     }

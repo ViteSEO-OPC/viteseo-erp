@@ -2,6 +2,7 @@
 
 namespace App\Modules\Hr\Database\Seeders;
 
+use App\Support\CurrentOrg;
 use App\Models\User;
 use App\Modules\Hr\Models\AuditLog;
 use Illuminate\Database\Seeder;
@@ -96,6 +97,20 @@ class AuditDemoSeeder extends Seeder
                 'updated_at' => $ts,
             ];
         }
+
+        /*
+         * org_id is set by hand here because Model::insert() is a QUERY BUILDER call:
+         * it never makes a model, so BelongsToOrg's `creating` stamp never runs. The
+         * global scope is a read-side concern and does not cover this either. Bulk
+         * insert is the one write path in this codebase that has to remember the
+         * tenant for itself.
+         */
+        $orgId = CurrentOrg::id();
+        $entries = array_map(static function (array $e) use ($orgId): array {
+            $e['org_id'] = $orgId;
+
+            return $e;
+        }, $entries);
 
         AuditLog::insert($entries);
     }

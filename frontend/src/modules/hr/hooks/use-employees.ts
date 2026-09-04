@@ -9,6 +9,7 @@ import {
   type EmployeeDirectoryParams,
   getEmployee,
   createEmployee,
+  type CreatedEmployee,
   updateEmployee,
   getSalaryHistory,
   activateEmployee,
@@ -129,10 +130,15 @@ export function useEmployee(id: number) {
   });
 }
 
+/**
+ * Hire somebody. Resolves to the employee AND the temporary password, because the
+ * create response is the only place that password exists — anything that drops it
+ * here leaves the new hire with no way to sign in.
+ */
 export function useCreateEmployee() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: EmployeeInput) => createEmployee(input),
+    mutationFn: (input: EmployeeInput): Promise<CreatedEmployee> => createEmployee(input),
     onSuccess: () => qc.invalidateQueries({ queryKey: EMPLOYEES_KEY }),
   });
 }

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Modules\Projects\Requests;
 
+use App\Support\OrgUserRule;
 use Illuminate\Foundation\Http\FormRequest;
 
 class UpdateGroupRequest extends FormRequest
@@ -23,7 +24,7 @@ class UpdateGroupRequest extends FormRequest
             'workspace_id' => ['prohibited'],
             'name' => ['sometimes', 'required', 'string', 'max:255'],
             'color' => ['sometimes', 'required', 'string', 'max:32'],
-            'leader_id' => ['sometimes', 'required', 'integer', 'exists:users,id'],
+            'leader_id' => ['sometimes', 'required', 'integer', OrgUserRule::exists()],
             'archived' => ['sometimes', 'boolean'],
         ];
     }

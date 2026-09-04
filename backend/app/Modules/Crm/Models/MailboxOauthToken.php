@@ -2,6 +2,7 @@
 
 namespace App\Modules\Crm\Models;
 
+use App\Models\Concerns\BelongsToOrg;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Carbon;
@@ -38,6 +39,7 @@ use Illuminate\Support\Carbon;
 ])]
 class MailboxOauthToken extends Model
 {
+    use BelongsToOrg;
     /**
      * Explicit: Eloquent would otherwise derive `mailbox_oauth_tokens` and miss the module's
      * `crm_` prefix.

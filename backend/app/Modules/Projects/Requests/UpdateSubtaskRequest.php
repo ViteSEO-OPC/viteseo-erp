@@ -9,6 +9,7 @@ use App\Modules\Projects\Enums\TaskPriority;
 use App\Modules\Projects\Models\ProjectStatus;
 use App\Modules\Projects\Models\Subtask;
 use App\Modules\Projects\Support\PublicId;
+use App\Support\OrgUserRule;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -68,7 +69,7 @@ class UpdateSubtaskRequest extends FormRequest
         return [
             'name' => ['sometimes', 'required', 'string', 'max:255'],
             'description' => ['sometimes', 'nullable', 'string'],
-            'assignee_id' => ['sometimes', 'nullable', 'integer', 'exists:users,id'],
+            'assignee_id' => ['sometimes', 'nullable', 'integer', OrgUserRule::exists()],
             'status_id' => ['sometimes', 'required', 'integer', 'exists:pm_project_statuses,id'],
             'priority' => ['sometimes', 'required', Rule::in(array_column(TaskPriority::cases(), 'value'))],
             // Effort runs on a fixed 0–10 scale (matches the UI slider/input).

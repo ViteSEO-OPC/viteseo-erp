@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Modules\Projects\Models;
 
+use App\Models\Concerns\BelongsToOrg;
 use App\Models\User;
 use App\Modules\Projects\Concerns\HasPublicUuid;
 use Illuminate\Database\Eloquent\Model;
@@ -16,6 +17,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class Comment extends Model
 {
+    use BelongsToOrg;
     use HasPublicUuid;
 
     public const UPDATED_AT = null;

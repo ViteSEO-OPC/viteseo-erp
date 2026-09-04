@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -12,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/core/auth-context";
 import { resolveLandingHref } from "@/core/access";
+import { ThemeToggle } from "@/core/components/theme-toggle";
 
 const loginSchema = z.object({
   email: z.string().email("Enter a valid email address"),
@@ -60,7 +62,10 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-muted px-4">
+    <div className="relative flex min-h-screen items-center justify-center bg-muted px-4">
+      <div className="absolute right-4 top-4">
+        <ThemeToggle />
+      </div>
       <div className="w-full max-w-sm rounded-card border border-border bg-card p-8 shadow-sm">
         <div className="mb-6 space-y-1 text-center">
           <h1 className="text-2xl font-semibold tracking-tight text-card-foreground">
@@ -119,6 +124,15 @@ export default function LoginPage() {
               {formError}
             </div>
           )}
+
+          <div className="text-right">
+            <Link
+              href="/forgot-password"
+              className="text-sm font-medium text-brand hover:underline"
+            >
+              Forgot password?
+            </Link>
+          </div>
 
           <Button
             type="submit"

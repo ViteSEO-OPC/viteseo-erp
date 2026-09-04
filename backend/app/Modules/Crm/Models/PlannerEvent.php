@@ -2,6 +2,7 @@
 
 namespace App\Modules\Crm\Models;
 
+use App\Models\Concerns\BelongsToOrg;
 use App\Models\User;
 use App\Modules\Crm\Database\Factories\PlannerEventFactory;
 use App\Modules\Crm\Observers\PlannerEventObserver;
@@ -62,6 +63,7 @@ use Illuminate\Support\Carbon;
 ])]
 class PlannerEvent extends Model
 {
+    use BelongsToOrg;
     protected $table = 'crm_planner_events';
 
     /**

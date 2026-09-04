@@ -187,7 +187,9 @@ class DashboardController extends Controller
         // matches the same role slug the seeder + User Management use. Suspension is read from
         // `crm_user_access`, NOT the shared `users.status` column this once used — that column was
         // never consulted at sign-in, so the "mirrors the sign-in gate" claim it carried was false.
-        $bds = app(CrmAccessService::class)->excludeSuspended(User::query())
+        // inCurrentOrg(): `users` is platform-wide, so without it this listed every
+        // tenant's BDs -- names and avatars -- on one tenant's dashboard.
+        $bds = app(CrmAccessService::class)->excludeSuspended(User::query()->inCurrentOrg())
             ->whereHas('roles', fn (Builder $q) => $q->where('name', 'crm_bd'))
             ->orderBy('name')
             ->get(['id', 'name', 'avatar']);

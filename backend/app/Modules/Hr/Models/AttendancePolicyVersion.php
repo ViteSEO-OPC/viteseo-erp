@@ -2,6 +2,7 @@
 
 namespace App\Modules\Hr\Models;
 
+use App\Models\Concerns\BelongsToOrg;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -13,6 +14,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class AttendancePolicyVersion extends Model
 {
+    use BelongsToOrg;
     protected $table = 'hr_attendance_policy_versions';
 
     protected $fillable = ['effective_from', 'payload', 'created_by'];

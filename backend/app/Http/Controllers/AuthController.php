@@ -95,6 +95,26 @@ class AuthController extends Controller
     }
 
     /**
+     * POST /api/v1/auth/change-password
+     *
+     * Verify the current password, set the new one, and revoke every OTHER
+     * token so a stolen session can't outlive the change.
+     */
+    public function changePassword(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'current_password' => ['required', 'current_password'],
+            'password' => ['required', 'confirmed', \Illuminate\Validation\Rules\Password::min(8)],
+        ]);
+
+        $user = $request->user();
+        $user->forceFill(['password' => \Illuminate\Support\Facades\Hash::make($data['password'])])->save();
+        $user->tokens()->where('id', '!=', $user->currentAccessToken()->id)->delete();
+
+        return response()->json(['data' => ['message' => 'Password updated.']]);
+    }
+
+    /**
      * POST /api/v1/auth/logout
      *
      * Revoke just the token used for this request (other devices stay logged in).

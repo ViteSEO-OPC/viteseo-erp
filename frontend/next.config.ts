@@ -13,6 +13,11 @@ const nextConfig: NextConfig = {
       // The HR approvals page covers leave + half-day + early-out + overtime, so it is no longer
       // "leave" — renamed to match the employee-side Work Schedule page (OT-5 follow-up).
       { source: "/teamora/requests/leave", destination: "/teamora/requests/work-schedule", permanent: false },
+      // Zerem's Team Accounts and Roles & Access became one Team & Roles page, the
+      // same single entry TeamOra and Sprintly have. Both old paths are bookmarked
+      // and both are named in the in-app Copilot's answers, so neither may 404.
+      { source: "/zerem/settings/team-accounts", destination: "/zerem/settings/team", permanent: false },
+      { source: "/zerem/settings/rules-permissions", destination: "/zerem/settings/team", permanent: false },
     ];
   },
 };

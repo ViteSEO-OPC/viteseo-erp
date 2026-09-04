@@ -2,10 +2,12 @@
 
 namespace App\Modules\Hr\Models;
 
+use App\Models\Concerns\BelongsToOrg;
 use Illuminate\Database\Eloquent\Model;
 
 class AttendancePolicy extends Model
 {
+    use BelongsToOrg;
     protected $table = 'hr_attendance_policies';
 
     protected $fillable = [

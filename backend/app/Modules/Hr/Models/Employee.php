@@ -2,6 +2,7 @@
 
 namespace App\Modules\Hr\Models;
 
+use App\Models\Concerns\BelongsToOrg;
 use App\Models\User;
 use App\Modules\Hr\Services\PrivateFileService;
 use Illuminate\Database\Eloquent\Casts\Attribute;
@@ -13,6 +14,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Employee extends Model
 {
+    use BelongsToOrg;
     use SoftDeletes;
 
     protected $table = 'hr_employees';

@@ -4,6 +4,7 @@ namespace App\Modules\Crm\Jobs;
 
 use App\Modules\Crm\Events\PlannerReminderDue;
 use App\Modules\Crm\Models\PlannerEvent;
+use App\Support\CurrentOrg;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -27,7 +28,17 @@ class SendDueRemindersJob implements ShouldQueue
 
     public int $tries = 1;
 
+    /**
+     * No authenticated user runs a queued job, so `CurrentOrg::id()` fell through to the
+     * FIRST org: every tenant but one had its reminders silently never emitted, and the
+     * log said "emitted" every minute regardless. One pinned pass per tenant instead.
+     */
     public function handle(): void
+    {
+        CurrentOrg::eachOrg(fn (int $orgId) => $this->handleOrg($orgId));
+    }
+
+    private function handleOrg(int $orgId): void
     {
         $now = now();
 
@@ -52,7 +63,7 @@ class SendDueRemindersJob implements ShouldQueue
         }
 
         if ($due->isNotEmpty()) {
-            Log::info('planner.reminder.emitted', ['count' => $due->count()]);
+            Log::info('planner.reminder.emitted', ['org_id' => $orgId, 'count' => $due->count()]);
         }
     }
 }

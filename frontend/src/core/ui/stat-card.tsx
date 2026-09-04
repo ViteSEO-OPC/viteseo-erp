@@ -34,7 +34,7 @@ function StatCardBody({ label, value, delta }: Omit<StatCardProps, 'href' | 'onC
         </span>
         {delta && (
           <span
-            className={`text-sm font-bold ${delta.positive ? 'text-[#0f8f8b]' : 'text-danger'}`}
+            className={`text-sm font-bold ${delta.positive ? 'text-[#0f8f8b] dark:text-brand' : 'text-danger'}`}
           >
             {delta.value}
           </span>

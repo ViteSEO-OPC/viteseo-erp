@@ -216,17 +216,18 @@ class CrmAccessGrantTest extends TestCase
 
     // --- Authorization ------------------------------------------------------
 
-    public function test_crm_admin_may_not_grant_crm_admin(): void
+    public function test_crm_admin_may_grant_crm_admin(): void
     {
         $existing = $this->centralUser();
 
-        // crm_admin's assignable set is [crm_bd]; crm_admin is not in it.
+        // An org's admin may appoint a co-admin. Before, only Vite SEO could, so a
+        // client wanting a second manager had to raise a ticket for it.
         $this->actingAs($this->actor('crm_admin'))
             ->postJson('/api/v1/crm/users', ['email' => $existing->email, 'role' => 'crm_admin'])
-            ->assertStatus(422)
-            ->assertJsonValidationErrors('role');
+            ->assertOk()
+            ->assertJsonPath('data.role', 'crm_admin');
 
-        $this->assertFalse($existing->fresh()->hasRole('crm_admin'));
+        $this->assertTrue($existing->fresh()->hasRole('crm_admin'));
     }
 
     public function test_crm_admin_may_not_grant_super_admin(): void

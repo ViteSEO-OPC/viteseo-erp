@@ -10,6 +10,18 @@ export function formatPeso(amount: number | string): string {
   }).format(n);
 }
 
+/**
+ * Money in the accounting convention: negatives are shown in parentheses —
+ * e.g. -1234 → "(₱1,234.00)" — instead of a minus sign. Use for signed figures
+ * (variance, net income, net cash), keeping colour as a secondary cue only.
+ */
+export function formatPesoAccounting(amount: number | string): string {
+  const n = typeof amount === "string" ? parseFloat(amount) : amount;
+  if (Number.isNaN(n)) return "—";
+  const formatted = formatPeso(Math.abs(n));
+  return n < 0 ? `(${formatted})` : formatted;
+}
+
 export function formatDate(iso: string | null | undefined): string {
   if (!iso) return "—";
   return new Date(iso).toLocaleDateString("en-PH", {

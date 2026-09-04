@@ -2,6 +2,7 @@
 
 namespace App\Modules\Crm\Models;
 
+use App\Models\Concerns\BelongsToOrg;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
@@ -26,6 +27,7 @@ use Illuminate\Support\Carbon;
 #[Fillable(['captured_at', 'reason', 'metrics', 'cohort'])]
 class BdPerformanceSnapshot extends Model
 {
+    use BelongsToOrg;
     protected $table = 'crm_bd_performance_snapshots';
 
     /** Capture reasons. `REASSIGNMENT` is used once a bulk handover can drain a portfolio. */

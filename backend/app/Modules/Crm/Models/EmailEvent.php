@@ -2,6 +2,7 @@
 
 namespace App\Modules\Crm\Models;
 
+use App\Models\Concerns\BelongsToOrg;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -23,6 +24,7 @@ use Illuminate\Support\Carbon;
 ])]
 class EmailEvent extends Model
 {
+    use BelongsToOrg;
     protected $table = 'crm_email_events';
 
     /** No created_at/updated_at columns — `occurred_at` is the single, immutable timestamp. */

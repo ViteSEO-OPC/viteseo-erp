@@ -2,12 +2,14 @@
 
 namespace App\Modules\Hr\Models;
 
+use App\Models\Concerns\BelongsToOrg;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /** One period's repayment against a loan. Unique per (loan, payroll run) — see the migration. */
 class LoanPayment extends Model
 {
+    use BelongsToOrg;
     protected $table = 'hr_loan_payments';
 
     protected $fillable = [

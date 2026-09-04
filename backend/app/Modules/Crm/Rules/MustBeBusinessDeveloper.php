@@ -25,9 +25,29 @@ class MustBeBusinessDeveloper implements ValidationRule
             return; // nullability is governed by the field's other rules
         }
 
-        $user = User::find($value);
+        // Scoped to the current org: `users` is platform-wide, so another tenant's BD
+        // would otherwise satisfy this rule and become the owner of this tenant's lead.
+        $user = User::query()->inCurrentOrg()->find($value);
 
-        if (! $user || ! $user->hasRole('crm_bd')) {
+        if (! $user) {
+            $fail('The selected user must be a Business Development Manager.');
+
+            return;
+        }
+
+        // A lead is owned by somebody who works leads. That used to mean `crm_bd`,
+        // because it was the only way to be one. A member on one of the org's own
+        // roles holds no Spatie role at all, so an admin could tick lead
+        // capabilities onto "Front Desk", put somebody in it, and then be refused
+        // when assigning them a lead — the capability bought and the capability
+        // usable disagreeing with each other.
+        //
+        // Admins are still refused, as before: this rule is about who CARRIES a
+        // lead, not who may touch one.
+        $carriesLeads = $user->hasRole('crm_bd')
+            || (! $user->hasAnyRole(['crm_admin', 'super_admin']) && $user->hasPermissionTo('crm.leads.view'));
+
+        if (! $carriesLeads) {
             $fail('The selected user must be a Business Development Manager.');
 
             return;

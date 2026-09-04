@@ -2,6 +2,7 @@
 
 namespace App\Modules\Crm\Models;
 
+use App\Models\Concerns\BelongsToOrg;
 use App\Modules\Crm\Enums\BusinessRuleCategory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
@@ -52,6 +53,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 ])]
 class BusinessRule extends Model
 {
+    use BelongsToOrg;
     protected $table = 'crm_business_rules';
 
     protected function casts(): array

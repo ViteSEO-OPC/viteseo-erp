@@ -6,7 +6,6 @@ import {
   Settings,
   Archive,
   Users,
-  Lock,
   Plug,
   SlidersHorizontal,
   Gauge,
@@ -31,8 +30,13 @@ const GROUPS: NavGroup[] = [
   {
     heading: "Administrator",
     items: [
-      { label: "Team Accounts", href: "/zerem/settings/team-accounts", icon: Users },
-      { label: "Rules & Permissions", href: "/zerem/settings/rules-permissions", icon: Lock },
+      // ONE entry, matching TeamOra and Sprintly. It was Team Accounts + Roles &
+      // Access, and they were never two tasks: adding a person and deciding what
+      // they can do is one, and split across two entries an operator found neither
+      // half. Worse, the Team Accounts list ran on /users — which selects by Spatie
+      // role and so showed NOTHING at all for an org staffed on its own custom
+      // roles. Both paths now redirect here (see next.config.ts).
+      { label: "Team & Roles", href: "/zerem/settings/team", icon: Users },
       // Integrations (Gmail connect/disconnect). No `permission` gate: the whole /zerem/settings
       // area is already minRole crm_admin in PAGE_ACCESS, and the endpoints behind it are
       // role:super_admin|crm_admin server-side — a nav-level check would add nothing.

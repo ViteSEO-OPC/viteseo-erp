@@ -2,6 +2,7 @@
 
 namespace App\Modules\Hr\Models;
 
+use App\Models\Concerns\BelongsToOrg;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -14,6 +15,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  */
 class ContributionVersion extends Model
 {
+    use BelongsToOrg;
     protected $table = 'hr_contribution_versions';
 
     public const TYPES = ['sss', 'philhealth', 'pagibig'];

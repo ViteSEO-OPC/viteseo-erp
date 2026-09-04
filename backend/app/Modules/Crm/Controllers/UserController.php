@@ -17,7 +17,9 @@ use App\Modules\Crm\Services\CrmAccessService;
 use App\Modules\Crm\Services\LeadAssignmentService;
 use App\Modules\Crm\Services\Planner\PlannerOwnershipTransfer;
 use App\Modules\Crm\Services\Performance\BdPerformanceSnapshotService;
+use App\Models\Org;
 use App\Models\User;
+use App\Support\CurrentOrg;
 use Illuminate\Contracts\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Http\JsonResponse;
@@ -32,6 +34,9 @@ class UserController extends Controller
         $actor = $request->user();
 
         $users = User::query()
+            // `users` is platform-wide and carries no org_id, so the global scope cannot
+            // fence it: Team Accounts listed every tenant's accounts, emails included.
+            ->inCurrentOrg()
             ->with('roles')
             // Portfolio size, for the Team Accounts "Reassign all leads (N)" action. A correlated
             // subquery rather than withCount(), so the shared User model needs no CRM relation.
@@ -65,9 +70,20 @@ class UserController extends Controller
     {
         $email = trim($request->string('email')->toString());
 
+        /*
+         * Scoped to THIS org, and the feature still works.
+         *
+         * The grant path exists for one person holding one account across several
+         * modules -- an HRIS colleague being given CRM access -- and that colleague is
+         * by definition in the same org. Searching the whole platform therefore bought
+         * nothing the feature needed, while telling any CRM admin whether a given
+         * email address exists in some OTHER tenant, along with its owner's name and
+         * roles. One org per user (2026_09_03_090000) makes the wider search useless
+         * as well as unsafe: a user found in another org could not be added here.
+         */
         $user = $email === ''
             ? null
-            : User::query()->with('roles')->where('email', $email)->first();
+            : User::query()->inCurrentOrg()->with('roles')->where('email', $email)->first();
 
         return response()->json([
             'data' => $user ? new UserLookupResource($user, $access) : null,
@@ -110,6 +126,15 @@ class UserController extends Controller
         ]);
 
         $user->assignRole($validated['role']);
+
+        // Membership, not the role, is what makes this person part of the org. Without
+        // it the account cannot sign in at all: the login audit row carries org_id NOT
+        // NULL and resolves it from membership, so the first attempt died on a
+        // constraint violation. A BD created here was locked out of Zerem the moment
+        // they were handed their password.
+        if (($orgId = CurrentOrg::id()) !== null) {
+            Org::find($orgId)?->users()->attach($user->id, ['is_default' => true]);
+        }
 
         return response()->json([
             'data' => new UserResource($user->load('roles')),

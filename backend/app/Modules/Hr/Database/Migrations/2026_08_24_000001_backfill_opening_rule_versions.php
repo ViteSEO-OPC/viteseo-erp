@@ -1,5 +1,6 @@
 <?php
 
+use App\Support\CurrentOrg;
 use App\Modules\Hr\Models\PayrollSetting;
 use App\Modules\Hr\Services\AttendancePolicyService;
 use Illuminate\Database\Migrations\Migration;
@@ -27,13 +28,21 @@ return new class extends Migration
 {
     public function up(): void
     {
-        // Deliberately DEFAULTS, not the live row: the live row is whatever it has since been
-        // edited to, and filing that as "in force since 2000" is the very error being fixed.
-        // Verified against this database's own history — the June run's policy_snapshot holds
-        // exactly the stock defaults, while the live row has since gained a minimum wage.
-        PayrollSetting::ensureOpeningVersion();
+        /*
+         * Scope off for the duration. This is a DATA migration: it writes through
+         * Eloquent models, and those models now carry the tenant scope, which
+         * filters on a column 2026_09_03_100002 has not added yet at this point in
+         * the history. See CurrentOrg::suspendScope().
+         */
+        CurrentOrg::suspendScope(function (): void {
+            // Deliberately DEFAULTS, not the live row: the live row is whatever it has since been
+            // edited to, and filing that as "in force since 2000" is the very error being fixed.
+            // Verified against this database's own history — the June run's policy_snapshot holds
+            // exactly the stock defaults, while the live row has since gained a minimum wage.
+            PayrollSetting::ensureOpeningVersion();
 
-        app(AttendancePolicyService::class)->ensureOpeningVersion();
+            app(AttendancePolicyService::class)->ensureOpeningVersion();
+        });
     }
 
     public function down(): void
