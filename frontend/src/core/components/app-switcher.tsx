@@ -17,6 +17,7 @@ const VARIANT_MODULE: Record<ShellVariant, ModuleKey> = {
   kiosk: "kiosk",
   projects: "projects",
   crm: "crm",
+  accounting: "accounting",
 };
 
 /**

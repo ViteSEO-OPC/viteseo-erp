@@ -119,8 +119,8 @@ class ProjectsDemoSeeder extends Seeder
 
         $project = Project::create([
             'workspace_id' => $workspace->id,
-            'name' => 'Website Revamp',
-            'description' => 'Rebuild the marketing site on the new design system, ship a faster, on-brand experience.',
+            'name' => 'Sagip Dental Clinic — Website Revamp',
+            'description' => 'Rebuild the clinic site, add online appointment booking, and get the pages loading fast on a phone.',
             'priority' => 'high',
             'color' => '#6366f1',
             'status' => ProjectState::ACTIVE,
@@ -136,7 +136,7 @@ class ProjectsDemoSeeder extends Seeder
         $home = Task::create([
             'project_id' => $project->id,
             'title' => 'Rebuild homepage hero section',
-            'description' => 'New hero with animated headline, CTA, and responsive layout down to 320px.',
+            'description' => 'New headline, a Book an appointment button, and a layout that holds down to 320px.',
             'assignment_type' => AssignmentType::INDIVIDUAL,
             'assignee_id' => $leo?->id,
             'assigned_by_id' => $marco?->id,
@@ -165,7 +165,7 @@ class ProjectsDemoSeeder extends Seeder
 
         $ctaEvents = Subtask::create([
             'task_id' => $home->id,
-            'name' => 'Wire up CTA analytics events',
+            'name' => 'Wire up the Book appointment click tracking',
             'assignee_id' => $grace?->id,
             'status_id' => $statuses['todo']->id,
             'priority' => TaskPriority::MEDIUM,
@@ -174,7 +174,7 @@ class ProjectsDemoSeeder extends Seeder
         $this->logSubtaskCreated($ctaEvents, $marco);
 
         $this->comment($home, $marco, 'Please keep the hero above the fold on mobile — check the 375px breakpoint.');
-        $comment = $this->comment($home, $leo, 'On it. Grid is done, wiring the CTA next.');
+        $comment = $this->comment($home, $leo, 'On it. Grid is done, wiring the Book appointment button next.');
         $this->notifyComment($home, $comment, $leo, $marco);
         $this->link($home, $leo, 'https://www.figma.com/file/5lX7DgqGbutmi9QfJryBRg/hero');
 
@@ -182,7 +182,7 @@ class ProjectsDemoSeeder extends Seeder
         $nav = Task::create([
             'project_id' => $project->id,
             'title' => 'Design new top navigation',
-            'description' => 'Sticky nav with mega-menu for product categories.',
+            'description' => 'Sticky menu with the services grouped under one heading.',
             'assignment_type' => AssignmentType::INDIVIDUAL,
             'assignee_id' => $bea?->id,
             'assigned_by_id' => $maya?->id,
@@ -247,7 +247,7 @@ class ProjectsDemoSeeder extends Seeder
         // 5) A completed task, for board/history realism.
         $setup = Task::create([
             'project_id' => $project->id,
-            'title' => 'Set up design tokens in the codebase',
+            'title' => 'Set the brand colours and type in the theme',
             'assignment_type' => AssignmentType::INDIVIDUAL,
             'assignee_id' => $leo?->id,
             'assigned_by_id' => $marco?->id,
@@ -292,8 +292,8 @@ class ProjectsDemoSeeder extends Seeder
         // 7) A proposal a PM already sent back — Grace can revise and resubmit it.
         $rejected = Task::create([
             'project_id' => $project->id,
-            'title' => 'Rewrite the pricing page in a new tone of voice',
-            'description' => 'Lighter, benefit-led copy across all three tiers.',
+            'title' => 'Rewrite the services page in a warmer tone',
+            'description' => 'Plain language, patient first, across all three service pages.',
             'assignment_type' => AssignmentType::INDIVIDUAL,
             'assignee_id' => $grace?->id,
             'assigned_by_id' => $grace?->id,
@@ -313,7 +313,7 @@ class ProjectsDemoSeeder extends Seeder
         //    queues on its own, not as part of a bundle.
         $keyboardNav = Subtask::create([
             'task_id' => $nav->id,
-            'name' => 'Add keyboard navigation to the mega-menu',
+            'name' => 'Add keyboard navigation to the services menu',
             'description' => 'Arrow keys + Escape, focus trap while open.',
             'assignee_id' => $bea?->id,
             'status_id' => $statuses['todo']->id,
@@ -331,8 +331,8 @@ class ProjectsDemoSeeder extends Seeder
             $project,
             $statuses['todo'],
             $leo,
-            'Audit the checkout flow for dead ends',
-            'Walk the full purchase path and note every screen with no way forward.',
+            'Audit the appointment form for dead ends',
+            'Walk the full booking path and note every screen with no way forward.',
             TaskPriority::HIGH,
             5,
             $now->copy()->addDays(6)->toDateString(),
@@ -363,8 +363,8 @@ class ProjectsDemoSeeder extends Seeder
 
         $project = Project::create([
             'workspace_id' => $workspace->id,
-            'name' => 'Mobile App v2',
-            'description' => 'Native rewrite of the companion app with offline support and push notifications.',
+            'name' => 'Northpoint Hardware — Ecommerce Build',
+            'description' => 'Stand up the online store, migrate the 1,200-item catalogue, and wire up local delivery.',
             'priority' => 'medium',
             'color' => '#f59e0b',
             'status' => ProjectState::ACTIVE,
@@ -373,12 +373,12 @@ class ProjectsDemoSeeder extends Seeder
         $statuses = $this->seedStatuses($project);
         $this->attachMembers($project, [$marco, $leo, $carlo, $maya]);
 
-        $mobile = $this->makeGroup($project, 'Mobile Team', '#10b981', $marco, [$leo, $carlo]);
+        $mobile = $this->makeGroup($project, 'Ecommerce Team', '#10b981', $marco, [$leo, $carlo]);
 
         $offline = Task::create([
             'project_id' => $project->id,
-            'title' => 'Implement offline sync queue',
-            'description' => 'Queue mutations locally and replay on reconnect with conflict resolution.',
+            'title' => 'Import the 1,200-item product catalogue',
+            'description' => 'Map the supplier spreadsheet onto product, variant and stock fields.',
             'assignment_type' => AssignmentType::GROUP,
             'group_id' => $mobile->id,
             'assignee_id' => null,
@@ -393,8 +393,8 @@ class ProjectsDemoSeeder extends Seeder
 
         $release = Task::create([
             'project_id' => $project->id,
-            'title' => 'Prepare the v2 release train',
-            'description' => 'Store listings, staged rollout, crash reporting and rollback plan.',
+            'title' => 'Prepare the launch checklist',
+            'description' => 'Payments tested, stock synced, staging signed off, and a rollback plan.',
             'assignment_type' => AssignmentType::GROUP,
             'group_id' => $mobile->id,
             'assignee_id' => null,
@@ -407,8 +407,8 @@ class ProjectsDemoSeeder extends Seeder
         $this->logCreated($release, $marco);
 
         foreach ([
-            ['Draft store listings and screenshots', $leo, TaskPriority::LOW, 2, 'todo'],
-            ['Wire crash reporting to the dashboard', $carlo, TaskPriority::HIGH, 6, 'in_progress'],
+            ['Draft the product photos and descriptions', $leo, TaskPriority::LOW, 2, 'todo'],
+            ['Wire order alerts to the shop inbox', $carlo, TaskPriority::HIGH, 6, 'in_progress'],
         ] as [$name, $assignee, $priority, $effort, $status]) {
             $subtask = Subtask::create([
                 'task_id' => $release->id,
@@ -425,7 +425,7 @@ class ProjectsDemoSeeder extends Seeder
 
         $push = Task::create([
             'project_id' => $project->id,
-            'title' => 'Wire push notifications (FCM + APNs)',
+            'title' => 'Wire up local delivery and pickup rates',
             'assignment_type' => AssignmentType::INDIVIDUAL,
             'assignee_id' => $carlo?->id,
             'assigned_by_id' => $marco?->id,
@@ -453,8 +453,8 @@ class ProjectsDemoSeeder extends Seeder
 
         $project = Project::create([
             'workspace_id' => $workspace->id,
-            'name' => 'Q2 Marketing Campaign',
-            'description' => 'Spring product launch campaign across email, paid, and social. Wrapped and archived.',
+            'name' => 'Aling Nenas Bakeshop — Local SEO Campaign',
+            'description' => 'Google Business Profile, local citations and barangay landing pages. Delivered and archived.',
             'priority' => 'low',
             'color' => '#8b5cf6',
             'status' => ProjectState::DONE,
@@ -464,8 +464,8 @@ class ProjectsDemoSeeder extends Seeder
         $this->attachMembers($project, [$maya, $nina, $carlo]);
 
         foreach ([
-            ['Launch email drip sequence', $nina, TaskPriority::MEDIUM, 5],
-            ['Run paid social A/B test', $carlo, TaskPriority::HIGH, 8],
+            ['Claim and fill the Google Business Profile', $nina, TaskPriority::MEDIUM, 5],
+            ['Build the barangay landing pages', $carlo, TaskPriority::HIGH, 8],
             ['Publish campaign recap report', $maya, TaskPriority::LOW, 3],
         ] as [$title, $assignee, $priority, $effort]) {
             $task = Task::create([
@@ -512,8 +512,8 @@ class ProjectsDemoSeeder extends Seeder
 
         $project = Project::create([
             'workspace_id' => $workspace->id,
-            'name' => 'Design System 2.0',
-            'description' => 'Tokens, primitives and documentation for the shared component library.',
+            'name' => 'Cebu Island Tours — Booking Site & SEO',
+            'description' => 'Booking site for the tour packages, plus an SEO push on the tour keywords.',
             'priority' => 'high',
             'color' => '#0ea5e9',
             'status' => ProjectState::ACTIVE,
@@ -522,31 +522,31 @@ class ProjectsDemoSeeder extends Seeder
         $statuses = $this->seedStatuses($project);
         $this->attachMembers($project, [$maya, $marco, $leo, $grace, $bea, $carlo, $nina, $paolo]);
 
-        $platform = $this->makeGroup($project, 'Platform Guild', '#6366f1', $grace, [$bea, $paolo]);
+        $platform = $this->makeGroup($project, 'SEO Team', '#6366f1', $grace, [$bea, $paolo]);
 
         // Individually-owned work. [title, assignee, priority, effort, status]
         foreach ([
-            ['Audit brand colour palette for WCAG 2.1', $grace, TaskPriority::HIGH, 9, 'in_progress'],
-            ['Design dark mode foundations', $bea, TaskPriority::HIGH, 8, 'todo'],
-            ['Rebuild the Button component with slots', $leo, TaskPriority::HIGH, 7, 'in_progress'],
-            ['Normalise spacing and radius tokens', $carlo, TaskPriority::MEDIUM, 6, 'todo'],
-            ['Document the Grid system', $nina, TaskPriority::MEDIUM, 5, 'todo'],
-            ['Write the icon contribution guide', $paolo, TaskPriority::LOW, 4, 'in_progress'],
+            ['Check the tour pages for readable colour contrast', $grace, TaskPriority::HIGH, 9, 'in_progress'],
+            ['Design the booking flow', $bea, TaskPriority::HIGH, 8, 'todo'],
+            ['Rebuild the booking widget', $leo, TaskPriority::HIGH, 7, 'in_progress'],
+            ['Tidy up the tour card layout', $carlo, TaskPriority::MEDIUM, 6, 'todo'],
+            ['Document the itinerary content model', $nina, TaskPriority::MEDIUM, 5, 'todo'],
+            ['Write the tour listing style guide', $paolo, TaskPriority::LOW, 4, 'in_progress'],
             ['Publish the initial accessibility report', $nina, TaskPriority::LOW, 3, 'todo'],
-            ['Rename legacy token aliases', $paolo, TaskPriority::LOW, 2, 'todo'],
-            ['Add Storybook smoke tests', $carlo, TaskPriority::MEDIUM, 7, 'in_progress'],
-            ['Migrate the Modal to the new tokens', $leo, TaskPriority::HIGH, 8, 'todo'],
-            ['Retire the old colour SCSS map', $bea, TaskPriority::LOW, 1, 'todo'],
+            ['Redirect the old tour URLs', $paolo, TaskPriority::LOW, 2, 'todo'],
+            ['Add smoke tests for the booking form', $carlo, TaskPriority::MEDIUM, 7, 'in_progress'],
+            ['Move the enquiry pop-up to the new form', $leo, TaskPriority::HIGH, 8, 'todo'],
+            ['Retire the old theme', $bea, TaskPriority::LOW, 1, 'todo'],
             // Two people deliberately pushed over the Heavy line (>40 by default):
             // an analysis page where nobody is overloaded has nothing to show.
-            ['Rewrite the theming engine', $leo, TaskPriority::HIGH, 8, 'in_progress'],
-            ['Untangle the legacy CSS cascade', $leo, TaskPriority::MEDIUM, 5, 'todo'],
-            ['Rebuild the data-table primitive', $carlo, TaskPriority::HIGH, 10, 'todo'],
-            ['Backfill component unit tests', $carlo, TaskPriority::MEDIUM, 6, 'in_progress'],
+            ['Rewrite the availability calendar', $leo, TaskPriority::HIGH, 8, 'in_progress'],
+            ['Untangle the old page-builder markup', $leo, TaskPriority::MEDIUM, 5, 'todo'],
+            ['Rebuild the tour comparison table', $carlo, TaskPriority::HIGH, 10, 'todo'],
+            ['Backfill schema markup on the tour pages', $carlo, TaskPriority::MEDIUM, 6, 'in_progress'],
             // Finished work — deliberately excluded from every workload total.
-            ['Agree the token naming convention', $grace, TaskPriority::MEDIUM, 5, 'done'],
-            ['Set up the docs site skeleton', $leo, TaskPriority::LOW, 3, 'done'],
-            ['Inventory existing components', $nina, TaskPriority::LOW, 2, 'done'],
+            ['Agree the URL and slug convention', $grace, TaskPriority::MEDIUM, 5, 'done'],
+            ['Set up the staging site', $leo, TaskPriority::LOW, 3, 'done'],
+            ['Inventory the existing tour pages', $nina, TaskPriority::LOW, 2, 'done'],
         ] as [$title, $assignee, $priority, $effort, $status]) {
             $task = Task::create([
                 'project_id' => $project->id,
@@ -566,8 +566,8 @@ class ProjectsDemoSeeder extends Seeder
         // A group task carried whole — the Platform Guild owns it directly.
         $tokens = Task::create([
             'project_id' => $project->id,
-            'title' => 'Ship the token pipeline to npm',
-            'description' => 'Build, version and publish the design tokens package.',
+            'title' => 'Ship the sitemap and robots.txt',
+            'description' => 'Generate it from the live tour pages and submit it to Search Console.',
             'assignment_type' => AssignmentType::GROUP,
             'group_id' => $platform->id,
             'assignee_id' => null,
@@ -583,7 +583,7 @@ class ProjectsDemoSeeder extends Seeder
         // pieces while each piece also lands on its own assignee.
         $docs = Task::create([
             'project_id' => $project->id,
-            'title' => 'Launch the component documentation site',
+            'title' => 'Launch the booking site',
             'assignment_type' => AssignmentType::GROUP,
             'group_id' => $platform->id,
             'assignee_id' => null,
@@ -596,10 +596,10 @@ class ProjectsDemoSeeder extends Seeder
         $this->logCreated($docs, $maya);
 
         foreach ([
-            ['Write usage guidelines for primitives', $bea, TaskPriority::MEDIUM, 6, 'todo'],
-            ['Build the live prop playground', $paolo, TaskPriority::HIGH, 8, 'in_progress'],
-            ['Wire search across the docs', $grace, TaskPriority::LOW, 3, 'todo'],
-            ['Port the changelog', $paolo, TaskPriority::LOW, 2, 'done'],
+            ['Write the tour copy guidelines', $bea, TaskPriority::MEDIUM, 6, 'todo'],
+            ['Build the live availability preview', $paolo, TaskPriority::HIGH, 8, 'in_progress'],
+            ['Wire search across the tour listings', $grace, TaskPriority::LOW, 3, 'todo'],
+            ['Port the old blog posts', $paolo, TaskPriority::LOW, 2, 'done'],
         ] as [$name, $assignee, $priority, $effort, $status]) {
             $subtask = Subtask::create([
                 'task_id' => $docs->id,
@@ -614,7 +614,7 @@ class ProjectsDemoSeeder extends Seeder
             $this->logSubtaskStatusChange($subtask, $assignee, $statuses['todo']->id);
         }
 
-        $this->comment($tokens, $marco, 'Cut a release candidate first so we can smoke-test consumers.');
+        $this->comment($tokens, $marco, 'Put it on staging first so we can test the booking end to end.');
         $this->link($tokens, $grace, 'https://www.figma.com/design/2sxepYV9HjaqX6zEb53P72/Pod---3-Project-Management-System');
     }
 

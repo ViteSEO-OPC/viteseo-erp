@@ -680,6 +680,12 @@
 [data-theme="dark"] .leaflet-container {
   background: #1b222c;
 }
+/* OpenStreetMap publishes no dark basemap, so dark mode inverts the light tiles rather than
+   pulling a second tile set. Applied to the tile pane only — pins, popups and controls sit in
+   other panes and keep their real colours. */
+[data-theme="dark"] .leaflet-container .leaflet-tile-pane {
+  filter: invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9);
+}
 /* Scoped under .leaflet-container so these win over Leaflet's own stylesheet (which the map
    component imports after globals.css). */
 .leaflet-container .leaflet-popup-content-wrapper,

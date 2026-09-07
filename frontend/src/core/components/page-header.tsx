@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils";
+import { Eyebrow } from "@/core/components/editorial";
 
 /**
  * Standard page title block: big bold heading + optional gray subtitle line
@@ -8,17 +9,21 @@ import { cn } from "@/lib/utils";
 export function PageHeader({
   title,
   subtitle,
+  eyebrow,
   actions,
   className,
 }: {
   title: string;
   subtitle?: string;
+  /** Small label above the title — the section this page belongs to. */
+  eyebrow?: string;
   actions?: React.ReactNode;
   className?: string;
 }) {
   return (
     <div className={cn("flex items-start justify-between gap-4", className)}>
       <div>
+        {eyebrow ? <Eyebrow className="mb-1.5">{eyebrow}</Eyebrow> : null}
         <h1 className="text-h1 font-bold tracking-tight text-foreground">
           {title}
         </h1>

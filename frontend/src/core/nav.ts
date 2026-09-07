@@ -25,6 +25,19 @@ import {
   Handshake,
   FolderKanban,
   LayoutTemplate,
+  BookOpen,
+  NotebookText,
+  Scale,
+  Landmark,
+  TrendingUp,
+  TrendingDown,
+  BookText,
+  ArrowLeftRight,
+  Percent,
+  RefreshCw,
+  ShoppingCart,
+  Waypoints,
+  Calculator,
   type LucideIcon,
 } from "lucide-react";
 
@@ -37,7 +50,9 @@ export type ShellVariant =
   /** Sprintly (PMS) — nav built per render from live workspaces/projects. */
   | "projects"
   /** Zerem (CRM) — nav built per render from the viewer's CRM role. */
-  | "crm";
+  | "crm"
+  /** Accounting — the books, sold as its own system. */
+  | "accounting";
 
 export interface NavLink {
   label: string;
@@ -127,7 +142,10 @@ export const hrNav: NavEntry[] = [
     label: "Request",
     icon: Inbox,
     children: [
-      { label: "Work Schedule", href: "/teamora/requests/work-schedule", icon: CalendarDays },
+      // "Leave" is the word people hunt for, and it appeared nowhere in this menu:
+      // every leave request in the company lives on this page, under a label that
+      // named the four smaller request types instead of the big one.
+      { label: "Leave & Requests", href: "/teamora/requests/work-schedule", icon: CalendarDays },
       { label: "Document", href: "/teamora/requests/document", icon: FileText, stub: true },
       { label: "Payroll", href: "/teamora/requests/payroll", icon: Wallet, stub: true },
       { label: "Concern", href: "/teamora/requests/concern", icon: ShieldAlert, stub: true },
@@ -158,7 +176,10 @@ export const hrNav: NavEntry[] = [
 // Employee portal nav (matches emp-Overview 170:4263) — stays flat.
 export const employeeNav: NavEntry[] = [
   { label: "Overview", href: "/teamora", icon: LayoutGrid },
-  { label: "Work Schedule", href: "/teamora/work-schedule", icon: CalendarDays },
+  // Same fix as the HR menu: this is where an employee FILES LEAVE, and "leave" is
+  // the word they hunt for. Naming it after the schedule hid the one thing most of
+  // them ever come here to do.
+  { label: "Leave & Requests", href: "/teamora/work-schedule", icon: CalendarDays },
   { label: "My Attendance", href: "/teamora/my-attendance", icon: Clock },
   { label: "Payslips", href: "/teamora/payslips", icon: FileText },
   { label: "Claims", href: "/teamora/claims", icon: Wallet },
@@ -178,6 +199,47 @@ export const kioskNav: NavEntry[] = [
 ];
 
 
+// Accounting portal nav — the books. A flat list with one Reports group, in the
+// order an accountant works: set up the accounts, record the entries, check they
+// balance, then report. The `feature` + `lockable` pairs are the tier fence made
+// visible: a Basic org SEES Bills sitting there locked with the tier that unlocks
+// it, which is the whole argument for locking rather than hiding.
+export const accountingNav: NavEntry[] = [
+  { label: "Overview", href: "/accounting/overview", icon: LayoutGrid },
+  { label: "Chart of Accounts", href: "/accounting", icon: BookOpen },
+  { label: "Journal", href: "/accounting/journal", icon: NotebookText },
+  { label: "Trial Balance", href: "/accounting/trial-balance", icon: Scale },
+  { label: "Bank Reconciliation", href: "/accounting/bank-reconciliation", icon: Landmark },
+  {
+    label: "Reports",
+    icon: BarChart3,
+    children: [
+      { label: "Statements", href: "/accounting/statements", icon: FileText },
+      { label: "Statement of Account", href: "/accounting/statement-of-account", icon: FileText, feature: "accounting.invoicing", lockable: true, upsell: "Basic" },
+      { label: "Aged Receivables", href: "/accounting/reports/aged-receivables", icon: TrendingUp, feature: "accounting.invoicing", lockable: true, upsell: "Basic" },
+      { label: "Aged Payables", href: "/accounting/reports/aged-payables", icon: TrendingDown, feature: "accounting.bills", lockable: true, upsell: "Pro" },
+      { label: "General Ledger", href: "/accounting/reports/general-ledger", icon: BookText },
+      { label: "Cash Flow", href: "/accounting/reports/cash-flow", icon: ArrowLeftRight },
+      { label: "VAT (BIR)", href: "/accounting/reports/vat", icon: Percent, feature: "accounting.tax_vat", lockable: true, upsell: "Full" },
+      { label: "BIR 2550Q", href: "/accounting/reports/bir-2550q", icon: Percent, feature: "accounting.tax_vat", lockable: true, upsell: "Full" },
+      { label: "BIR SLSP", href: "/accounting/reports/slsp", icon: Percent, feature: "accounting.tax_vat", lockable: true, upsell: "Full" },
+    ],
+  },
+  { label: "Invoices", href: "/accounting/invoices", icon: FileText, feature: "accounting.invoicing", lockable: true, upsell: "Basic" },
+  { label: "Recurring Invoices", href: "/accounting/recurring-invoices", icon: RefreshCw, feature: "accounting.invoicing", lockable: true, upsell: "Basic" },
+  { label: "Purchase Orders", href: "/accounting/purchase-orders", icon: ShoppingCart, feature: "accounting.bills", lockable: true, upsell: "Pro" },
+  { label: "Bills", href: "/accounting/bills", icon: Receipt, feature: "accounting.bills", lockable: true, upsell: "Pro" },
+  { label: "Contacts", href: "/accounting/contacts", icon: Users },
+  // The one bridge this repo has. Inventory→Ledger and Booking→Ledger exist in
+  // the build this module came from; those modules are not sold here, so their
+  // rows would be a lock on a door with no room behind it.
+  { label: "Payroll → Ledger", href: "/accounting/payroll", icon: Banknote, feature: "accounting.payroll_posting", lockable: true, upsell: "Full", connection: "payroll_accounting" },
+  { label: "Budget", href: "/accounting/budget", icon: Wallet, feature: "accounting.budgeting", lockable: true, upsell: "Full" },
+  { label: "Business Settings", href: "/accounting/settings", icon: Building2, requiresRole: "acc_admin" },
+  { label: "Integrations", href: "/admin/integrations", icon: Waypoints, requiresRole: "acc_admin" },
+  { label: "Team & Roles", href: "/accounting/team", icon: UserCog, requiresRole: "acc_admin" },
+];
+
 export const navByVariant: Record<ShellVariant, NavEntry[]> = {
   hr: hrNav,
   employee: employeeNav,
@@ -187,6 +249,7 @@ export const navByVariant: Record<ShellVariant, NavEntry[]> = {
   // static set to declare here.
   projects: [],
   crm: [],
+  accounting: accountingNav,
 };
 
 export const workspaceLabel: Record<ShellVariant, string> = {
@@ -195,6 +258,7 @@ export const workspaceLabel: Record<ShellVariant, string> = {
   kiosk: "KIOSK",
   projects: "WORKSPACE",
   crm: "WORKSPACE",
+  accounting: "WORKSPACE",
 };
 
 /** Sidebar brand label per portal. */
@@ -204,6 +268,9 @@ export const brandLabel: Record<ShellVariant, string> = {
   kiosk: "Kiosk",
   projects: "Sprintly",
   crm: "Zerem",
+  // No product name of its own yet — the other three are branded (TeamOra,
+  // Zerem, Sprintly) and this one is still called what it does.
+  accounting: "Accounting",
 };
 
 /**
@@ -219,6 +286,7 @@ export const brandIcon: Record<ShellVariant, LucideIcon> = {
   kiosk: LayoutTemplate,
   projects: FolderKanban,
   crm: Handshake,
+  accounting: Calculator,
 };
 
 /** Profile link per portal (null = this portal has no profile page). */
@@ -230,6 +298,9 @@ export const profileHref: Record<ShellVariant, string | null> = {
   // Zerem has no single account page — it resolves per role, so the CRM passes
   // `profileHrefOverride` instead of relying on this.
   crm: null,
+  // Accounting has no profile page of its own; the shell falls back to the
+  // platform user menu.
+  accounting: null,
 };
 
 /** Human-friendly role label for the header UserMenu's identity block. */

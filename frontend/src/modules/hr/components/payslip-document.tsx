@@ -31,12 +31,14 @@ const DEDUCTION_LABELS: Record<PayslipDeductionKey, string> = {
  */
 
 /**
- * The letterhead when the profile hasn't arrived yet — the same values the row is seeded
- * with. A payslip that flashed a blank company name on every open would read as broken.
+ * No hardcoded letterhead.
+ *
+ * This used to fall back to the PROVIDER's legal name and Makati address, to avoid a blank
+ * flash before the profile loaded. That was safe while the product served one company. It is
+ * not now: the fallback puts the vendor's legal entity on a client's payslip, and a payslip
+ * is a legal document. A blank line for a moment is a smaller wrong than the wrong company's
+ * name for good.
  */
-const FALLBACK_COMPANY_NAME = "VITE SEO DIGITAL ADVERTISING OPC";
-const FALLBACK_COMPANY_ADDRESS =
-  "26L Burgundy Corporate Tower, 252 Sen. Gil Puyat Avenue, Pio Del Pilar 1230 City of Makati NCR, Fourth District Philippines";
 
 /** Bare grouped amount — no ₱. The document states its currency once, on the net pay bar. */
 function amount(n: number): string {
@@ -138,8 +140,8 @@ export function PayslipDocument({
   // The letterhead, from Company → Settings — the same row `hr::payslip` prints from, so the
   // document on screen and the PDF of it can never disagree about who the employer is.
   const { data: company } = useCompanyProfile();
-  const companyName = company?.legal_name || FALLBACK_COMPANY_NAME;
-  const companyAddress = company ? (company.address ?? "") : FALLBACK_COMPANY_ADDRESS;
+  const companyName = company?.legal_name ?? "";
+  const companyAddress = company?.address ?? "";
   const companyLogo = company?.logo_url ?? null;
   // Derived by the API, not here — the PDF renders the same figures and the arithmetic is
   // subtle enough (see PayslipResource::documentTotals) that two implementations would drift.

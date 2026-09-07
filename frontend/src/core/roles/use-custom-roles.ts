@@ -41,7 +41,7 @@ export interface CustomRole {
 
 /** A built-in role and what it grants — read-only reference. */
 /** Which system a built-in role belongs to: "hr", "crm" or "pms". */
-export type RoleFeature = "hr" | "crm" | "pms";
+export type RoleFeature = "hr" | "crm" | "pms" | "accounting";
 
 export interface PresetRole {
   key: string;

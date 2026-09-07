@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 
+import { parseAmount } from "@/core/lib/format";
 import { Modal } from "@/core/ui/modal";
 
 export interface PromptModalProps {
@@ -9,7 +10,12 @@ export interface PromptModalProps {
   title: string;
   label: string;
   initialValue?: string;
-  type?: "text" | "number";
+  /**
+   * "amount" is a peso figure: it accepts what money looks like on screen
+   * (PHP 1,234.56) rather than only a bare float, which a `type="number"` input
+   * silently reads as empty. `onConfirm` still receives a clean numeric string.
+   */
+  type?: "text" | "number" | "amount";
   placeholder?: string;
   confirmLabel?: string;
   pending?: boolean;
@@ -47,6 +53,15 @@ export function PromptModal({
 
   const submit = () => {
     if (value.trim() === "") return;
+
+    if (type === "amount") {
+      const amount = parseAmount(value);
+      if (Number.isNaN(amount)) return;
+      onConfirm(String(amount));
+
+      return;
+    }
+
     onConfirm(value.trim());
   };
 
@@ -79,8 +94,8 @@ export function PromptModal({
         <span className="text-sm font-medium text-foreground">{label}</span>
         <input
           autoFocus
-          type={type}
-          inputMode={type === "number" ? "decimal" : undefined}
+          type={type === "amount" ? "text" : type}
+          inputMode={type === "text" ? undefined : "decimal"}
           step={type === "number" ? "0.01" : undefined}
           value={value}
           placeholder={placeholder}
