@@ -565,6 +565,7 @@ function AllotmentCell({
         employment_status: status,
         days_per_year: days,
       });
+      toast.success("Days Successfully Saved");
       setLocal(String(days));
     } catch {
       toast.error("Could not save the allotment.");
