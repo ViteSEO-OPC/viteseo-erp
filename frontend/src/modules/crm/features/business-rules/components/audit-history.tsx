@@ -1,7 +1,6 @@
 "use client";
 
 import { Badge } from "@/modules/crm/components/ui/badge";
-import { EmptyState } from "@/modules/crm/components/shared/empty-state/empty-state";
 import {
   Table,
   TableBody,
@@ -37,10 +36,6 @@ function readable(value: string | null): string {
 
 /** Read-only, append-only audit trail. Nothing here is editable — it is a permanent record. */
 export function AuditHistory({ entries }: { entries: BusinessRuleAudit[] }) {
-  if (entries.length === 0) {
-    return <EmptyState message="No audit entries yet" />;
-  }
-
   return (
     <div className="overflow-x-auto rounded-lg border border-border">
       <Table>
