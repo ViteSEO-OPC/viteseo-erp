@@ -33,7 +33,7 @@ class BdRankingService
 
         // Business Development Managers with live Zerem access (R-6), name-ordered — same selection
         // as BD Performance, now sharing one definition of "not suspended".
-        $bds = $this->access->excludeSuspended(User::query())
+        $bds = $this->access->excludeSuspended(User::query()->inCurrentOrg())
             ->whereHas('roles', fn (Builder $q) => $q->where('name', 'crm_bd'))
             ->orderBy('name')
             ->get(['id', 'name']);

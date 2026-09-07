@@ -3,6 +3,9 @@
 namespace App\Modules\Crm\Policies;
 
 use App\Models\User;
+use Illuminate\Support\Facades\DB;
+use App\Support\CurrentOrg;
+use App\Models\CustomRole;
 
 class UserPolicy
 {
@@ -55,16 +58,43 @@ class UserPolicy
     }
 
     /**
-     * Role-scoped management: Admin may only act on BD Manager accounts — never on
-     * another Admin or a Super Admin (prevents privilege escalation).
+     * Role-scoped management: an Admin may act on the ordinary members of their own
+     * org — never on another Admin or a Super Admin, which is what stops this being
+     * a privilege escalation.
+     *
+     * "Ordinary member" used to mean `crm_bd`, because that was the only kind there
+     * was. Custom roles added another: a member holding one has NO Spatie role at
+     * all, only direct permissions, so the old check refused every action against
+     * them. The list screen had the same assumption and showed an empty table; that
+     * was fixed and this was left, so an admin could finally SEE the person they
+     * had hired and still got 403 renaming, suspending or reassigning them.
+     *
+     * Deliberately NOT widened to everyone in the org: a colleague with no CRM
+     * footing at all — an HR-only employee — appears on the merged roster because
+     * it lists membership, and a CRM admin has no business renaming them.
      */
     private function canManage(User $actor, User $target): bool
     {
-        if ($actor->hasRole('crm_admin')) {
-            return $target->hasRole('crm_bd')
-                && ! $target->hasAnyRole(['crm_admin', 'super_admin']);
+        if (! $actor->hasRole('crm_admin')) {
+            return false;
         }
 
-        return false;
+        if ($target->hasAnyRole(['crm_admin', 'super_admin'])) {
+            return false;
+        }
+
+        if ($target->hasRole('crm_bd')) {
+            return true;
+        }
+
+        // One of this org's own roles. The org scope on CustomRole is what keeps
+        // this from reaching into another tenant's.
+        $customRoleId = DB::table('org_user')
+            ->where('org_id', CurrentOrg::id())
+            ->where('user_id', $target->id)
+            ->value('custom_role_id');
+
+        return $customRoleId !== null
+            && CustomRole::query()->whereKey($customRoleId)->exists();
     }
 }

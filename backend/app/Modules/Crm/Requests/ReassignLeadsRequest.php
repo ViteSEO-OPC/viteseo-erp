@@ -3,6 +3,7 @@
 namespace App\Modules\Crm\Requests;
 
 use App\Modules\Crm\Rules\MustBeBusinessDeveloper;
+use App\Support\OrgUserRule;
 use Illuminate\Foundation\Http\FormRequest;
 
 /**
@@ -24,7 +25,7 @@ class ReassignLeadsRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'to_user_id' => ['required', 'integer', 'exists:users,id', new MustBeBusinessDeveloper],
+            'to_user_id' => ['required', 'integer', OrgUserRule::exists(), new MustBeBusinessDeveloper],
         ];
     }
 }

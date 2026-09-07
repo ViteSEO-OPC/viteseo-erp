@@ -2,6 +2,7 @@
 
 namespace App\Modules\Crm\Models;
 
+use App\Models\Concerns\BelongsToOrg;
 use App\Models\User;
 
 use App\Modules\Crm\Observers\NoteObserver;
@@ -23,6 +24,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 #[Fillable(['body'])]
 class Note extends Model
 {
+    use BelongsToOrg;
     protected $table = 'crm_notes';
 
     use SoftDeletes;

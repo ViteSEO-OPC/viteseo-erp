@@ -1,8 +1,10 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
+import { UserCog } from "lucide-react";
 import type { User, UserRole } from "@/core/types";
-import { Card, Input, SearchIcon } from "@/core/ui";
+import { Button, Card, Input, SearchIcon } from "@/core/ui";
 import { useGroups } from "@/modules/projects/hooks/use-groups";
 import { useUsers } from "@/modules/projects/hooks/use-users";
 import {
@@ -76,8 +78,18 @@ export function ManagerTeamView() {
 
   return (
     <div className="px-4 py-6 sm:px-6 lg:px-8">
-      {/* Header */}
-      <h1 className="text-2xl font-bold text-ink sm:text-3xl">Team</h1>
+      {/* Header. This list shows who is already here; creating the sign-in that
+          puts someone ON it is the org-wide screen behind this button — the only
+          route to it, since the rail stops at Team. */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-2xl font-bold text-ink sm:text-3xl">Team</h1>
+        <Button asChild>
+          <Link href="/sprintly/team/accounts">
+            <UserCog />
+            Team &amp; Roles
+          </Link>
+        </Button>
+      </div>
 
       {/* Stat cards — 2-up on phones so they stay glanceable instead of a
           three-card vertical stack pushing the table below the fold. */}

@@ -21,6 +21,7 @@ use App\Modules\Hr\Support\PayslipLines;
 use App\Modules\Hr\Models\PayslipRequest;
 use App\Modules\Hr\Models\Reimbursement;
 use App\Modules\Hr\Models\RetroFlag;
+use App\Support\CurrentOrg;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Collection;
@@ -1766,6 +1767,12 @@ class PayrollService
     {
         return DB::table('hr_payslips')
             ->join('hr_payroll_runs', 'hr_payslips.payroll_run_id', '=', 'hr_payroll_runs.id')
+            // A RAW query, so the `org` global scope does not fence it. Every caller that
+            // narrows to one employee was fenced by that employee already; the two that do
+            // NOT -- computeThirteenthMonth() and thirteenthMonth() -- group by employee over
+            // the whole table, so without this they paid and reported 13th month for every
+            // tenant's staff. Qualified: hr_payroll_runs carries org_id too.
+            ->where('hr_payslips.org_id', CurrentOrg::id())
             ->whereNull('hr_payslips.deleted_at')
             ->whereNull('hr_payroll_runs.deleted_at')
             ->where('hr_payroll_runs.type', 'regular')

@@ -2,6 +2,7 @@
 
 namespace App\Modules\Crm\Models;
 
+use App\Models\Concerns\BelongsToOrg;
 use App\Models\User;
 use App\Modules\Crm\Enums\PerformanceTargetMetric;
 use App\Modules\Crm\Enums\PerformanceTargetPeriod;
@@ -39,6 +40,7 @@ use Illuminate\Support\Carbon;
 ])]
 class PerformanceTarget extends Model
 {
+    use BelongsToOrg;
     use SoftDeletes;
 
     protected $table = 'crm_performance_targets';

@@ -6,6 +6,7 @@ use App\Models\User;
 use App\Modules\Crm\Services\CrmAccessService;
 use App\Modules\Crm\Enums\PerformanceTargetMetric;
 use App\Modules\Crm\Enums\PerformanceTargetPeriod;
+use App\Support\OrgUserRule;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -21,7 +22,7 @@ class StorePerformanceTargetRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'user_id' => ['required', 'integer', Rule::exists('users', 'id')],
+            'user_id' => ['required', 'integer', OrgUserRule::exists()],
             'period_type' => ['required', Rule::in(PerformanceTargetPeriod::values())],
             'period_start' => ['required', 'date'],
             'metric' => ['required', Rule::in(PerformanceTargetMetric::values())],
@@ -49,7 +50,7 @@ class StorePerformanceTargetRequest extends FormRequest
     {
         // "Active" means Zerem access is not suspended (`crm_user_access`), not the shared
         // `users.status` column — a BD who has left keeps their account for TeamOra and Sprintly.
-        return app(CrmAccessService::class)->excludeSuspended(User::query())
+        return app(CrmAccessService::class)->excludeSuspended(User::query()->inCurrentOrg())
             ->whereKey($userId)
             ->whereHas('roles', fn (Builder $query) => $query->where('name', 'crm_bd'))
             ->exists();

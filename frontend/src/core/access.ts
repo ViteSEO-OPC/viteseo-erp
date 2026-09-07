@@ -8,9 +8,9 @@
 // renders the accessible cards) and the login redirect (which decides where to
 // land). Keep it dependency-light — only the lucide icon type is imported.
 
-import { Users, Handshake, FolderKanban, type LucideIcon } from "lucide-react";
+import { Users, Handshake, FolderKanban, LayoutTemplate, type LucideIcon } from "lucide-react";
 
-export type ModuleKey = "hris" | "crm" | "projects";
+export type ModuleKey = "hris" | "crm" | "projects" | "kiosk";
 
 export interface AccessibleModule {
   key: ModuleKey;
@@ -23,10 +23,30 @@ export interface AccessibleModule {
   icon: LucideIcon;
   /** Where clicking the card (or a single-module login) sends the user. */
   href: string;
+  /**
+   * Hide the card entirely when it is not accessible, instead of showing it locked.
+   *
+   * A locked card is an ADVERT: it says "you could have this, ask us". That is right
+   * for a product a client has not availed yet and wrong for anything that is not
+   * for sale, because it offers something they can never buy and names an internal
+   * tool while doing it.
+   */
+  hideWhenLocked?: boolean;
 }
 
 /** Roles that grant HR-management access (the full HR portal at /teamora). */
 const HR_MANAGER_ROLES = ["hr_officer", "super_admin"];
+
+/** Launcher module key → the org-entitlement feature key it requires. */
+const MODULE_FEATURE_KEY: Record<ModuleKey, string> = {
+  hris: "hr",
+  crm: "crm",
+  projects: "pms",
+  // Kiosk is an INTERNAL tool, not a sold entitlement — access is permission-only
+  // (see the tile below), so this mapping is unused for kiosk but kept for the
+  // Record's completeness.
+  kiosk: "kiosk",
+};
 
 /** True when any permission falls inside the given `namespace.` prefix. */
 function hasNamespace(permissions: string[], namespace: string): boolean {
@@ -48,6 +68,7 @@ export interface ModuleTile extends AccessibleModule {
 export function getModuleTiles(
   roles: string[],
   permissions: string[],
+  enabledModules?: string[],
 ): ModuleTile[] {
   // HR-management access (role or any hr.employees.* perm) → the full HR portal;
   // plain employees get their self-service overview at the root.
@@ -55,6 +76,14 @@ export function getModuleTiles(
     roles.some((r) => HR_MANAGER_ROLES.includes(r)) ||
     hasNamespace(permissions, "hr.employees");
   const canHris = hasNamespace(permissions, "hr") || roles.includes("hr_employee");
+
+  // A tile is reachable only when the user's permissions grant it AND (when the
+  // org's entitlements are known) the org has availed that module. While
+  // entitlements are still loading (undefined), fall back to permission-only.
+  const entitled = (key: ModuleKey, permitted: boolean): boolean =>
+    enabledModules === undefined
+      ? permitted
+      : permitted && enabledModules.includes(MODULE_FEATURE_KEY[key]);
 
   return [
     {
@@ -66,7 +95,7 @@ export function getModuleTiles(
         : "Your payslips, time off, claims & profile.",
       icon: Users,
       href: "/teamora",
-      accessible: canHris,
+      accessible: entitled("hris", canHris),
     },
     {
       key: "crm",
@@ -75,7 +104,7 @@ export function getModuleTiles(
       description: "Leads, follow-ups, clients & sales performance.",
       icon: Handshake,
       href: "/zerem/dashboard",
-      accessible: hasNamespace(permissions, "crm"),
+      accessible: entitled("crm", hasNamespace(permissions, "crm")),
     },
     {
       key: "projects",
@@ -84,7 +113,20 @@ export function getModuleTiles(
       description: "Workspaces, boards, tasks & team planning.",
       icon: FolderKanban,
       href: "/sprintly",
-      accessible: hasNamespace(permissions, "projects"),
+      accessible: entitled("projects", hasNamespace(permissions, "projects")),
+    },
+    {
+      key: "kiosk",
+      title: "Kiosk",
+      subtitle: "Web Configurator",
+      description: "Build a client's website mockup — pick, preview & capture the lead.",
+      icon: LayoutTemplate,
+      href: "/kiosk/overview",
+      // Internal tool: permission-only, NOT gated by an org entitlement -- and not
+      // sold, so a client must not even see it locked. It is ViteSEO's own lead-gen
+      // configurator; a client org has no kiosk permission and no way to get one.
+      accessible: hasNamespace(permissions, "kiosk"),
+      hideWhenLocked: true,
     },
   ];
 }

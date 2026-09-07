@@ -2,6 +2,7 @@
 
 namespace App\Modules\Crm\Models;
 
+use App\Models\Concerns\BelongsToOrg;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
@@ -31,6 +32,7 @@ use Illuminate\Support\Carbon;
 ])]
 class LeadWebsiteSearch extends Model
 {
+    use BelongsToOrg;
     protected $table = 'crm_lead_website_searches';
 
     protected $attributes = [

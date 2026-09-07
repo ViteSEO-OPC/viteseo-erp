@@ -7,4 +7,6 @@ return [
     App\Modules\Hr\Providers\HrServiceProvider::class,               // HR module
     App\Modules\Projects\Providers\ProjectsServiceProvider::class,   // Projects (PMS) module
     App\Modules\Crm\Providers\CrmServiceProvider::class,             // CRM (Zerem) module
+    App\Modules\Accounting\Providers\AccountingServiceProvider::class, // Accounting module
+    App\Modules\Kiosk\Providers\KioskServiceProvider::class,         // Kiosk (website configurator) module
 ];

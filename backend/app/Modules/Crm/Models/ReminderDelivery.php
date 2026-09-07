@@ -2,6 +2,7 @@
 
 namespace App\Modules\Crm\Models;
 
+use App\Models\Concerns\BelongsToOrg;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -22,6 +23,7 @@ use Illuminate\Support\Carbon;
 ])]
 class ReminderDelivery extends Model
 {
+    use BelongsToOrg;
     protected $table = 'crm_reminder_deliveries';
 
     /** No created_at/updated_at — `delivered_at` is the single, immutable timestamp. */

@@ -2,6 +2,7 @@
 
 namespace App\Modules\Crm\Models;
 
+use App\Models\Concerns\BelongsToOrg;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
@@ -19,6 +20,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 #[Fillable([])]
 class LeadAttachment extends Model
 {
+    use BelongsToOrg;
     protected $table = 'crm_lead_attachments';
 
     use SoftDeletes;

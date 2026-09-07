@@ -2,6 +2,7 @@
 
 namespace App\Modules\Crm\Models;
 
+use App\Models\Concerns\BelongsToOrg;
 use App\Models\User;
 use App\Modules\Crm\Enums\BusinessRuleAuditAction;
 use App\Modules\Crm\Enums\BusinessRuleModule;
@@ -44,6 +45,7 @@ use Illuminate\Support\Carbon;
 ])]
 class BusinessRuleAudit extends Model
 {
+    use BelongsToOrg;
     protected $table = 'crm_business_rule_audit';
 
     /** Append-only: no updated_at column (matches crm_activities; §1.3 / §1.6). */

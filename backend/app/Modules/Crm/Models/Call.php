@@ -2,6 +2,7 @@
 
 namespace App\Modules\Crm\Models;
 
+use App\Models\Concerns\BelongsToOrg;
 use App\Models\User;
 use App\Modules\Crm\Database\Factories\CallFactory;
 use App\Modules\Crm\Enums\CallDirection;
@@ -59,6 +60,7 @@ use Illuminate\Support\Carbon;
 ])]
 class Call extends Model
 {
+    use BelongsToOrg;
     protected $table = 'crm_calls';
 
     protected static function newFactory(): CallFactory

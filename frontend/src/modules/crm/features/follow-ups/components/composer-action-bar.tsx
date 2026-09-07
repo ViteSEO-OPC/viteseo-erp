@@ -3,7 +3,7 @@
 import { RefreshCw, Copy, Bookmark, Check, Send as SendIcon } from "lucide-react";
 import { Button } from "@/modules/crm/components/ui/button";
 import { ScheduleToggle } from "@/modules/crm/features/follow-ups/components/schedule-toggle";
-import { useCopyToClipboard } from "@/modules/crm/hooks/use-copy-to-clipboard";
+import { useCopyToClipboard } from "@/core/use-copy-to-clipboard";
 import { notify as toast } from "@/core/lib/notify";
 
 type ComposerActionBarProps = {

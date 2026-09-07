@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Modules\Projects\Requests;
 
 use App\Modules\Projects\Models\Group;
+use App\Support\OrgUserRule;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Validator;
 
@@ -23,9 +24,9 @@ class StoreGroupRequest extends FormRequest
         return [
             'name' => ['required', 'string', 'max:255'],
             'color' => ['required', 'string', 'max:32'],
-            'leader_id' => ['required', 'integer', 'exists:users,id'],
+            'leader_id' => ['required', 'integer', OrgUserRule::exists()],
             'member_ids' => ['required', 'array', 'min:1'],
-            'member_ids.*' => ['integer', 'exists:users,id'],
+            'member_ids.*' => ['integer', OrgUserRule::exists()],
             'archived' => ['nullable', 'boolean'],
         ];
     }

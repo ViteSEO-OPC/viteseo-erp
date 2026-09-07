@@ -2,11 +2,13 @@
 
 namespace App\Modules\Hr\Models;
 
+use App\Models\Concerns\BelongsToOrg;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class LeaveTypeAllotment extends Model
 {
+    use BelongsToOrg;
     protected $table = 'hr_leave_type_allotments';
 
     protected $fillable = [

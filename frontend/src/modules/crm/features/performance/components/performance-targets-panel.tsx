@@ -17,7 +17,7 @@ import { FormField, FormFieldGrid } from "@/modules/crm/components/forms/form-fi
 import { ConfirmDialog } from "@/modules/crm/components/shared/confirm-dialog/confirm-dialog";
 import { ErrorState } from "@/modules/crm/components/shared/error-state/error-state";
 import { FIELD } from "@/modules/crm/features/settings/components/form-styles";
-import { useUsers } from "@/modules/crm/features/settings/hooks/use-users-data";
+import { useBdUsers } from "@/modules/crm/hooks/use-bd-users";
 import {
   usePerformanceTargets,
   useSaveTarget,
@@ -53,12 +53,13 @@ function anchorFor(period: TargetPeriod): string {
 
 export function PerformanceTargetsPanel() {
   const { targets, isLoading, isError, retry } = usePerformanceTargets();
-  const { users } = useUsers();
+  // The same active-BD source every owner picker uses, rather than a second filter
+  // over the raw account list: that one read only page 1, so a Super Admin with more
+  // than fifteen accounts got an empty picker here.
+  const { bdUsers: bds } = useBdUsers();
   const save = useSaveTarget();
   const update = useUpdateTarget();
   const remove = useDeleteTarget();
-
-  const bds = users.filter((u) => u.role === "crm_bd" && u.status === "active");
 
   const [userId, setUserId] = useState("");
   const [metric, setMetric] = useState<TargetMetric>("converted_leads");

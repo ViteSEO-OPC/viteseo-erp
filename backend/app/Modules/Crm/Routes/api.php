@@ -28,6 +28,7 @@ use App\Modules\Crm\Controllers\NotificationController;
 use App\Modules\Crm\Controllers\PerformanceTargetController;
 use App\Modules\Crm\Controllers\PlannerEventController;
 use App\Modules\Crm\Controllers\ServiceAreaController;
+use App\Modules\Crm\Controllers\TeamController;
 use App\Modules\Crm\Controllers\UserController;
 use App\Modules\Crm\Controllers\WebsiteEnrichmentController;
 use App\Modules\Crm\Controllers\WebsiteEvidenceController;
@@ -51,7 +52,20 @@ Route::prefix('v1/crm')->group(function (): void {
     // EnsureCrmAccessIsActive covers EVERY route below: CRM suspension is enforced per-request
     // (403 + `crm_access_suspended`), never by revoking the shared Sanctum token, which also signs the
     // user in to TeamOra and Sprintly. `GET /crm/me` is the single exemption — see the middleware.
-    Route::middleware(['auth:sanctum', EnsureCrmAccessIsActive::class])->group(function () {
+    /*
+ * THE THREE GATES, added 2026-09-03. Until then this module had NONE of them, and
+ * a plan was a price list: an org could avail Basic and reach every route Full
+ * sells, and an org whose subscription had lapsed -- or that never had one -- kept
+ * working exactly as before.
+ *
+ *   set-current-org      pins the tenant for the whole request, before anything reads
+ *   subscription-active  402s a lapsed or absent subscription (super_admin bypasses)
+ *   feature:crm     refuses an org that never availed this module at all
+ *
+ * Order matters: subscription-active and feature both ask CurrentOrg who the tenant
+ * is, so set-current-org has to run first.
+ */
+Route::middleware(['auth:sanctum', 'set-current-org', 'subscription-active', 'feature:crm', EnsureCrmAccessIsActive::class])->group(function () {
         // CRM-shaped profile payload + self-service update (own name + phone only).
         // Not admin user management; the platform's /api/v1/auth/me still owns auth.
         Route::get('/me', MeController::class);
@@ -188,6 +202,21 @@ Route::prefix('v1/crm')->group(function (): void {
         // BDs entirely. Declared BEFORE the `/leads/{lead}` wildcard routes so the static `archived` and
         // `restore-all` paths are not captured by the {lead} binding.
         Route::middleware('role:super_admin|crm_admin')->group(function () {
+
+        /*
+         * Org-level team management: the CURRENT org's CRM staff.
+         *
+         * This is how a client's own super admin gives their people accounts --
+         * one of the two halves of "create roles, then create the people who hold
+         * them". Guarded three ways and none of them is the URL: the admin check
+         * lives in TeamController::ensureAdmin, membership is fenced to the current
+         * org, and the role a member may be given is restricted to this module's
+         * presets. Seat count is capped by the org's subscription (see Seats).
+         */
+        Route::get('team', [TeamController::class, 'index']);
+        Route::post('team', [TeamController::class, 'store']);
+        Route::put('team/{user}', [TeamController::class, 'update']);
+        Route::delete('team/{user}', [TeamController::class, 'destroy']);
             // List archived leads (leads.view gates viewing; the group already restricts to management).
             Route::get('/leads/archived', [LeadController::class, 'archived'])->can('viewAny', Lead::class);
             // Bulk restore — checked rows (ids) or the whole current filter set. Reuses the single
@@ -518,10 +547,8 @@ Route::prefix('v1/crm')->group(function (): void {
             Route::post('/settings/integrations/gmail/authorization', [GmailOAuthController::class, 'store']);
 
             // Settings → Integrations → Nearby Lead Generation: which engine fills the discovered-
-            // business pool. Gated identically to Gmail above, and for the same reason — this
-            // configures how the ORGANISATION generates leads, not a personal preference. A Business
-            // Development Manager is refused here at the route, so the UI hiding these controls is
-            // presentation rather than protection.
+            // business pool. A Business Development Manager is refused here at the route, so the UI
+            // hiding these controls is presentation rather than protection.
             //
             // GET returns configuration plus the EFFECTIVE provider and a reason code — never the
             // API key, never its ciphertext, never its length. Selecting OpenAI without a usable
@@ -552,12 +579,24 @@ Route::prefix('v1/crm')->group(function (): void {
             //
             // POST .../test verifies one stored credential and records a status code. Throttled: the
             // button spends money, so it must not be a load generator.
-            Route::get('/settings/integrations/nerby', [NerbyProviderSettingController::class, 'show']);
-            Route::put('/settings/integrations/nerby/provider', [NerbyProviderSettingController::class, 'select']);
-            Route::put('/settings/integrations/nerby/providers/{provider}', [NerbyProviderSettingController::class, 'update']);
-            Route::delete('/settings/integrations/nerby/providers/{provider}/credential', [NerbyProviderSettingController::class, 'destroyCredential']);
-            Route::post('/settings/integrations/nerby/providers/{provider}/test', [NerbyProviderSettingController::class, 'test'])
-                ->middleware('throttle:10,1');
+            // SUPER ADMIN ONLY, unlike Gmail directly above. `crm_nerby_provider_settings`
+            // is the one CRM table deliberately left without org_id, because the keys it
+            // holds are Vite SEO's own, bought and paid for by us and shared by every
+            // tenant. Its migration promised this gate and the route did not carry it:
+            // under `crm_admin` a client's own admin could replace or delete the
+            // credential every other client's Nearby Clients runs on, and spend our
+            // money testing it. A global table is only safe behind a global-only gate.
+            //
+            // If a client is ever meant to bring their own key, this is the wrong fix:
+            // the table needs org_id and this group goes back to crm_admin.
+            Route::middleware('role:super_admin')->group(function () {
+                Route::get('/settings/integrations/nerby', [NerbyProviderSettingController::class, 'show']);
+                Route::put('/settings/integrations/nerby/provider', [NerbyProviderSettingController::class, 'select']);
+                Route::put('/settings/integrations/nerby/providers/{provider}', [NerbyProviderSettingController::class, 'update']);
+                Route::delete('/settings/integrations/nerby/providers/{provider}/credential', [NerbyProviderSettingController::class, 'destroyCredential']);
+                Route::post('/settings/integrations/nerby/providers/{provider}/test', [NerbyProviderSettingController::class, 'test'])
+                    ->middleware('throttle:10,1');
+            });
         });
     });
 });

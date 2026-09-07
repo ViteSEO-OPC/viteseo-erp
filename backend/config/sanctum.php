@@ -50,7 +50,9 @@ return [
     |
     */
 
-    'expiration' => null,
+    // 30 days by default — a leaked bearer token must not live forever. The
+    // frontend already handles 401 by clearing the token and re-logging-in.
+    'expiration' => env('SANCTUM_TOKEN_EXPIRATION', 43200),
 
     /*
     |--------------------------------------------------------------------------

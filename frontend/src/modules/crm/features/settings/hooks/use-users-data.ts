@@ -1,8 +1,3 @@
-"use client";
-
-import { useQuery } from "@tanstack/react-query";
-import { apiClient } from "@/modules/crm/lib/axios";
-import { queryKeys } from "@/modules/crm/lib/query-keys";
 import type { TeamUser, TeamUserStatus } from "@/modules/crm/features/settings/types/user-types";
 
 type UserApi = {
@@ -34,25 +29,13 @@ export function mapUser(api: UserApi): TeamUser {
 }
 
 /**
- * Team Accounts list. The backend scopes results by role (Admin → BD accounts only,
- * Super Admin → everyone), so no client-side filtering is needed.
+ * There is deliberately NO list hook here any more.
+ *
+ * `GET /users` lists by SPATIE ROLE, so an org staffed on its own custom roles —
+ * whose members hold direct permissions and no role at all — came back EMPTY, and
+ * the team screen showed a blank table with no explanation. The members list now
+ * reads `GET /crm/team`, which counts org MEMBERSHIP (see `useTeamAccounts`).
+ *
+ * `mapUser` stays: the write endpoints under /users still answer with a
+ * UserResource, and their results are read back through it.
  */
-export function useUsers() {
-  const query = useQuery({
-    queryKey: queryKeys.users.list({}),
-    queryFn: async () => {
-      const res = await apiClient.get("/users");
-      const items = (res.data.data as UserApi[]).map(mapUser);
-      const total: number = res.data.meta?.total ?? items.length;
-      return { users: items, total };
-    },
-  });
-
-  return {
-    users: query.data?.users ?? [],
-    total: query.data?.total ?? 0,
-    isLoading: query.isLoading,
-    isError: query.isError,
-    retry: query.refetch,
-  };
-}

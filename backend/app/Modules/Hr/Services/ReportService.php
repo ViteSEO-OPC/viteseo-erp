@@ -18,6 +18,7 @@ use App\Modules\Hr\Models\ReportExport;
 use App\Modules\Hr\Models\Requisition;
 use App\Modules\Hr\Services\RecruitmentService;
 use App\Modules\Hr\Services\TaxService;
+use App\Support\CurrentOrg;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -238,6 +239,26 @@ class ReportService
         return '₱' . number_format($n, 2);
     }
 
+    /**
+     * The department picker's options — one definition, ten reports.
+     *
+     * A RAW query, so the `org` global scope that fences every Eloquent read does
+     * not apply and the tenant fence has to be written out. It was missing: every
+     * report on the hub listed every tenant's departments.
+     *
+     * @return list<array{id: int, name: string}>
+     */
+    private function departmentOptions(): array
+    {
+        return DB::table('hr_departments')
+            ->where('hr_departments.org_id', CurrentOrg::id())
+            ->whereNull('deleted_at')
+            ->orderBy('name')
+            ->get(['id', 'name'])
+            ->map(fn ($d) => ['id' => (int) $d->id, 'name' => $d->name])
+            ->all();
+    }
+
     /** @param array<string, mixed> $filters */
     private function headcount(array $filters = []): array
     {
@@ -246,6 +267,8 @@ class ReportService
 
         $byDept = DB::table('hr_employees')
             ->join('hr_departments', 'hr_employees.department_id', '=', 'hr_departments.id')
+            // Raw query: no global scope. Qualified because BOTH joined tables carry org_id.
+            ->where('hr_employees.org_id', CurrentOrg::id())
             ->whereNull('hr_employees.deleted_at')
             ->selectRaw('hr_departments.name, count(*) as count')
             ->groupBy('hr_departments.name')
@@ -276,12 +299,7 @@ class ReportService
             $cursor->addMonth();
         }
 
-        $departments = DB::table('hr_departments')
-            ->whereNull('deleted_at')
-            ->orderBy('name')
-            ->get(['id', 'name'])
-            ->map(fn ($d) => ['id' => (int) $d->id, 'name' => $d->name])
-            ->all();
+        $departments = $this->departmentOptions();
 
         return [
             'title' => 'Headcount & Movement',
@@ -345,12 +363,7 @@ class ReportService
             ? round($active->sum(fn ($e) => $e->hire_date->diffInYears($now)) / $active->count(), 1)
             : 0;
 
-        $departments = DB::table('hr_departments')
-            ->whereNull('deleted_at')
-            ->orderBy('name')
-            ->get(['id', 'name'])
-            ->map(fn ($d) => ['id' => (int) $d->id, 'name' => $d->name])
-            ->all();
+        $departments = $this->departmentOptions();
 
         return [
             'title' => 'Attrition & Tenure',
@@ -420,12 +433,7 @@ class ReportService
             $cursor->addMonth();
         }
 
-        $departments = DB::table('hr_departments')
-            ->whereNull('deleted_at')
-            ->orderBy('name')
-            ->get(['id', 'name'])
-            ->map(fn ($d) => ['id' => (int) $d->id, 'name' => $d->name])
-            ->all();
+        $departments = $this->departmentOptions();
 
         return [
             'title' => 'Absences & Leaves',
@@ -496,12 +504,7 @@ class ReportService
 
         arsort($byDepartment);
 
-        $departments = DB::table('hr_departments')
-            ->whereNull('deleted_at')
-            ->orderBy('name')
-            ->get(['id', 'name'])
-            ->map(fn ($d) => ['id' => (int) $d->id, 'name' => $d->name])
-            ->all();
+        $departments = $this->departmentOptions();
 
         return [
             'title' => 'Leave Liability',
@@ -638,6 +641,9 @@ class ReportService
             ->join('hr_employees', 'hr_payslips.employee_id', '=', 'hr_employees.id')
             ->leftJoin('users', 'hr_employees.user_id', '=', 'users.id')
             ->leftJoin('hr_departments', 'hr_employees.department_id', '=', 'hr_departments.id')
+            // Raw query: no global scope. Qualified -- four of the five tables carry org_id,
+            // so an unqualified `org_id` here is ambiguous SQL, not merely unclear.
+            ->where('hr_payslips.org_id', CurrentOrg::id())
             ->whereNull('hr_payslips.deleted_at')
             ->whereNull('hr_payroll_runs.deleted_at')
             ->where('hr_payroll_runs.type', 'regular')
@@ -736,6 +742,7 @@ class ReportService
     private function reconciliationYears(): array
     {
         return DB::table('hr_payroll_runs')
+            ->where('hr_payroll_runs.org_id', CurrentOrg::id())
             ->whereNull('deleted_at')
             ->where('type', 'regular')
             ->where('status', 'completed')
@@ -794,12 +801,7 @@ class ReportService
             ? PayrollRun::find($filters['run'])
             : PayrollRun::where('status', 'completed')->orderByDesc('cycle_start')->orderByDesc('id')->first();
 
-        $departments = DB::table('hr_departments')
-            ->whereNull('deleted_at')
-            ->orderBy('name')
-            ->get(['id', 'name'])
-            ->map(fn ($d) => ['id' => (int) $d->id, 'name' => $d->name])
-            ->all();
+        $departments = $this->departmentOptions();
 
         if (! $run) {
             return [
@@ -1130,12 +1132,7 @@ class ReportService
                     ...$this->runTotals($r, $deptId),
                 ])->all(),
             ],
-            'departments' => DB::table('hr_departments')
-                ->whereNull('deleted_at')
-                ->orderBy('name')
-                ->get(['id', 'name'])
-                ->map(fn ($d) => ['id' => (int) $d->id, 'name' => $d->name])
-                ->all(),
+            'departments' => $this->departmentOptions(),
             // The pay groups that actually have completed runs — offering one with no data is a
             // filter that silently returns nothing.
             'pay_groups' => PayrollRun::where('status', 'completed')
@@ -1183,12 +1180,7 @@ class ReportService
             $funnel[] = ['label' => $steps[$i]['label'], 'value' => $count, 'display' => (string) $count];
         }
 
-        $departments = DB::table('hr_departments')
-            ->whereNull('deleted_at')
-            ->orderBy('name')
-            ->get(['id', 'name'])
-            ->map(fn ($d) => ['id' => (int) $d->id, 'name' => $d->name])
-            ->all();
+        $departments = $this->departmentOptions();
 
         return [
             'title' => 'Recruitment Funnel',
@@ -1215,6 +1207,8 @@ class ReportService
         // Gender representation per department (100%-stacked women/men).
         $rows = DB::table('hr_employees')
             ->join('hr_departments', 'hr_employees.department_id', '=', 'hr_departments.id')
+            // Raw query: no global scope. Qualified because BOTH joined tables carry org_id.
+            ->where('hr_employees.org_id', CurrentOrg::id())
             ->whereNull('hr_employees.deleted_at')
             ->when($deptId, fn ($q) => $q->where('hr_departments.id', $deptId))
             ->selectRaw("hr_departments.name dept, SUM(hr_employees.gender = 'Female') women, SUM(hr_employees.gender = 'Male') men")
@@ -1232,12 +1226,7 @@ class ReportService
             $points[] = ['label' => $r->dept, 'values' => [$womenPct, 100 - $womenPct]];
         }
 
-        $departments = DB::table('hr_departments')
-            ->whereNull('deleted_at')
-            ->orderBy('name')
-            ->get(['id', 'name'])
-            ->map(fn ($d) => ['id' => (int) $d->id, 'name' => $d->name])
-            ->all();
+        $departments = $this->departmentOptions();
 
         return [
             'title' => 'Diversity',
@@ -1330,12 +1319,7 @@ class ReportService
             $coverage[] = ['label' => $label, 'value' => $pct, 'display' => "{$pct}%"];
         }
 
-        $departments = DB::table('hr_departments')
-            ->whereNull('deleted_at')
-            ->orderBy('name')
-            ->get(['id', 'name'])
-            ->map(fn ($d) => ['id' => (int) $d->id, 'name' => $d->name])
-            ->all();
+        $departments = $this->departmentOptions();
 
         return [
             'title' => 'Compensation & Benefits',
@@ -1397,12 +1381,7 @@ class ReportService
             $cursor->addMonth();
         }
 
-        $departments = DB::table('hr_departments')
-            ->whereNull('deleted_at')
-            ->orderBy('name')
-            ->get(['id', 'name'])
-            ->map(fn ($d) => ['id' => (int) $d->id, 'name' => $d->name])
-            ->all();
+        $departments = $this->departmentOptions();
 
         return [
             'title' => 'Health & Safety',

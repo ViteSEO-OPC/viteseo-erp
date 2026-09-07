@@ -4,6 +4,7 @@ namespace App\Modules\Crm\Requests;
 
 use App\Modules\Crm\Enums\ConsultationOutcome;
 use App\Modules\Crm\Rules\MustBeBusinessDeveloper;
+use App\Support\OrgUserRule;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -49,7 +50,7 @@ class UpdatePlannerEventRequest extends FormRequest
             'description' => ['sometimes', 'nullable', 'string', 'max:5000'],
 
             // Reassignment (Admin/SA typically). Must reference a Business Developer.
-            'assigned_to' => ['sometimes', 'nullable', 'integer', 'exists:users,id', new MustBeBusinessDeveloper],
+            'assigned_to' => ['sometimes', 'nullable', 'integer', OrgUserRule::exists(), new MustBeBusinessDeveloper],
         ];
     }
 

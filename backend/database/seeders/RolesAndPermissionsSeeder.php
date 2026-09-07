@@ -229,6 +229,86 @@ class RolesAndPermissionsSeeder extends Seeder
             'crm.dashboard.view',
         ]);
 
+        /*
+         * The Accounting, Inventory and Booking blocks lived here -- their roles and
+         * permissions, ~90 lines of them. Those modules are Kiplo's product and were
+         * removed from this repo on 2026-09-03, and a role nothing can hold is a role
+         * that only shows up in a picker to confuse whoever reads it.
+         *
+         * They stayed in this seeder rather than in the modules on the argument that
+         * roles are a shared platform concern. That argument was right about WHERE
+         * they live and wrong about WHOSE they are, which is why removing a module
+         * left them behind.
+         *
+         * Accounting came back on 2026-09-05 -- a ViteSEO client availed it, so it is
+         * now this product's too, and its block is restored below. Inventory and
+         * Booking stay out: their modules are not in this repo, so their roles would
+         * still be roles nothing can hold.
+         */
+
+        // --- Accounting permissions (namespaced accounting.*) ---
+        // Double-entry ledger + payroll costing. Sold as a system in SystemRegistry;
+        // these are the capabilities INSIDE it, which is a separate axis from the
+        // tier that unlocks the feature (see AccountingPlanRegistry).
+        $accountingPermissions = [
+            'accounting.accounts.view', 'accounting.accounts.create', 'accounting.accounts.update', 'accounting.accounts.delete',
+            'accounting.journal.view', 'accounting.journal.create', 'accounting.journal.post', 'accounting.journal.reverse',
+            'accounting.budgets.view', 'accounting.budgets.manage',
+            'accounting.reports.view',
+            'accounting.payroll.post',
+        ];
+
+        foreach ($accountingPermissions as $name) {
+            Permission::firstOrCreate(['name' => $name, 'guard_name' => 'web']);
+        }
+
+        // Accounting roles (Finance Admin > Accountant > Viewer). Money is sensitive,
+        // so access is these roles plus the org scope enforced in the policies.
+        $accAdmin = Role::firstOrCreate(['name' => 'acc_admin', 'guard_name' => 'web']);           // Finance Admin -- full
+        $accAccountant = Role::firstOrCreate(['name' => 'acc_accountant', 'guard_name' => 'web']); // Accountant / Bookkeeper
+        $accViewer = Role::firstOrCreate(['name' => 'acc_viewer', 'guard_name' => 'web']);         // Viewer / Auditor -- read-only
+
+        // Finance Admin -- every accounting permission. This is the role
+        // OrgOnboardingService::ADMIN_ROLES hands the owner when an org avails
+        // Accounting, so it must exist before anyone can subscribe.
+        $accAdmin->syncPermissions($accountingPermissions);
+
+        // Accountant -- posts entries and payroll, reads the rest. No chart-of-accounts
+        // edits, no reversals, no budget management: those are the four ways to change
+        // history rather than record it.
+        $accAccountant->syncPermissions([
+            'accounting.accounts.view',
+            'accounting.journal.view', 'accounting.journal.create', 'accounting.journal.post',
+            'accounting.budgets.view',
+            'accounting.reports.view',
+            'accounting.payroll.post',
+        ]);
+
+        // Viewer / Auditor -- read-only across accounting.
+        $accViewer->syncPermissions([
+            'accounting.accounts.view',
+            'accounting.journal.view',
+            'accounting.budgets.view',
+            'accounting.reports.view',
+        ]);
+
+        // super_admin (CEO) -- also gets every accounting permission.
+        $superAdmin->givePermissionTo($accountingPermissions);
+
+        // --- Kiosk (internal website configurator — BD lead-gen tool) ---
+        // Not a sold product, so it's gated by these permissions, not an org
+        // entitlement. `configure` = run the wizard + save a selection;
+        // `selections.*` = see/manage saved leads + issue temp client access.
+        $kioskPermissions = ['kiosk.configure', 'kiosk.selections.view', 'kiosk.selections.manage'];
+        foreach ($kioskPermissions as $name) {
+            Permission::firstOrCreate(['name' => $name, 'guard_name' => 'web']);
+        }
+        $kioskBd = Role::firstOrCreate(['name' => 'kiosk_bd', 'guard_name' => 'web']);        // BD — full kiosk
+        $kioskClient = Role::firstOrCreate(['name' => 'kiosk_client', 'guard_name' => 'web']); // Temp client — configure only
+        $kioskBd->syncPermissions($kioskPermissions);
+        $kioskClient->syncPermissions(['kiosk.configure']);
+        $superAdmin->givePermissionTo($kioskPermissions);
+
         // --- Business Rules Administration (Settings → Business Rules) ---
         // Two permissions: `.view` (read rules + version history + audit history) and `.manage`
         // (edit / enable-disable / reorder / publish / rollback / discard — a superset of `.view`).

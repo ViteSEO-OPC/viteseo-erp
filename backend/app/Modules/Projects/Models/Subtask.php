@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Modules\Projects\Models;
 
+use App\Models\Concerns\BelongsToOrg;
 use App\Models\User;
 use App\Modules\Projects\Concerns\HasApprovalWorkflow;
 use App\Modules\Projects\Concerns\HasPublicUuid;
@@ -20,6 +21,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  */
 class Subtask extends Model
 {
+    use BelongsToOrg;
     use HasApprovalWorkflow, HasPublicUuid, SoftDeletes;
 
     protected $table = 'pm_subtasks';

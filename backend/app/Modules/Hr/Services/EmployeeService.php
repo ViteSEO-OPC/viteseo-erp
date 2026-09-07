@@ -2,7 +2,9 @@
 
 namespace App\Modules\Hr\Services;
 
+use App\Models\Org;
 use App\Models\User;
+use App\Support\CurrentOrg;
 use App\Modules\Hr\Models\Attendance;
 use App\Modules\Hr\Models\ContributionSetting;
 use App\Modules\Hr\Models\Employee;
@@ -408,11 +410,23 @@ class EmployeeService
             $user = User::create([
                 'name' => $this->displayName($data),
                 'email' => $data['email'],
-                // MVP: a known default so demo logins work; real onboarding would
-                // email a set-password link.
-                'password' => Hash::make($data['password'] ?? 'password'),
+                // SECURITY: no guessable default. When no password is supplied the
+                // account gets an unusable random one — the employee sets their own
+                // via the forgot-password flow. (Demo logins come from seeders,
+                // which pass an explicit password.)
+                'password' => Hash::make($data['password'] ?? \Illuminate\Support\Str::random(40)),
             ]);
             $user->assignRole('hr_employee');
+
+            // 1a) Membership is what makes them a person in this org, and without it
+            // the account is not merely empty -- it cannot sign in at all. The login
+            // audit row carries org_id NOT NULL, resolved from membership, so the
+            // first sign-in died on a constraint violation before this line existed.
+            // Employees added through People had no way in; only the Team screen,
+            // which attaches separately, produced a usable account.
+            if (($orgId = CurrentOrg::id()) !== null) {
+                Org::find($orgId)?->users()->attach($user->id, ['is_default' => true]);
+            }
 
             // 2) The HR record hangs off that user. employee_no derives from the
             // (unique) user id, so it's guaranteed unique too.

@@ -30,6 +30,7 @@ class SyncMailboxesCommand extends Command
 
     protected $signature = 'outreach:sync
         {--mailbox= : Sync only this mailbox (created on first use if unknown)}
+        {--org= : Org that owns --mailbox, when onboarding an address with no row yet}
         {--now : Run synchronously in this process instead of dispatching to the queue}';
 
     protected $description = 'Poll the configured inbound mailboxes for new mail (scheduled every five minutes)';
@@ -46,14 +47,14 @@ class SyncMailboxesCommand extends Command
             return self::SUCCESS;
         }
 
-        foreach ($mailboxes as $mailbox) {
+        foreach ($mailboxes as $mailbox => $orgId) {
             if ($this->option('now')) {
-                SyncMailboxJob::dispatchSync($mailbox);
+                SyncMailboxJob::dispatchSync($mailbox, $orgId);
             } else {
-                SyncMailboxJob::dispatch($mailbox);
+                SyncMailboxJob::dispatch($mailbox, $orgId);
             }
 
-            $this->line("  queued sync for {$mailbox}");
+            $this->line("  queued sync for {$mailbox}".($orgId !== null ? " (org #{$orgId})" : ''));
         }
 
         $this->info("Inbound sync dispatched for {$mailboxes->count()} mailbox(es).");
@@ -78,28 +79,43 @@ class SyncMailboxesCommand extends Command
      * rotation for good, since nothing else ever sets it back. A failing mailbox must keep being
      * retried; only a human pausing it should stop the polling.
      *
-     * @return Collection<int, string>
+     * TENANT FENCE: the console has no authenticated user, so `CurrentOrg::id()` falls
+     * through to the FIRST org and the BelongsToOrg scope would silently narrow this to
+     * that one tenant's mailboxes — dropping every other tenant out of the rotation with
+     * no error, while the command reported success every five minutes. The fan-out
+     * therefore reads ACROSS orgs explicitly and hands each job its mailbox's own org;
+     * SyncMailboxJob pins to it before touching anything.
+     *
+     * @return Collection<string, int|null>  mailbox address => owning org id
      */
     private function targets(): Collection
     {
         $explicit = $this->option('mailbox');
         if (is_string($explicit) && $explicit !== '') {
-            return collect([$explicit]);
+            $org = $this->option('org');
+
+            // No --org: the job resolves the owner from the existing row. An address with
+            // no row anywhere is registered in the default org context, which is what
+            // onboarding the provider's own mailbox has always done.
+            return collect([$explicit => ($org !== null && $org !== '' ? (int) $org : null)]);
         }
 
-        /** @var Collection<int, string> $syncable */
-        $syncable = MailboxSync::query()
+        /** @var Collection<string, int|null> $syncable */
+        $syncable = MailboxSync::withoutGlobalScope('org')
             ->where('status', '!=', self::STATUS_PAUSED)
-            ->pluck('email');
+            ->get(['email', 'org_id'])
+            ->mapWithKeys(fn ($row) => [$row->email => $row->org_id !== null ? (int) $row->org_id : null]);
 
         if ($syncable->isNotEmpty()) {
             return $syncable;
         }
 
+        // Deployment default: the provider org's own fallback, so a fresh single-org
+        // install is self-starting. Null org — it is nobody's tenant mailbox yet.
         $configured = config('outreach.mailbox');
 
         return is_string($configured) && $configured !== ''
-            ? collect([$configured])
+            ? collect([$configured => null])
             : collect();
     }
 }

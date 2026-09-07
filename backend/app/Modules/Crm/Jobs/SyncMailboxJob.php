@@ -11,6 +11,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use App\Support\CurrentOrg;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -64,18 +65,64 @@ class SyncMailboxJob implements ShouldBeUnique, ShouldQueue
      */
     public int $uniqueFor = 900;
 
-    public function __construct(public readonly string $mailbox) {}
+    public function __construct(
+        public readonly string $mailbox,
+        /**
+         * The tenant that owns this mailbox. Supplied by the fan-out, which reads the
+         * mailbox table across orgs; null only on the `--mailbox=` onboarding path for an
+         * address with no row yet.
+         */
+        public readonly ?int $orgId = null,
+    ) {}
 
-    /** One in-flight sync per mailbox; a second dispatch for the same mailbox is dropped. */
+    /**
+     * One in-flight sync per mailbox; a second dispatch for the same mailbox is dropped.
+     * Keyed by ORG AND address, because `crm_mailbox_syncs` is unique on (org_id, email) —
+     * two tenants may legitimately poll the same address, and one must not suppress the other.
+     */
     public function uniqueId(): string
     {
-        return $this->mailbox;
+        return $this->orgId === null ? $this->mailbox : $this->orgId.':'.$this->mailbox;
     }
 
+    /**
+     * TENANT FENCE. A queued job has no authenticated user, so `CurrentOrg::id()` falls
+     * through to the FIRST org. Unpinned, this method did two wrong things at once: the
+     * `firstOrCreate` below could not SEE another tenant's mailbox row (the global scope
+     * hid it) and so created a duplicate stamped with the provider org, and every row the
+     * ingest then wrote — Email, Activity, notifications — was stamped the same way. One
+     * tenant's inbound mail filed against another tenant's leads.
+     *
+     * So the org is resolved FIRST, from the row that owns the address, read across orgs;
+     * everything after runs pinned to it.
+     */
     public function handle(MailboxSyncManager $mailboxes, InboundEmailService $inbound): void
+    {
+        $orgId = $this->orgId ?? MailboxSync::withoutGlobalScope('org')
+            ->where('email', $this->mailbox)
+            ->value('org_id');
+
+        if ($orgId === null) {
+            // No row for this address in ANY org, and no org named: there is no tenant to pin
+            // to. Register it in the DEFAULT org context, which is exactly what onboarding a
+            // mailbox did before tenancy. Deliberately NOT `runAs(null)` — pinning null would
+            // stamp a null org_id and fail the NOT NULL constraint instead of falling back.
+            $this->syncMailbox($mailboxes, $inbound);
+
+            return;
+        }
+
+        CurrentOrg::runAs((int) $orgId, function () use ($mailboxes, $inbound): void {
+            $this->syncMailbox($mailboxes, $inbound);
+        });
+    }
+
+    /** The actual sync, running pinned to the mailbox's own org. */
+    private function syncMailbox(MailboxSyncManager $mailboxes, InboundEmailService $inbound): void
     {
         // firstOrCreate, not findOrFail: `outreach:sync --mailbox=` may name a mailbox that has no
         // row yet, and a null cursor is a valid starting state (the provider bootstraps from it).
+        // Scoped by the pin above, so an unknown address is registered to the org being synced.
         $sync = MailboxSync::query()->firstOrCreate(
             ['email' => $this->mailbox],
             ['provider' => (string) config('outreach.inbound_provider', 'gmail'), 'status' => 'active'],

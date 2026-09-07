@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Modules\Projects\Models;
 
+use App\Models\Concerns\BelongsToOrg;
 use App\Modules\Projects\Concerns\HasPublicUuid;
 use App\Modules\Projects\Database\Factories\ProjectStatusFactory;
 use App\Modules\Projects\Enums\StatusKey;
@@ -17,6 +18,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  */
 class ProjectStatus extends Model
 {
+    use BelongsToOrg;
     /** @use HasFactory<ProjectStatusFactory> */
     use HasFactory, HasPublicUuid;
 

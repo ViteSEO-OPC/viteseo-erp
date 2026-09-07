@@ -2,6 +2,7 @@
 
 namespace App\Modules\Hr\Services;
 
+use App\Support\CurrentOrg;
 use App\Modules\Hr\Models\TaxBracket;
 use App\Modules\Hr\Models\TaxVersion;
 use Illuminate\Support\Facades\DB;
@@ -51,7 +52,17 @@ class TaxVersionService
             // table must not survive as a leftover row the resolver would still read.
             TaxBracket::where('tax_version_id', $version->id)->delete();
 
+            /*
+             * org_id by hand: Model::insert()/upsert() go straight to the query
+             * builder, so BelongsToOrg's `creating` stamp never fires. Bulk writes
+             * are the one path in this codebase that has to remember the tenant for
+             * themselves, and forgetting is silent -- the row lands with a null org
+             * and is then invisible to every scoped read that should have found it.
+             */
+            $orgId = CurrentOrg::id();
+
             TaxBracket::insert(array_map(fn (array $b) => [
+                'org_id' => $orgId,
                 'tax_version_id' => $version->id,
                 'min_annual' => round((float) $b['min_annual'], 2),
                 'base_tax' => round((float) $b['base_tax'], 2),

@@ -4,6 +4,7 @@ namespace App\Modules\Crm\Requests;
 
 use App\Modules\Crm\Enums\ConsultationOutcome;
 use App\Modules\Crm\Rules\MustBeBusinessDeveloper;
+use App\Support\OrgUserRule;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -69,7 +70,7 @@ class StorePlannerEventRequest extends FormRequest
             // (auto-assigned to self in the controller). Must reference a Business Developer.
             'assigned_to' => [
                 Rule::requiredIf(fn (): bool => (bool) $this->user() && ! $this->user()->hasRole('crm_bd')),
-                'nullable', 'integer', 'exists:users,id', new MustBeBusinessDeveloper,
+                'nullable', 'integer', OrgUserRule::exists(), new MustBeBusinessDeveloper,
             ],
         ];
     }

@@ -78,7 +78,13 @@ function DialogContent({
           // browser chrome) and let overflow scroll, so a tall modal can never push its footer off
           // screen or overlap content. flex-col keeps header/body/footer stacked; overflow-x-hidden
           // clips the footer's full-bleed (-mx) margins to a clean edge-to-edge bar in every modal.
-          "fixed top-1/2 left-1/2 z-50 flex max-h-[calc(100dvh-2rem)] w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 flex-col gap-4 overflow-y-auto overflow-x-hidden overscroll-contain rounded-xl bg-popover p-4 text-sm text-popover-foreground ring-1 ring-foreground/10 duration-100 outline-none sm:max-w-sm data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
+          //
+          // Centred on the CONTENT area from lg up, not the viewport: the shell publishes its live
+          // sidebar width as `--shell-sidebar-w` on <html>, so half of it shifts the centre point
+          // past the sidebar. Reading the variable (rather than restating a breakpoint + width)
+          // is what lets this follow the collapse rail, and the `0rem` fallback is what keeps a
+          // dialog rendered outside any shell centred on the viewport.
+          "fixed top-1/2 left-1/2 z-50 flex max-h-[calc(100dvh-2rem)] w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 flex-col gap-4 overflow-y-auto overflow-x-hidden overscroll-contain rounded-xl bg-popover p-4 text-sm text-popover-foreground ring-1 ring-foreground/10 duration-100 outline-none sm:max-w-sm data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95 lg:left-[calc(50%+var(--shell-sidebar-w,0rem)/2)]",
           className
         )}
         {...props}

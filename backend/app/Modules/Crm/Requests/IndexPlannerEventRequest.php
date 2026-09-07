@@ -2,6 +2,7 @@
 
 namespace App\Modules\Crm\Requests;
 
+use App\Support\OrgUserRule;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -32,7 +33,7 @@ class IndexPlannerEventRequest extends FormRequest
     {
         return [
             'view' => ['sometimes', 'nullable', Rule::in(self::VIEWS)],
-            'assigned_to' => ['sometimes', 'nullable', 'integer', 'exists:users,id'],
+            'assigned_to' => ['sometimes', 'nullable', 'integer', OrgUserRule::exists()],
             'from' => ['sometimes', 'nullable', 'date'],
             'to' => ['sometimes', 'nullable', 'date'],
             'status' => ['sometimes', 'nullable', Rule::in(self::STATUSES)],

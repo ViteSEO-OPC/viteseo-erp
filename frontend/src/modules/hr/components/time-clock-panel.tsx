@@ -334,7 +334,7 @@ export function TimeClockPanel() {
   // switch auto time in/out off, and then they punch like everyone else.
   if (data?.attendance_exempt) {
     return (
-      <div className="flex items-center gap-3 rounded-card bg-dark-teal p-6 text-white">
+      <div className="flex items-center gap-3 rounded-card bg-teal-ink p-6 text-white">
         <span className="size-2.5 rounded-full bg-success" />
         <div>
           <p className="text-sm font-semibold">You&apos;re exempt from attendance (Management).</p>
@@ -350,7 +350,7 @@ export function TimeClockPanel() {
     // Column widths follow the Figma: a 420px right rail (40px of it inner
     // padding) butted straight against the divider, so the left column doesn't
     // stretch and strand the two halves apart.
-    <div className="grid grid-cols-1 gap-6 rounded-card bg-dark-teal p-8 text-white lg:grid-cols-[1fr_auto_420px] lg:gap-x-0">
+    <div className="grid grid-cols-1 gap-6 rounded-card bg-teal-ink p-8 text-white lg:grid-cols-[1fr_auto_420px] lg:gap-x-0">
       {/* Left: status + clock + actions */}
       <div>
         {/*

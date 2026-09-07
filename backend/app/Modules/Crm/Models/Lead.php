@@ -2,6 +2,7 @@
 
 namespace App\Modules\Crm\Models;
 
+use App\Models\Concerns\BelongsToOrg;
 use App\Models\User;
 
 use App\Modules\Crm\Enums\CallOutcome;
@@ -71,6 +72,7 @@ use Illuminate\Support\Carbon;
 ])]
 class Lead extends Model
 {
+    use BelongsToOrg;
     protected $table = 'crm_leads';
 
     protected static function newFactory(): LeadFactory

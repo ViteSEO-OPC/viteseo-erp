@@ -11,6 +11,7 @@ use App\Modules\Projects\Requests\StoreGroupRequest;
 use App\Modules\Projects\Requests\UpdateGroupRequest;
 use App\Modules\Projects\Resources\GroupResource;
 use App\Modules\Projects\Services\GroupService;
+use App\Support\OrgUserRule;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Http\Response;
@@ -80,7 +81,7 @@ class GroupController extends Controller
         $this->authorize('manageMembers', $group);
 
         $validated = $request->validate([
-            'user_id' => ['required', 'integer', 'exists:users,id'],
+            'user_id' => ['required', 'integer', OrgUserRule::exists()],
         ]);
 
         $group = $this->groupService->addMember($group, (int) $validated['user_id']);

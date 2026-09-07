@@ -2,6 +2,7 @@
 
 namespace App\Modules\Hr\Database\Seeders;
 
+use App\Support\CurrentOrg;
 use App\Modules\Hr\Models\Department;
 use App\Modules\Hr\Models\Employee;
 use App\Modules\Hr\Models\EmployeeDocument;
@@ -177,18 +178,27 @@ class EmployeeDemoSeeder extends Seeder
 
         if ($maya) {
             // Two-step employment history (replaces the single auto entry).
+        /*
+         * org_id is set by hand here because Model::insert() is a QUERY BUILDER call:
+         * it never makes a model, so BelongsToOrg's `creating` stamp never runs. The
+         * global scope is a read-side concern and does not cover this either. Bulk
+         * insert is the one write path in this codebase that has to remember the
+         * tenant for itself.
+         */
+            $orgId = CurrentOrg::id();
+
             $maya->employmentHistories()->delete();
             EmploymentHistory::insert([
-                ['employee_id' => $maya->id, 'title' => 'Senior Product Manager', 'start_date' => '2023-08-01', 'end_date' => null, 'status' => 'current', 'created_at' => now(), 'updated_at' => now()],
-                ['employee_id' => $maya->id, 'title' => 'Product Manager', 'start_date' => '2021-08-01', 'end_date' => '2023-08-01', 'status' => 'promoted', 'created_at' => now(), 'updated_at' => now()],
+                ['org_id' => $orgId, 'employee_id' => $maya->id, 'title' => 'Senior Product Manager', 'start_date' => '2023-08-01', 'end_date' => null, 'status' => 'current', 'created_at' => now(), 'updated_at' => now()],
+                ['org_id' => $orgId, 'employee_id' => $maya->id, 'title' => 'Product Manager', 'start_date' => '2021-08-01', 'end_date' => '2023-08-01', 'status' => 'promoted', 'created_at' => now(), 'updated_at' => now()],
             ]);
 
             // Three-step compensation history (monthly base → 1.5M / 1.62M / 1.92M per yr).
             $maya->salaryHistories()->delete();
             SalaryHistory::insert([
-                ['employee_id' => $maya->id, 'base_salary' => 160000, 'effective_date' => '2023-08-01', 'reason' => 'Promotion to Senior PM', 'change_type' => 'promotion', 'created_at' => now(), 'updated_at' => now()],
-                ['employee_id' => $maya->id, 'base_salary' => 135000, 'effective_date' => '2023-01-01', 'reason' => 'Merit increase', 'change_type' => 'merit', 'created_at' => now(), 'updated_at' => now()],
-                ['employee_id' => $maya->id, 'base_salary' => 125000, 'effective_date' => '2021-08-01', 'reason' => 'Initial salary', 'change_type' => 'hire', 'created_at' => now(), 'updated_at' => now()],
+                ['org_id' => $orgId, 'employee_id' => $maya->id, 'base_salary' => 160000, 'effective_date' => '2023-08-01', 'reason' => 'Promotion to Senior PM', 'change_type' => 'promotion', 'created_at' => now(), 'updated_at' => now()],
+                ['org_id' => $orgId, 'employee_id' => $maya->id, 'base_salary' => 135000, 'effective_date' => '2023-01-01', 'reason' => 'Merit increase', 'change_type' => 'merit', 'created_at' => now(), 'updated_at' => now()],
+                ['org_id' => $orgId, 'employee_id' => $maya->id, 'base_salary' => 125000, 'effective_date' => '2021-08-01', 'reason' => 'Initial salary', 'change_type' => 'hire', 'created_at' => now(), 'updated_at' => now()],
             ]);
 
             // A few downloadable demo documents (tiny placeholder PDFs on the public disk).

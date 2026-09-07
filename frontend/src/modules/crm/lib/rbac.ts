@@ -95,7 +95,7 @@ export function assignableRoles(roles: readonly string[] | undefined): Role[] {
     return ["crm_admin", "crm_bd"];
   }
   if (hasRoleName(roles, "crm_admin")) {
-    return ["crm_bd"];
+    return ["crm_admin", "crm_bd"];
   }
   return [];
 }

@@ -2,6 +2,8 @@
 
 namespace App\Modules\Crm\Models;
 
+use App\Models\Concerns\BelongsToOrg;
+use App\Support\CurrentOrg;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
@@ -19,6 +21,7 @@ use Illuminate\Support\Facades\DB;
 ])]
 class Niche extends Model
 {
+    use BelongsToOrg;
     protected $table = 'crm_niches';
 
     protected function casts(): array
@@ -99,6 +102,11 @@ class Niche extends Model
     public static function repointLeads(string $from, string $to): int
     {
         return DB::table('crm_leads')
+            // A raw UPDATE, so the `org` global scope does not fence it -- and this one WRITES.
+            // Without the fence, renaming a niche in one tenant rewrote every other tenant's
+            // leads that happened to share the old industry string. DB::table (not Lead::query)
+            // is deliberate: the rename must follow soft-deleted leads too, per the docblock.
+            ->where('crm_leads.org_id', CurrentOrg::id())
             ->whereRaw('LOWER(industry) = ?', [mb_strtolower($from)])
             ->update(['industry' => $to]);
     }

@@ -289,10 +289,10 @@
       "answer": "Because those are **Business Developer workspaces**, restricted by an exact allow-list rather than a seniority threshold — so being an Admin doesn't grant them. They're personal working surfaces (an inbox, a schedule, a personal scorecard), not management views. Management equivalents exist: use **Reports & Performance** and scope to a BD to see their pipeline, follow-ups and outcomes."
     },
     {
-      "id": "team-accounts",
-      "question": "How are user accounts managed?",
-      "keywords": "team accounts users create user invite deactivate manage staff bd account settings admin",
-      "answer": "Admins manage CRM accounts in *Settings → Team Accounts* — creating and editing users and setting their role. Only a **Super Admin** can delete an account; an Admin can do everything else. Deactivating a person matters for reporting: management views and the BD scope chips only list **active** Business Developers, so an inactive account drops out of comparisons rather than skewing them."
+      "id": "team-and-roles",
+      "question": "How are user accounts and roles managed?",
+      "keywords": "team accounts roles access users create user invite deactivate suspend manage staff bd account settings admin custom role permissions",
+      "answer": "Admins manage Zerem staff in *Settings → Team & Roles* — one page for the whole job: add a member (or grant Zerem access to a colleague who already has a Vite SEO Systems account), set each person's role, and build your organisation's own roles. The row menu holds sign-in details, rename, suspend or restore Zerem access, and handing a resigning BD's leads to someone else. Only a **Super Admin** can delete an account; an Admin suspends instead. Suspending matters for reporting: management views and the BD scope chips only list **active** Business Developers, so a suspended account drops out of comparisons rather than skewing them."
     },
     {
       "id": "nearby-clients",
@@ -310,7 +310,7 @@
       "id": "where-to-find",
       "question": "Where do I find things in the CRM?",
       "keywords": "where find navigate menu sidebar page location go to which screen sections map",
-      "answer": "**Dashboard** — pipeline overview and recent activity. **Leads** — the full list, plus create, import, export and assignment. **Nearby Clients** — the discovery Prospect Pool. **Outreach** — email follow-ups and drafts. **Planner** — everything scheduled. **My Performance** — your own scorecard. **Activity Logs** — the full audit feed. **Reports & Performance** (Admin) — management analytics. **Settings** (Admin) — Team Accounts, Archive, Business Rules. Tell me where you want to go and I'll take you."
+      "answer": "**Dashboard** — pipeline overview and recent activity. **Leads** — the full list, plus create, import, export and assignment. **Nearby Clients** — the discovery Prospect Pool. **Outreach** — email follow-ups and drafts. **Planner** — everything scheduled. **My Performance** — your own scorecard. **Activity Logs** — the full audit feed. **Reports & Performance** (Admin) — management analytics. **Settings** (Admin) — Team & Roles, Archive, Business Rules. Tell me where you want to go and I'll take you."
     },
     {
       "id": "search",
