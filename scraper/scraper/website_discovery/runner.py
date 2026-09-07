@@ -1,6 +1,12 @@
-"""Runs Tier 0 candidate discovery over the CRM's website-search queue.
+"""Runs candidate website discovery over the CRM's website-search queue.
 
-    queue -> OSM tags (batched) -> Wikidata P856 -> candidates -> fetch each -> CRM adjudicates
+    queue -> OSM tags (batched) -> Wikidata P856 -> domain probe (DNS)
+          -> candidates -> fetch each -> CRM adjudicates
+
+Tier 0 LOOKS UP what OSM already knows; Tier 1 SEARCHES for what it does not. Both run on every
+lead, and both are reported as run even when they find nothing — the CRM refuses an exhaustion claim
+that does not cover every required tier, so a partial run leaves the lead searchable rather than
+letting it read as thoroughly searched.
 
 Every CRM write is opt-in, exactly as ``discover`` and ``audit`` are: without ``--commit`` this reads
 the queue, resolves candidates and prints what it found, and submits nothing.
@@ -25,6 +31,9 @@ from scraper.website_discovery.tier0 import (
     fetch_osm_elements,
     resolve_wikidata_websites,
 )
+from scraper.website_discovery.tier1 import TIER_PROBE
+from scraper.website_discovery.tier1 import candidates_for as probe_candidates_for
+from scraper.website_discovery.tier1 import hosts_for_leads, resolve_hosts
 
 
 class CrmEvidenceClient:
@@ -119,11 +128,42 @@ def run_website_discovery(config: Config, limit: int, *, commit: bool = False) -
 
         results = candidates_for(leads, tags_by_place, websites_by_qid)
 
-        found = sum(len(r.candidates) for r in results)
+        tier0_found = sum(len(r.candidates) for r in results)
+        print(
+            f"  tier 0: {tier0_found} candidate(s) across {len(results)} lead(s) "
+            f"({len(qids)} brand(s) resolved).",
+            file=sys.stderr,
+        )
+
+        # TIER 1 — deterministic domain probing. Runs for EVERY lead, including those Tier 0 already
+        # answered: a second independent candidate is what gives the CRM's margin rule something to
+        # weigh, and the tier must be recorded as run either way or an exhaustion claim would
+        # understate the search. DNS for the whole batch in one pass; no HTTP happens here.
+        hosts_by_lead = hosts_for_leads(leads)
+        live_hosts = resolve_hosts({h for hosts in hosts_by_lead.values() for h in hosts})
+        probes = probe_candidates_for(
+            leads,
+            hosts_by_lead,
+            live_hosts,
+            {r.lead_id: {c["url"] for c in r.candidates} for r in results},
+        )
+
+        for result in results:
+            result.candidates.extend(probes.get(result.lead_id, []))
+            # Appended unconditionally — "attempted and empty" is still attempted, exactly as Tier 0
+            # reports itself for a lead whose place_id could not be looked up.
+            result.tiers_run.append(TIER_PROBE)
+
+        tier1_found = sum(len(p) for p in probes.values())
+        found = tier0_found + tier1_found
         exhausted = sum(1 for r in results if r.exhausted)
         print(
-            f"  tier 0: {found} candidate(s) across {len(results)} lead(s); "
-            f"{exhausted} lead(s) had none ({len(qids)} brand(s) resolved).",
+            f"  tier 1: {tier1_found} candidate(s) from {len(live_hosts)} resolving host(s).",
+            file=sys.stderr,
+        )
+        print(
+            f"  total: {found} candidate(s) across {len(results)} lead(s); "
+            f"{exhausted} lead(s) had none.",
             file=sys.stderr,
         )
 

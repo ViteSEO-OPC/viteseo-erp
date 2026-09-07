@@ -5,13 +5,23 @@
     "deploy it; do not hand-edit it on a server, or the next deploy will silently revert it.",
     "",
     "Each entry expands to one (area, category) PAIR per category. A scheduled run takes the",
-    "next `--targets` pairs in round-robin order, so no pair is queried again until every other",
-    "pair has had a turn.",
+    "next `--targets` pairs, ONE PER GROUP in round-robin order, so no pair is queried again",
+    "until every other pair in its group has had a turn.",
+    "",
+    "`group` is the rotation bucket — island groups here. It exists so a national target list",
+    "spreads each run across Luzon, Visayas and Mindanao instead of draining the first group in",
+    "the file before the others are ever visited. The names are the FILE's vocabulary:",
+    "scraper/targets.py hardcodes none of them, so adding a group needs no Python change.",
     "",
     "`area` is free text resolved by Nominatim (`--area`). `category` must be a word the active",
     "provider knows — see CATEGORY_SELECTORS in scraper/providers/openstreetmap.py. These are",
     "PROVIDER categories (OSM tags), deliberately NOT the CRM's Business Niche registry: the CRM",
     "niche vocabulary is a separate business concern and must not leak into provider selectors.",
+    "",
+    "Every pair below was validated with `discover --print-only --provider osm --limit 3` before",
+    "being added — each area resolves in Nominatim and each category returns businesses. Bacolod",
+    "City and Tagbilaran City were REJECTED by that check (car_repair returned 0); do not add a",
+    "city here without running the same check first.",
     "",
     "`defaults.limit` bounds how many businesses a single pair may discover per run, and",
     "`defaults.targets_per_run` how many pairs one run may touch. The volume ceiling is the product",
@@ -20,7 +30,9 @@
     "raised to chase throughput. Widen coverage by ADDING TARGETS, not by lifting the caps.",
     "",
     "Growth lever: the pool is meant to build continuously, so add areas/categories here rather",
-    "than increasing per-run volume. More targets means a longer rotation, not a bigger burst."
+    "than increasing per-run volume. At 27 pairs and 3 targets per run the rotation completes in",
+    "9 nights — one pair per island group per night. More targets means a longer rotation, not a",
+    "bigger burst."
   ],
   "defaults": {
     "limit": 30,
@@ -28,12 +40,49 @@
   },
   "targets": [
     {
+      "group": "luzon",
       "area": "Makati City, Philippines",
       "categories": ["pharmacy", "dentist", "clinic"]
     },
     {
+      "group": "luzon",
       "area": "Quezon City, Philippines",
-      "categories": ["restaurant", "salon"]
+      "categories": ["restaurant", "salon", "cafe"]
+    },
+    {
+      "group": "luzon",
+      "area": "Batangas City, Philippines",
+      "categories": ["hardware", "car_repair", "supermarket"]
+    },
+    {
+      "group": "visayas",
+      "area": "Cebu City, Philippines",
+      "categories": ["pharmacy", "dentist", "restaurant"]
+    },
+    {
+      "group": "visayas",
+      "area": "Iloilo City, Philippines",
+      "categories": ["clinic", "salon", "cafe"]
+    },
+    {
+      "group": "visayas",
+      "area": "Tacloban City, Philippines",
+      "categories": ["hardware", "car_repair", "supermarket"]
+    },
+    {
+      "group": "mindanao",
+      "area": "Davao City, Philippines",
+      "categories": ["pharmacy", "dentist", "restaurant"]
+    },
+    {
+      "group": "mindanao",
+      "area": "Cagayan de Oro, Philippines",
+      "categories": ["clinic", "salon", "cafe"]
+    },
+    {
+      "group": "mindanao",
+      "area": "General Santos City, Philippines",
+      "categories": ["hardware", "car_repair", "supermarket"]
     }
   ]
 }

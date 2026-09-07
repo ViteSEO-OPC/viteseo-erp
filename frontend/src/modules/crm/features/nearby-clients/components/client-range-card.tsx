@@ -58,7 +58,16 @@ export function ClientRangeCard({ client, selected, onSelect, onPlanVisit, onDir
       <div className="mt-3 flex flex-wrap items-center gap-3">
         {client.active && <Chip dot="bg-green-500" text="Active" cls="text-green-700" />}
         <Chip dot={p.dot} text={p.text} cls={p.cls} />
+        {client.qualified && (
+          <Chip dot="bg-muted-foreground" text="Already added to CRM" cls="text-muted-foreground" />
+        )}
       </div>
+
+      {client.qualified && client.qualifiedBy && (
+        <p className="mt-2 text-xs text-muted-foreground">
+          Added by: <span className="font-medium text-card-foreground">{client.qualifiedBy.name}</span>
+        </p>
+      )}
 
       {client.website && (
         <div className="mt-3 border-t border-border-subtle pt-3">
@@ -75,12 +84,16 @@ export function ClientRangeCard({ client, selected, onSelect, onPlanVisit, onDir
         <Button
           variant="default"
           size="sm"
-          disabled={qualifying}
+          disabled={qualifying || client.qualified}
           onClick={(e) => { e.stopPropagation(); onQualify(); }}
-          title="Accept this prospect into your CRM leads"
+          title={
+            client.qualified
+              ? `Already accepted into the CRM${client.qualifiedBy ? ` by ${client.qualifiedBy.name}` : " by another BD"} — it can no longer be accepted.`
+              : "Accept this prospect into your CRM leads"
+          }
         >
           <CheckCircle2 className="h-3.5 w-3.5" aria-hidden />
-          {qualifying ? "Accepting…" : "Accept into CRM"}
+          {client.qualified ? "Already in CRM" : qualifying ? "Accepting…" : "Accept into CRM"}
         </Button>
         <Button
           variant="outline"

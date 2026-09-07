@@ -22,16 +22,27 @@ use Illuminate\Support\Facades\Log;
  * refusing to assert something no evidence supported.
  *
  * WHAT CHANGES HERE, AND WHAT DOES NOT. This class records the looking: which candidates were
- * proposed, by which tier, and why each was refused. It never sets `website_status` on its own.
- * {@see confirmAbsent()} does, and only when a human has read that evidence and accepted it — which
- * is the same authority a person already had through the lead-edit endpoint, now exercised against a
- * documented trail instead of a guess. The deriver, the verifier, LeadImportService and every scoring
- * file are untouched.
+ * proposed, by which tier, and why each was refused — and, once that looking is complete, what it
+ * amounts to. `website_status` is written in exactly two places, both in this file:
+ * {@see recordDeterminedAbsence()} when the evidence itself is conclusive, and
+ * {@see confirmAbsent()} when a person records the same judgement under their own name. The deriver,
+ * the verifier, LeadImportService and every scoring file are untouched.
  *
- * EXHAUSTION IS EVIDENCE, NOT A VERDICT. A search that finds nothing is weaker than a human check —
- * a business may hold a site no tier surfaced — so {@see markExhausted()} sets a timestamp and stops.
- * Nothing downstream treats it as a status, and there is deliberately no code path from exhaustion
- * to `no-website` that does not pass through a person.
+ * EXHAUSTION IS THE VERDICT, ONCE IT IS GENUINELY EXHAUSTION. A search that ran every tier in
+ * {@see REQUIRED_TIERS} and verified nothing now resolves to `no-website` itself, in
+ * {@see recordDeterminedAbsence()}. The BD does not adjudicate DNS answers and identity
+ * confidences — that was never verification, only a signature on a machine's conclusion — so the
+ * machine signs its own and the BD consumes the classification.
+ *
+ * THE DETERMINATION IS STILL REVERSIBLE, which is what makes it safe to make automatically:
+ * {@see reconcileConfirmedAbsence()} withdraws it the moment a website is verified afterwards.
+ * {@see confirmAbsent()} remains for a person who wants to record the judgement themselves.
+ *
+ * AND EXHAUSTION IS RELATIVE TO WHERE THERE WAS TO LOOK. {@see REQUIRED_TIERS} is the second half of
+ * that claim: a search may only call itself exhausted once every required tier has actually run.
+ * Without it "found nothing" and "barely looked" were recorded identically, which is the one way an
+ * honest human confirmation can still produce a wrong answer — the person is shown a complete trail
+ * and has no way to tell it was never filled in.
  */
 class WebsiteEvidenceService
 {
@@ -54,6 +65,27 @@ class WebsiteEvidenceService
      * whichever candidate happened to sort first.
      */
     public const ACCEPT_MARGIN = 15;
+
+    /**
+     * The tiers a search must have run before it may call itself exhausted.
+     *
+     * The tier names are the candidate SOURCE values because a tier is identified by the kind of
+     * evidence it produces — the two vocabularies are deliberately the same one, so a tier cannot be
+     * recorded as run under a name no candidate could ever carry.
+     *
+     * Adding a tier here makes every existing exhausted search incomplete BY DESIGN: the claim
+     * "we looked everywhere" is relative to where there was to look, and widening that set must
+     * reopen the question rather than grandfather an answer given before the new place existed.
+     * Existing rows are not rewritten — {@see markExhausted()} simply stops re-confirming them, and
+     * a lead re-enters the queue the moment its stale `exhausted_at` is cleared.
+     *
+     * @var list<string>
+     */
+    public const REQUIRED_TIERS = [
+        LeadWebsiteCandidate::SOURCE_OSM_TAG,
+        LeadWebsiteCandidate::SOURCE_WIKIDATA,
+        LeadWebsiteCandidate::SOURCE_PROBE,
+    ];
 
     public function __construct(private readonly WebsiteIdentityVerifier $verifier) {}
 
@@ -398,11 +430,72 @@ class WebsiteEvidenceService
             return $search;
         }
 
+        // EVERY REQUIRED TIER MUST HAVE RUN. `tiers_run` was recorded from the start but nothing
+        // enforced it, so a run that only read OSM tags and Wikidata could claim exhaustion — and
+        // those two tiers are LOOKUPS, not searches: measured, `brand:wikidata` covers 0% of
+        // dentists, clinics and salons, which is exactly where genuine absences live. Letting that
+        // count as "we looked everywhere" is what put a human in front of an empty trail and invited
+        // them to confirm `no-website` on the strength of a search that never happened.
+        //
+        // Refused silently, like the guards above: the caller re-declares exhaustion on its next
+        // pass, and a lead that is not yet exhausted simply stays in the queue.
+        if (array_diff(self::REQUIRED_TIERS, $search->tiers_run ?? []) !== []) {
+            return $search;
+        }
+
         $search->lead_id = $lead->id;
         $search->exhausted_at = now();
         $search->save();
 
+        $this->recordDeterminedAbsence($lead, $search);
+
         return $search->refresh();
+    }
+
+    /**
+     * The SYSTEM's own absence determination, written the moment a search is genuinely exhausted.
+     *
+     * WHY THIS IS NOT A HUMAN JUDGEMENT DRESSED UP AS ONE. Reaching this line already means every
+     * guard in {@see markExhausted()} passed: every tier in {@see REQUIRED_TIERS} actually ran, no
+     * candidate is still unchecked, and none was verified. That is the same evidence a person was
+     * previously shown — the difference is that they had no technical means to add to it. Asking a
+     * BD to adjudicate DNS answers and identity confidences was never verification; it was a
+     * signature on a machine's conclusion. The machine now signs its own.
+     *
+     * IT REUSES THE CONFIRMATION RECORD ON PURPOSE, with `confirmed_by` NULL meaning "determined by
+     * the system, not a person". Every existing safeguard keys on `confirmed_absent_at` — above all
+     * {@see reconcileConfirmedAbsence()}, which withdraws `no-website` if a website is verified
+     * later. A separate flag would have looked tidier and silently escaped that withdrawal, leaving
+     * a wrong `no-website` standing with nothing able to unwind it.
+     *
+     * IT ONLY EVER FILLS A GAP. A lead that is not `website-unknown` holds somebody else's answer —
+     * a human's edit, or an audit's derivation — and this must not overwrite it, exactly as
+     * {@see promoteVerifiedWebsite()} refuses to overwrite an existing URL.
+     */
+    private function recordDeterminedAbsence(Lead $lead, LeadWebsiteSearch $search): void
+    {
+        if ($lead->website_status !== 'website-unknown') {
+            return;
+        }
+
+        DB::transaction(function () use ($lead, $search): void {
+            $search->confirmed_absent_at = now();
+            // NULL is the marker: a determination nobody signed. `confirmedBy` renders as null in the
+            // evidence response, which is what distinguishes it from a human confirmation.
+            $search->confirmed_by = null;
+            $search->confirmation_note = 'Determined automatically: every required discovery tier ran and no candidate was verified.';
+            $search->save();
+
+            // `update`, not `updateQuietly` — LeadObserver must see this exactly as it sees the human
+            // path, so scoring and activity behave identically however the status was reached.
+            $lead->update(['website_status' => 'no-website']);
+
+            Log::info('Website absence determined automatically', [
+                'lead_id' => $lead->id,
+                'tiers_run' => $search->tiers_run,
+                'candidates_rejected' => $search->candidates_rejected,
+            ]);
+        });
     }
 
     /**

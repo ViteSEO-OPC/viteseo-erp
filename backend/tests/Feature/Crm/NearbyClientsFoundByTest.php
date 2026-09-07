@@ -131,9 +131,14 @@ class NearbyClientsFoundByTest extends TestCase
 
         $row = $this->getJson('/api/v1/crm/nearby-clients')->assertOk()->json('data.0');
 
+        // `qualified` / `qualifiedAt` / `qualifiedBy` joined this surface when claimed businesses
+        // began staying on the Nearby board instead of vanishing (see NearbyClaimedVisibilityTest).
+        // They are additive and read-only, exactly like `foundBy` before them — this assertion still
+        // exists to catch a field LEAVING, or one arriving without anyone deciding to add it.
         $this->assertSame([
             'id', 'business', 'initials', 'niche', 'area', 'contact', 'status', 'foundBy',
-            'priority', 'active', 'latitude', 'longitude', 'website',
+            'priority', 'active', 'qualified', 'qualifiedAt', 'qualifiedBy',
+            'latitude', 'longitude', 'website',
         ], array_keys($row));
     }
 

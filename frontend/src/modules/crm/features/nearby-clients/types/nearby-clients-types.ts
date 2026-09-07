@@ -107,6 +107,15 @@ export type NearbyClient = {
   mapY?: number;
   /** Website Intelligence summary (audit findings only). Present on every discovered business. */
   website?: WebsiteSummary;
+  /**
+   * CLAIM STATE. A discovered business stays on this surface after a BD accepts it, so `qualified`
+   * marks the ones already in the CRM: the card shows who took it and its Accept action is disabled
+   * for everyone. Display only — the claim is enforced by the server's locked qualify transaction.
+   */
+  qualified: boolean;
+  qualifiedAt: string | null;
+  /** The BD who accepted it — name only. Null when the claimant can no longer be resolved. */
+  qualifiedBy: { id: string; name: string } | null;
 };
 
 // ── Website evidence chain (LIVE — GET /leads/{id}/website-evidence) ────────────────────────────

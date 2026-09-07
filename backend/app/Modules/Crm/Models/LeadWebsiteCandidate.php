@@ -17,7 +17,7 @@ use Illuminate\Support\Carbon;
  *
  * @property string $url
  * @property string|null $normalized_url
- * @property string $source osm_tag | wikidata | search | ai | manual
+ * @property string $source osm_tag | wikidata | probe | search | ai | manual
  * @property string|null $source_detail
  * @property bool|null $verified NULL = not yet checked; false = checked and refused
  * @property int|null $confidence
@@ -42,6 +42,12 @@ class LeadWebsiteCandidate extends Model
     /** Where a candidate came from. Varchar-backed so a new tier needs no migration. */
     public const SOURCE_OSM_TAG = 'osm_tag';
     public const SOURCE_WIKIDATA = 'wikidata';
+    /**
+     * A hostname derived from the business name and confirmed to resolve in DNS — a guess the
+     * verifier must still earn, kept distinct from SOURCE_SEARCH (a search engine's answer) so the
+     * evidence trail says which places were actually tried rather than merely that something was.
+     */
+    public const SOURCE_PROBE = 'probe';
     public const SOURCE_SEARCH = 'search';
     public const SOURCE_AI = 'ai';
     public const SOURCE_MANUAL = 'manual';
@@ -50,7 +56,7 @@ class LeadWebsiteCandidate extends Model
     public static function sources(): array
     {
         return [
-            self::SOURCE_OSM_TAG, self::SOURCE_WIKIDATA,
+            self::SOURCE_OSM_TAG, self::SOURCE_WIKIDATA, self::SOURCE_PROBE,
             self::SOURCE_SEARCH, self::SOURCE_AI, self::SOURCE_MANUAL,
         ];
     }

@@ -29,6 +29,7 @@ from scraper.targets import (
     TargetsError,
     advance,
     configured_targets_per_run,
+    grouped,
     load_state,
     load_targets,
     save_state,
@@ -307,11 +308,24 @@ def _discover_all(args: argparse.Namespace) -> int:
         return 0
 
     mode = "COMMIT" if args.commit else "DRY RUN"
-    print(
-        f"[{mode}] discover-all: {len(selected)} of {len(targets)} target(s), "
-        f"cursor {state.get('cursor', 0)}.",
-        file=sys.stderr,
-    )
+    # Group attribution in the run header: with an interleaved rotation, "3 of 27 targets" no longer
+    # says whether the run actually spread across the island groups. The counts are what an operator
+    # reads the nightly log for, so they belong on the line that is already printed rather than in a
+    # second one. A single-group (pre-group) file prints only its cursor, exactly as before.
+    buckets = grouped(targets)
+    if len(buckets) > 1:
+        ran = {name: sum(1 for t in selected if t.group == name) for name in buckets}
+        spread = ", ".join(f"{name} {ran[name]}/{len(pairs)}" for name, pairs in buckets.items())
+        print(
+            f"[{mode}] discover-all: {len(selected)} of {len(targets)} target(s) — {spread}.",
+            file=sys.stderr,
+        )
+    else:
+        print(
+            f"[{mode}] discover-all: {len(selected)} of {len(targets)} target(s), "
+            f"cursor {state.get('cursor', 0)}.",
+            file=sys.stderr,
+        )
 
     failures = 0
     for target in selected:

@@ -23,7 +23,7 @@ use Symfony\Component\HttpFoundation\Response;
  *
  * NOTHING HERE DERIVES A STATUS. Candidate adjudication reuses the unmodified
  * {@see \App\Modules\Crm\Services\WebsiteIdentityVerifier}; `WebsiteStatusDeriver` is untouched and
- * still cannot return `no-website`. The single write of that value lives in
+ * still cannot return `no-website`. That value is written in
  * {@see WebsiteEvidenceService::confirmAbsent()} and happens only on a person's instruction — the
  * same authority they already held through the lead-edit endpoint, now exercised against a
  * documented trail rather than a guess.
@@ -85,7 +85,8 @@ class WebsiteEvidenceController extends Controller
         );
 
         // The caller may declare it has nothing further to try; the service still refuses to mark
-        // exhaustion while any candidate is unchecked or verified.
+        // exhaustion while any candidate is unchecked or verified, or while a required tier has not
+        // run. A scraper that skipped a tier re-declares on its next pass and succeeds then.
         if ($request->boolean('exhausted')) {
             $search = $this->evidence->markExhausted($lead);
         }
@@ -115,7 +116,11 @@ class WebsiteEvidenceController extends Controller
     }
 
     /**
-     * A human confirms no credible website exists. The ONLY path to `no-website`.
+     * A human records that no credible website exists.
+     *
+     * NOT the only path any more: an exhausted search determines the same thing itself in
+     * WebsiteEvidenceService::recordDeterminedAbsence(). This remains for a person who wants to
+     * record the judgement explicitly, and is the only path that attributes it to them.
      *
      * 409 rather than 422 when the evidence is not ready: the request is well-formed and the user is
      * entitled to make it — the system simply is not in a state where the claim can be justified yet.

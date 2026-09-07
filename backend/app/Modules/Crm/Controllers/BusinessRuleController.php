@@ -57,7 +57,10 @@ class BusinessRuleController extends Controller
     public function versions(string $module): AnonymousResourceCollection
     {
         return BusinessRuleVersionResource::collection(
-            $this->service->getVersionHistory($this->module($module)),
+            // Eager-loaded so the history can name who authored and who published each version,
+            // exactly as `audit()` below loads its causer. Without this the resource emits the raw
+            // ids only and the table has nothing but a number to show.
+            $this->service->getVersionHistory($this->module($module))->load(['creator', 'publisher']),
         );
     }
 
