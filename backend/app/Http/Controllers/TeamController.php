@@ -107,31 +107,42 @@ class TeamController extends Controller
         $customByUser = DB::table('org_user')->where('org_id', $orgId)->pluck('custom_role_id', 'user_id');
         $customNames = CustomRole::query()->pluck('name', 'id');
 
+        /*
+         * `data: { members, seats }`, matching /hr/team, /crm/team and
+         * /projects/team -- not the older `data: [...], seats: {...}` this
+         * endpoint used to answer with.
+         *
+         * The shape moved because the SCREEN moved. Accounting used to have a
+         * Team page of its own; it now renders the platform's shared
+         * TeamAccountsManager, the same component the other three portals use,
+         * and that component reads one envelope. The old shape was written when
+         * Accounting was the only product and its team page the only caller.
+         *
+         * Note what is NOT filtered here: every member of the org is returned,
+         * with `role: null` for anyone holding nothing in Accounting. The roster
+         * is the non-null half and the "others in this organisation" count is
+         * the null half -- so the screen can say who works in the books AND that
+         * the rest exist, which a filtered list could not.
+         */
         return response()->json([
-            'data' => $members->map(function (User $u) use ($customByUser, $customNames, $request) {
-                $customId = $customByUser[$u->id] ?? null;
-                if ($customId && isset($customNames[$customId])) {
-                    $role = 'custom:' . $customId;
-                    $roleLabel = $customNames[$customId];
-                } else {
-                    $role = $this->accountingPreset($u);
-                    $roleLabel = null;
-                }
+            'data' => [
+                'members' => $members->map(function (User $u) use ($customByUser, $customNames, $request): array {
+                    $customId = $customByUser[$u->id] ?? null;
+                    $hasCustom = $customId !== null && isset($customNames[$customId]);
 
-                return [
-                    'id' => $u->id,
-                    'name' => $u->name,
-                    'email' => $u->email,
-                    'role' => $role,
-                    'role_label' => $roleLabel,
-                    'is_you' => $u->id === $request->user()->id,
-                ];
-            })->values(),
-            // Same shape as the Inventory/Booking team endpoints, so the page
-            // can show "X of Y seats used".
-            'seats' => [
-                'used' => Seats::used($orgId),
-                'limit' => Seats::limitFor($orgId),
+                    return [
+                        'id' => $u->id,
+                        'name' => $u->name,
+                        'email' => $u->email,
+                        'role' => $hasCustom ? 'custom:' . $customId : $this->accountingPreset($u),
+                        'role_label' => $hasCustom ? $customNames[$customId] : null,
+                        'is_you' => $u->id === $request->user()->id,
+                    ];
+                })->values(),
+                'seats' => [
+                    'used' => Seats::used($orgId),
+                    'limit' => Seats::limitFor($orgId),
+                ],
             ],
         ]);
     }

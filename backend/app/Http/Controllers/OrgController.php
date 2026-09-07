@@ -7,13 +7,17 @@ namespace App\Http\Controllers;
 use App\Models\Org;
 use App\Models\Subscription;
 use App\Models\SubscriptionPayment;
+use App\Modules\Accounting\Models\Account;
+use App\Modules\Accounting\Models\RevenueSchedule;
 use App\Services\OrgOnboardingService;
 use App\Services\SubscriptionService;
+use App\Support\CurrentOrg;
 use App\Support\FeatureRegistry;
 use App\Support\Seats;
 use App\Support\SystemRegistry;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
@@ -40,18 +44,73 @@ class OrgController extends Controller
     }
 
     /**
-     * GET /api/v1/admin/revenue-schedules — kept as an empty, honest answer.
+     * GET /api/v1/admin/revenue-schedules — what clients have paid ViteSEO that
+     * ViteSEO has not yet earned, out of the provider's own books.
      *
-     * This used to read deferred-revenue schedules and the Unearned Revenue
-     * balance out of the provider's own books. Those books were the Accounting
-     * module, which is Kiplo's product and no longer lives here. Billing is manual
-     * now (see SubscriptionBillingService), so there is nothing to defer and
-     * nothing to recognise -- and an endpoint the admin UI still calls is better
-     * returning an empty set than a 500.
+     * Gutted to a hardcoded zero on 2026-09-03 when Accounting left this repo,
+     * and left that way when it returned on 2026-09-05 — so after
+     * SubscriptionBillingService was restored on 2026-09-07 and started creating
+     * schedules again, this screen went on reporting none. Restored here.
+     *
+     * NOTE ON THE FENCE. The balance is a raw query, and a raw query gets no
+     * global scope — `CurrentOrg::runAs()` does not reach it. The `e.org_id`
+     * line below is therefore written by hand.
+     *
+     * It is DEPTH, not the thing holding. What actually keeps another tenant's
+     * unearned revenue off this screen is `l.account_id`: every org provisions
+     * its own 2210, ids are globally unique, and a journal line may only
+     * reference an account of its own org (StoreJournalEntryRequest fences that
+     * `exists` rule). Dropping the org_id line changes no result today — proven
+     * by mutation, which survived. It stays because the day someone reads this
+     * balance for a range of accounts, or by code instead of by id, the raw
+     * query would have nothing left holding it.
      */
     public function revenueSchedules(): JsonResponse
     {
-        return response()->json(['data' => ['unearned_balance' => 0, 'schedules' => []]]);
+        $provider = Org::query()->orderBy('id')->first();
+        if (! $provider) {
+            return response()->json(['data' => ['unearned_balance' => 0, 'schedules' => []]]);
+        }
+
+        $payload = CurrentOrg::runAs($provider->id, function () use ($provider): array {
+            // Eloquent, so BelongsToOrg scopes this to the provider on its own.
+            $schedules = RevenueSchedule::query()
+                ->orderByRaw("CASE status WHEN 'active' THEN 0 ELSE 1 END")
+                ->orderByDesc('id')
+                ->get()
+                ->map(fn (RevenueSchedule $s) => [
+                    'id' => $s->id,
+                    'description' => $s->description,
+                    'monthly_amount' => (float) $s->monthly_amount,
+                    'months' => $s->months,
+                    'recognized_count' => $s->recognized_count,
+                    'remaining' => $s->remaining(),
+                    'next_recognition_date' => $s->next_recognition_date?->toDateString(),
+                    'status' => $s->status,
+                    'deferred_remaining' => round((float) $s->monthly_amount * $s->remaining(), 2),
+                ])
+                ->values()
+                ->all();
+
+            $unearned = Account::query()->where('code', '2210')->first();
+            $balance = 0.0;
+
+            if ($unearned) {
+                $totals = DB::table('acc_journal_lines as l')
+                    ->join('acc_journal_entries as e', 'e.id', '=', 'l.journal_entry_id')
+                    ->where('e.org_id', $provider->id)   // <-- raw query: fence by hand
+                    ->where('e.status', 'posted')
+                    ->where('l.account_id', $unearned->id)
+                    ->selectRaw('COALESCE(SUM(l.credit), 0) c, COALESCE(SUM(l.debit), 0) d')
+                    ->first();
+
+                $balance = round((float) $totals->c - (float) $totals->d, 2);
+            }
+
+            return ['unearned_balance' => $balance, 'schedules' => $schedules];
+        });
+
+        return response()->json(['data' => $payload]);
     }
 
     /** GET /api/v1/admin/orgs — every tenant + its subscription (billing view). */

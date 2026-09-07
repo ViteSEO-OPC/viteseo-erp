@@ -92,10 +92,12 @@ class DatabaseSeeder extends Seeder
          * answered 402. Seeding it is not a convenience: it is the row that says
          * this org is entitled to the software it is looking at.
          *
-         * Full tier on all three, because the provider uses all three.
+         * Full tier on every system the platform sells -- read off SystemRegistry,
+         * never listed by hand, so the next system to go on sale does not have to
+         * remember to come back here. ViteSEO uses its own products.
          */
         $features = [];
-        foreach (['hr', 'crm', 'pms'] as $system) {
+        foreach (SystemRegistry::keys() as $system) {
             $features = [...$features, ...SystemRegistry::registry($system)::get('full')['features']];
         }
         Entitlements::sync($provider->id, array_values(array_unique($features)));

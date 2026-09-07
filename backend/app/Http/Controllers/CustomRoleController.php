@@ -136,6 +136,9 @@ class CustomRoleController extends Controller
             'crm_bd' => ['label' => 'Business Development', 'feature' => 'crm', 'namespace' => 'crm.'],
             'pm_apm' => ['label' => 'Project Manager', 'feature' => 'pms', 'namespace' => 'projects.'],
             'pm_member' => ['label' => 'Team Member', 'feature' => 'pms', 'namespace' => 'projects.'],
+            'acc_admin' => ['label' => 'Finance Admin', 'feature' => 'accounting', 'namespace' => 'accounting.'],
+            'acc_accountant' => ['label' => 'Accountant', 'feature' => 'accounting', 'namespace' => 'accounting.'],
+            'acc_viewer' => ['label' => 'Viewer / Auditor', 'feature' => 'accounting', 'namespace' => 'accounting.'],
         ];
 
         $entitled = Entitlements::keysFor(CurrentOrg::id());

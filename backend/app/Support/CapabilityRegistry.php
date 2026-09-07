@@ -46,6 +46,7 @@ final class CapabilityRegistry
         'crm' => 'crm',
         // The one that proves the two axes are different.
         'projects' => 'pms',
+        'accounting' => 'accounting',
         'kiosk' => 'kiosk',
     ];
 
@@ -72,6 +73,12 @@ final class CapabilityRegistry
 
         // Projects — permission namespace `projects`, feature namespace `pms`.
         'projects.workload' => 'pms.workload',
+
+        // Accounting. The ledger itself (accounts, journal, reports) is core —
+        // every tier gets it, or the module does nothing. Budgets and payroll
+        // posting are the two that carry their own `feature:` gate on a route.
+        'accounting.budgets' => 'accounting.budgeting',
+        'accounting.payroll' => 'accounting.payroll_posting',
     ];
 
     /**

@@ -66,8 +66,14 @@ return new class extends Migration
 
         // The provider avails everything it sells, so no gate can shut its own
         // staff out of a module they built.
+        //
+        // Read off SystemRegistry rather than listed by hand. The list used to say
+        // hr/crm/pms directly, one line under this same sentence, and the sentence
+        // stopped being true the moment a fourth system was sold: Accounting came
+        // back on 2026-09-05 and the provider org did not avail it, so ViteSEO's own
+        // super admin met the locked tile written for clients who had not paid.
         $features = [];
-        foreach (['hr', 'crm', 'pms'] as $system) {
+        foreach (SystemRegistry::keys() as $system) {
             $features = [...$features, ...SystemRegistry::registry($system)::get('full')['features']];
         }
         Entitlements::sync($provider->id, array_values(array_unique($features)));

@@ -3,6 +3,8 @@
 namespace App\Modules\Hr\Models;
 
 use App\Models\Concerns\BelongsToOrg;
+use Illuminate\Database\Eloquent\Casts\Attribute;
+use Illuminate\Support\Carbon;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\SoftDeletes;
@@ -72,6 +74,31 @@ class Attendance extends Model
         'location_verified_by',
         'tasks',
     ];
+
+    /**
+     * Store the day, not the day at midnight.
+     *
+     * `work_date` is cast to `date`, and on the way IN Eloquent serialises a cast
+     * date with the model's $dateFormat -- `Y-m-d H:i:s`. The column is declared
+     * `$table->date(...)`, so MySQL truncates that on insert and production has
+     * always looked correct. SQLite does not: its "date" type is an affinity
+     * label, it keeps `2026-08-31 00:00:00` verbatim, and then
+     * `where('work_date', '2026-08-31')` matches nothing.
+     *
+     * The reads were only ever right because an engine was covering for the
+     * writes. Locally every attendance roster came back empty and every inclusive
+     * whereBetween() silently dropped its last day -- 67 of 67 rows on the
+     * provider org were unreachable. Found while seeding demo data for the user
+     * manual, not by a test: the HR suite runs on MySQL, where this cannot fail.
+     */
+    protected function workDate(): Attribute
+    {
+        return Attribute::make(
+            set: fn (mixed $value): ?string => $value === null
+                ? null
+                : Carbon::parse($value)->toDateString(),
+        );
+    }
 
     protected $casts = [
         'work_date' => 'date',

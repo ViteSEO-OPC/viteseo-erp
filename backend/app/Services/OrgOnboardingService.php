@@ -9,6 +9,7 @@ use App\Modules\Hr\Support\HrProvisioner;
 use App\Models\Org;
 use App\Models\Subscription;
 use App\Models\User;
+use App\Modules\Accounting\Services\ChartOfAccountsProvisioner;
 use App\Support\Entitlements;
 use App\Support\Seats;
 use App\Support\SystemRegistry;
@@ -97,8 +98,8 @@ class OrgOnboardingService
              * SSS/PhilHealth/Pag-IBIG, no work schedule means zero scheduled workdays.
              * The run completes and every payslip looks entirely ordinary.
              *
-             * Accounting's chart of accounts and Inventory's default location used to
-             * be provisioned here too; both modules left this repo on 2026-09-03.
+             * Inventory's default location used to be provisioned here too; that
+             * module left this repo on 2026-09-03 and has not come back.
              */
             if (array_key_exists('hr', $systems)) {
                 app(HrProvisioner::class)->provisionFor($org);
@@ -106,6 +107,21 @@ class OrgOnboardingService
 
             if (array_key_exists('crm', $systems)) {
                 app(CrmProvisioner::class)->provisionFor($org);
+            }
+
+            /*
+             * A ledger with no accounts is not an empty ledger, it is a broken one:
+             * there is nothing to debit and nothing to credit, so the first journal
+             * entry a bookkeeper tries to write has no accounts to pick from and the
+             * screen dead-ends on an empty select.
+             *
+             * This is the silent kind of gap. The module answers 200 with `data: []`
+             * -- indistinguishable from a real org that has simply not posted
+             * anything yet -- which is exactly how it read as working when Accounting
+             * came back on 2026-09-05 and this line had not.
+             */
+            if (array_key_exists('accounting', $systems)) {
+                app(ChartOfAccountsProvisioner::class)->seedFor($org);
             }
 
             // Union of every availed tier's features + explicit add-ons (deps resolved).

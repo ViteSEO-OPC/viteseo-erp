@@ -39,6 +39,9 @@ class SystemRegistry
             'hr' => ['label' => 'HRIS', 'registry' => HrPlanRegistry::class],
             'crm' => ['label' => 'CRM', 'registry' => CrmPlanRegistry::class],
             'pms' => ['label' => 'Projects', 'registry' => ProjectsPlanRegistry::class],
+            // Added 2026-09-05: a client asked to avail it, so the module came
+            // back from the Kiplo build with its tenancy already applied.
+            'accounting' => ['label' => 'Accounting', 'registry' => AccountingPlanRegistry::class],
 
         ];
     }

@@ -28,6 +28,9 @@ class FeatureRegistry
             'hr' => ['label' => 'HR — TeamOra', 'module' => 'hr', 'requires' => [], 'variants' => []],
             'crm' => ['label' => 'CRM — Zerem', 'module' => 'crm', 'requires' => [], 'variants' => []],
             'pms' => ['label' => 'Projects — Sprintly', 'module' => 'pms', 'requires' => [], 'variants' => []],
+            // No product name yet, unlike the other three. The build this came from
+            // calls it Cashflo, which is that company's brand, not this one's.
+            'accounting' => ['label' => 'Accounting', 'module' => 'accounting', 'requires' => [], 'variants' => []],
 
             /*
              * ── The sub-functions ViteSEO sells, and grants to roles ──────────
@@ -59,6 +62,15 @@ class FeatureRegistry
             'crm.automation' => ['label' => 'Outreach automation (n8n)', 'module' => 'crm', 'requires' => ['crm', 'crm.outreach'], 'variants' => []],
 
             // --- Projects sub-functions -------------------------------------
+            // --- Accounting sub-functions ------------------------------------
+            'accounting.invoicing' => ['label' => 'Invoicing (AR)', 'module' => 'accounting', 'requires' => ['accounting'], 'variants' => []],
+            'accounting.bills' => ['label' => 'Bills (AP)', 'module' => 'accounting', 'requires' => ['accounting'], 'variants' => []],
+            'accounting.tax_vat' => ['label' => 'VAT / BIR reporting', 'module' => 'accounting', 'requires' => ['accounting'], 'variants' => []],
+            'accounting.budgeting' => ['label' => 'Budget vs Actual', 'module' => 'accounting', 'requires' => ['accounting'], 'variants' => []],
+            // Posts payroll to the ledger. Works standalone from a CSV, so it depends
+            // only on accounting -- an org can buy this without buying the HRIS.
+            'accounting.payroll_posting' => ['label' => 'Payroll → Journal posting', 'module' => 'accounting', 'requires' => ['accounting'], 'variants' => []],
+
             'pms.reports' => ['label' => 'Analysis & reports', 'module' => 'pms', 'requires' => ['pms'], 'variants' => []],
             'pms.workload' => ['label' => 'Workload & capacity planning', 'module' => 'pms', 'requires' => ['pms'], 'variants' => []],
             // Full-tier exclusive, same reason as crm.automation.

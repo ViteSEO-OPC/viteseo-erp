@@ -29,7 +29,16 @@ class ConnectionRegistry
      */
     public static function all(): array
     {
-        return [];
+        return [
+            'payroll_accounting' => [
+                'label' => 'Payroll → Accounting',
+                'description' => 'Post finalized payroll runs straight to the accounting ledger as balanced journal entries.',
+                'from' => 'hr',
+                'to' => 'accounting',
+                'requires' => ['hr', 'accounting.payroll_posting'],
+                'status' => 'available',
+            ],
+        ];
     }
 
     /** @return list<string> All known connection keys. */
