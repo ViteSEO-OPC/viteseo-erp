@@ -21,9 +21,25 @@ const PIN_COLOR: Record<NearbyPriority, string> = {
   low: "#3b82f6",
 };
 
+<<<<<<< HEAD
 // CARTO basemaps — theme-aware (Positron light / Dark Matter dark). OSM + CARTO attribution.
 // The map provider lives entirely behind this component (see nearby-map.tsx): the rest of the Nearby
 // module speaks only in coordinates + NearbyClient, so this Leaflet/OSM layer can be swapped for
+=======
+// OpenStreetMap's own tiles — the one basemap that is still genuinely keyless.
+//
+// This read `basemaps.cartocdn.com` and called it "keyless CARTO", which was true when it was
+// written. CARTO now stamps **API KEY REQUIRED / carto.com/basemaps/apikey** diagonally across
+// every tile it serves — and serves them with **HTTP 200**, so Leaflet renders them happily,
+// nothing errors, and no log records it. The map looked like a working map with a watermark
+// printed through the middle of a client's prospect list.
+//
+// OSM has no dark style, so dark mode filters the light tiles rather than fetching a second set
+// (see `.leaflet-container` in crm-theme.css). One tile source, one thing to keep working.
+//
+// The map provider lives entirely behind this component (see nearby-map.tsx): the rest of the
+// Nearby module speaks only in coordinates + NearbyClient, so this layer can be swapped for
+>>>>>>> multi-tenancy
 // another provider (e.g. Google Maps) without touching the hook, filters, list, or page.
 //
 // CARTO ended keyless raster access and now stamps "API KEY REQUIRED" into the tile image itself
@@ -34,11 +50,16 @@ const CARTO_KEY_PARAM = process.env.NEXT_PUBLIC_CARTO_BASEMAP_KEY
   ? `?key=${process.env.NEXT_PUBLIC_CARTO_BASEMAP_KEY}`
   : "";
 const TILES = {
+<<<<<<< HEAD
   light: `https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png${CARTO_KEY_PARAM}`,
   dark: `https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png${CARTO_KEY_PARAM}`,
+=======
+  light: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+  dark: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+>>>>>>> multi-tenancy
 };
 const ATTRIBUTION =
-  '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>';
+  '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
 
 // National fallback centre (roughly the middle of the Philippines) for the empty/no-origin view.
 const PH_FALLBACK: LatLng = { lat: 12.8797, lng: 121.774 };

@@ -81,10 +81,18 @@ export function useNerbyIntegration() {
     },
   });
 
+  // 403 is not a failure here, it is the answer. The provider API key is bought and
+  // paid for by the platform, so these routes are super-admin only (see the comment
+  // above them in the CRM route file) — a client's own CRM admin is refused on
+  // purpose. Surfacing that as "could not load" turns a deliberate boundary into
+  // what looks like a broken screen.
+  const status = (query.error as { response?: { status?: number } } | null)?.response?.status;
+
   return {
     integration: query.data,
     isLoading: query.isLoading,
-    isError: query.isError,
+    isError: query.isError && status !== 403,
+    isForbidden: status === 403,
     retry: query.refetch,
   };
 }

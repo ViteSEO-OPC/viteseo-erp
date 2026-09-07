@@ -125,7 +125,7 @@ const STATE_CLASS: Record<ProviderState["tone"], string> = {
  * never populated from a response.
  */
 export function NerbyIntegrationCard() {
-  const { integration, isLoading, isError, retry } = useNerbyIntegration();
+  const { integration, isLoading, isError, isForbidden, retry } = useNerbyIntegration();
 
   return (
     <Card className={cardClass}>
@@ -150,6 +150,12 @@ export function NerbyIntegrationCard() {
             <Skeleton className="h-16 w-full" />
             <Skeleton className="h-16 w-full" />
           </div>
+        ) : isForbidden ? (
+          <p className="rounded-lg border border-border bg-muted/40 p-4 text-sm text-muted-foreground">
+            The discovery engine is set by the platform administrator, not per organisation —
+            the provider account is bought and paid for centrally. Everything else on this page
+            is yours to change.
+          </p>
         ) : isError || !integration ? (
           <ErrorState
             message="Could not load the Nearby provider configuration."

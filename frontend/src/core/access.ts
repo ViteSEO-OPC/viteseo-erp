@@ -8,9 +8,9 @@
 // renders the accessible cards) and the login redirect (which decides where to
 // land). Keep it dependency-light — only the lucide icon type is imported.
 
-import { Users, Handshake, FolderKanban, LayoutTemplate, type LucideIcon } from "lucide-react";
+import { Users, Handshake, FolderKanban, LayoutTemplate, Calculator, type LucideIcon } from "lucide-react";
 
-export type ModuleKey = "hris" | "crm" | "projects" | "kiosk";
+export type ModuleKey = "hris" | "crm" | "projects" | "accounting" | "kiosk";
 
 export interface AccessibleModule {
   key: ModuleKey;
@@ -42,6 +42,7 @@ const MODULE_FEATURE_KEY: Record<ModuleKey, string> = {
   hris: "hr",
   crm: "crm",
   projects: "pms",
+  accounting: "accounting",
   // Kiosk is an INTERNAL tool, not a sold entitlement — access is permission-only
   // (see the tile below), so this mapping is unused for kiosk but kept for the
   // Record's completeness.
@@ -60,10 +61,11 @@ export interface ModuleTile extends AccessibleModule {
 }
 
 /**
- * Every module tile — ALWAYS all three, in stable order (HRIS → CRM → Projects) —
- * each flagged `accessible` for the current user. The launcher renders all three
- * (locking the ones the user can't enter); callers that only want the reachable
- * ones use `getAccessibleModules` below.
+ * Every module tile — ALWAYS the full set, in stable order (HRIS → CRM →
+ * Projects → Accounting → Kiosk) — each flagged `accessible` for the current
+ * user. The launcher renders the sold ones (locking those the user can't enter)
+ * and hides the internal tools; callers that only want the reachable ones use
+ * `getAccessibleModules` below.
  */
 export function getModuleTiles(
   roles: string[],
@@ -114,6 +116,16 @@ export function getModuleTiles(
       icon: FolderKanban,
       href: "/sprintly",
       accessible: entitled("projects", hasNamespace(permissions, "projects")),
+    },
+    {
+      key: "accounting",
+      // No product name yet, unlike its three siblings — see brandLabel in nav.ts.
+      title: "Accounting",
+      subtitle: "Books",
+      description: "Ledger, invoices, bills, BIR reports & budgets.",
+      icon: Calculator,
+      href: "/accounting/overview",
+      accessible: entitled("accounting", hasNamespace(permissions, "accounting")),
     },
     {
       key: "kiosk",

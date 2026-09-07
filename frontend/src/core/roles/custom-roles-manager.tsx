@@ -66,18 +66,23 @@ const PORTAL_PRODUCT: Record<RoleFeature, string> = {
   hr: TEAM_MODULES.hr.product,
   crm: TEAM_MODULES.crm.product,
   pms: TEAM_MODULES.projects.product,
+  accounting: TEAM_MODULES.accounting.product,
 };
 
 /**
  * Whether a capability block is the mounted portal's own.
  *
  * A block is keyed by the FEATURE that sells it — "hr" for the module core,
- * "hr.payroll" for a sub-function — so the portal's own blocks are its key plus
- * anything under it. Matched by prefix rather than listed, so a sub-function the
- * plan adds later opens with its portal without an entry here.
+ * "hr.payroll" for a sub-function — and only the CORE opens.
+ *
+ * It used to open the core AND everything under it, which read fine for an org on
+ * several systems and badly for one on a single system: every block matched, none
+ * folded, and a client who bought only the HRIS met five expanded blocks — the
+ * wall the folding exists to prevent. The add-on packs a plan sells are exactly
+ * the blocks worth folding, whoever the org is.
  */
 function belongsToPortal(featureKey: string, portal: RoleFeature): boolean {
-  return featureKey === portal || featureKey.startsWith(`${portal}.`);
+  return featureKey === portal;
 }
 
 /** "leave_requests" -> "Leave requests". */
@@ -198,6 +203,11 @@ function RoleBuilderDialog({
   const isOpen = (feature: CapabilityFeature) =>
     toggled[feature.feature] ?? (!portalHasBlock || belongsToPortal(feature.feature, portal));
   const folded = features.filter((f) => !belongsToPortal(f.feature, portal)).length;
+
+  // How many SYSTEMS the org is on, not how many blocks. "a role you build here can
+  // be picked in the others too" is only true when there are others; to a client who
+  // bought the HRIS alone it promises a door that is not in their building.
+  const systemCount = new Set(features.map((f) => f.feature.split(".")[0])).size;
 
   /**
    * This portal's blocks first, the rest after, each in the catalog's own order.
@@ -337,10 +347,19 @@ function RoleBuilderDialog({
               it, and without this sentence reads that as a leak rather than as
               the rule the platform is built on. */}
           <p className="mt-1 text-xs text-ink-soft">
-            A role belongs to the ORGANISATION, not to one system — one person, one
-            account, one role covering their whole job. So every system this
-            organisation availed is here, and a role you build in {PORTAL_PRODUCT[portal]}{" "}
-            can be picked in the others too.
+            {systemCount > 1 ? (
+              <>
+                A role belongs to the ORGANISATION, not to one system — one person,
+                one account, one role covering their whole job. So every system this
+                organisation availed is here, and a role you build in{" "}
+                {PORTAL_PRODUCT[portal]} can be picked in the others too.
+              </>
+            ) : (
+              <>
+                A role belongs to the ORGANISATION, not to one screen — one person,
+                one account, one role covering their whole job.
+              </>
+            )}
           </p>
           {/* The blocks are the org's availed functions, in the plan's own words —
               an operator should recognise them as the things they bought. */}

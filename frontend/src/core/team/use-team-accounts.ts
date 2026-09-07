@@ -20,7 +20,7 @@ import { apiClient } from "@/core/api-client";
  */
 
 /** Which portal's team endpoint a screen is talking to. */
-export type TeamModuleKey = "hr" | "projects" | "crm";
+export type TeamModuleKey = "hr" | "projects" | "crm" | "accounting";
 
 /** One access level a member can hold in a module. */
 export interface TeamRolePreset {
@@ -103,6 +103,32 @@ export const TEAM_MODULES: Record<TeamModuleKey, TeamModule> = {
         value: "crm_bd",
         label: "Business Development",
         description: "Works their own leads and follow-ups.",
+      },
+    ],
+  },
+  accounting: {
+    key: "accounting",
+    // No product name of its own yet -- the other three are branded.
+    product: "Accounting",
+    // The platform path, not `/accounting/team`: this endpoint predates the
+    // module's removal and lives in App\Http\Controllers, which is why it
+    // survived it. Same contract as the other three.
+    path: "/team",
+    roles: [
+      {
+        value: "acc_admin",
+        label: "Finance Admin",
+        description: "Runs the books — accounts, entries, reversals, budgets and the team itself.",
+      },
+      {
+        value: "acc_accountant",
+        label: "Accountant",
+        description: "Records and posts entries and payroll, but cannot rewrite the chart or reverse.",
+      },
+      {
+        value: "acc_viewer",
+        label: "Viewer / Auditor",
+        description: "Reads everything, changes nothing.",
       },
     ],
   },
