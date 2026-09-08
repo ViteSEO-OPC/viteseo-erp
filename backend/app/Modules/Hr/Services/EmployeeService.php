@@ -5,6 +5,7 @@ namespace App\Modules\Hr\Services;
 use App\Models\Org;
 use App\Models\User;
 use App\Support\CurrentOrg;
+use App\Support\GrantableRoles;
 use App\Modules\Hr\Models\Attendance;
 use App\Modules\Hr\Models\ContributionSetting;
 use App\Modules\Hr\Models\Employee;
@@ -426,6 +427,17 @@ class EmployeeService
                 'password' => Hash::make($data['password'] ?? \Illuminate\Support\Str::random(40)),
             ]);
             $user->assignRole('hr_employee');
+
+            /*
+             * Whatever access they were hired with. Validated in StoreEmployeeRequest
+             * against GrantableRoles -- a closed list, the org's entitlements, and the
+             * tier cap on trainees -- so by the time it reaches here it is safe to
+             * assign. Additive by construction: assignRole() attaches, and nothing in
+             * this method removes a role from anyone.
+             */
+            foreach (array_intersect((array) ($data['grant_roles'] ?? []), GrantableRoles::all()) as $role) {
+                $user->assignRole($role);
+            }
 
             // 1a) Membership is what makes them a person in this org, and without it
             // the account is not merely empty -- it cannot sign in at all. The login

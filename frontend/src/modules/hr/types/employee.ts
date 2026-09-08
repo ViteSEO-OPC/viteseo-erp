@@ -193,6 +193,8 @@ export interface EmployeeInput {
   hire_date: string;
   base_salary: number;
   is_management?: boolean; // fixed salary + exempt from attendance
+  /** Roles in the other modules, granted at hire. See App\Support\GrantableRoles. */
+  grant_roles?: string[];
   /** Out of the minimum-wage check. The reason is required when this is true. */
   minimum_wage_exempt?: boolean;
   minimum_wage_exempt_reason?: string;
