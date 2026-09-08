@@ -170,6 +170,12 @@ class EmployeeService
             $changes['email'] = $data['email'];
         }
 
+        // Same seam as the name: the HR record is where a phone is maintained, and
+        // `users` is where the other three systems read it.
+        if (array_key_exists('phone', $data)) {
+            $changes['phone'] = $data['phone'];
+        }
+
         $nameParts = array_flip(['first_name', 'middle_name', 'last_name', 'name_extension']);
         $sent = array_intersect_key($data, $nameParts);
 
@@ -410,6 +416,9 @@ class EmployeeService
             $user = User::create([
                 'name' => $this->displayName($data),
                 'email' => $data['email'],
+                // CRM and Projects read users.phone; they have no employee row to
+                // read, because a client may not have availed HR at all.
+                'phone' => $data['phone'] ?? null,
                 // SECURITY: no guessable default. When no password is supplied the
                 // account gets an unusable random one — the employee sets their own
                 // via the forgot-password flow. (Demo logins come from seeders,
@@ -622,6 +631,13 @@ class EmployeeService
         }
 
         $employee->load('user');
+        /*
+         * `users.avatar` is a SHARED column, and this is a path on the SAME private
+         * disk the CRM writes to — so ProfilePhotoService::url() serves it unchanged.
+         * Its owns() claims only `crm/profile-photos/`, which is what makes sharing
+         * safe in the other direction: the CRM's cleanup can never unlink an HR file.
+         */
+        $this->mirrorAvatar($employee);
         $this->audit->log('updated', 'People', "Updated {$employee->user?->name}'s profile photo", $employee);
 
         return $employee->load(['user.roles', 'department', 'manager.user', 'employmentHistories']);
@@ -637,6 +653,8 @@ class EmployeeService
             Storage::disk('local')->delete($previous);
 
             $employee->load('user');
+            // Otherwise the avatar points at a file that is no longer there.
+            $this->mirrorAvatar($employee);
             $this->audit->log('removed', 'People', "Removed {$employee->user?->name}'s profile photo", $employee);
         }
 
@@ -684,6 +702,18 @@ class EmployeeService
 
     /** The separation causes the attrition report already groups by. */
     public const SEPARATION_TYPES = ['voluntary', 'involuntary'];
+
+    /**
+     * Carry the employee's photo path onto the shared `users.avatar` column.
+     *
+     * Only ever writes an HR-owned path or null, so it cannot clobber a photo the
+     * CRM uploaded into `crm/profile-photos/` with something that module would then
+     * refuse to clean up.
+     */
+    private function mirrorAvatar(Employee $employee): void
+    {
+        $employee->user?->forceFill(['avatar' => $employee->photo_path])->save();
+    }
 
     /**
      * Refuse the account behind an employee. Idempotent.
