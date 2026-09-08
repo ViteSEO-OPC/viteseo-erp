@@ -686,6 +686,26 @@ class EmployeeService
     public const SEPARATION_TYPES = ['voluntary', 'involuntary'];
 
     /**
+     * Refuse the account behind an employee. Idempotent.
+     *
+     * Writes one column on `users` and nothing else — deliberately not a role
+     * change, a token revocation or a membership delete, all of which would have to
+     * be remembered and undone. The membership row in particular STAYS, because
+     * OrgUserRule validates every person-picker against it: deleting it would unpick
+     * the person from the work they actually did.
+     */
+    private function closeAccount(Employee $employee): void
+    {
+        $employee->user?->forceFill(['status' => User::STATUS_INACTIVE])->save();
+    }
+
+    /** Open it again. The mirror of closeAccount(), and just as small. */
+    private function openAccount(Employee $employee): void
+    {
+        $employee->user?->forceFill(['status' => User::STATUS_ACTIVE])->save();
+    }
+
+    /**
      * End someone's employment.
      *
      * @param  array{separation_type:string, separation_date:string, reason?:string|null}  $data
@@ -719,6 +739,23 @@ class EmployeeService
             ]);
 
             $employee->load('user');
+
+            /*
+             * Close the account, or leave it for the sweep to close on the day.
+             *
+             * A termination ends access now — that is the point of it, and a notice
+             * period is not something an involuntary separation grants. A resignation
+             * is worked out: the person is still doing the job until their last day,
+             * so `hr:apply-separations` closes theirs when the date arrives.
+             *
+             * Nothing else is touched. No role is removed, no token revoked, no task
+             * reassigned — the account is refused, not dismantled, so reinstatement
+             * has nothing to put back. See EnsureAccountIsActive.
+             */
+            if ($data['separation_type'] === 'involuntary') {
+                $this->closeAccount($employee);
+            }
+
             $this->audit->log(
                 'updated',
                 'People',
@@ -753,6 +790,9 @@ class EmployeeService
             $this->reopenTimelineOnReinstatement($employee);
 
             $employee->load('user');
+            // Reinstatement's claim is that the ending never happened, so the account
+            // opens again on the token the person was already holding.
+            $this->openAccount($employee);
             $this->audit->log(
                 'reopened',
                 'People',
@@ -795,6 +835,7 @@ class EmployeeService
             $previousHire = $employee->hire_date?->toDateString();
 
             $employee->restore();
+            $this->openAccount($employee);
             $employee->update([
                 'separation_type' => null,
                 'separation_date' => null,

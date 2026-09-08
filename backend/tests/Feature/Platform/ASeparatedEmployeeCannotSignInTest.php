@@ -137,19 +137,27 @@ class ASeparatedEmployeeCannotSignInTest extends TestCase
         ['org' => $org, 'employee' => $employee] = $this->orgWithOneEmployee();
 
         $before = Seats::used($org->id);
+        $juanId = User::where('email', 'juan@bituin.ph')->value('id');
 
+        // Involuntary, so the account closes here rather than on the sweep — a seat
+        // follows the account being closed, not the separation being filed. A
+        // resignation filed two weeks out keeps its seat until the last day, which
+        // is right: the person is still working and still signing in.
         CurrentOrg::runAs($org->id, fn () => app(EmployeeService::class)->separate($employee, [
-            'separation_type' => 'voluntary',
+            'separation_type' => 'involuntary',
             'separation_date' => now()->toDateString(),
         ]));
 
-        // The org_user row deliberately stays — rehire needs it, and OrgUserRule
-        // validates historical references against it. Only the COUNT changes.
         $this->assertSame(
             $before - 1,
             Seats::used($org->id),
             'A seat is a person who can sign in. Someone who has left is neither.',
         );
+
+        // The membership row deliberately STAYS. Rehire needs it, and OrgUserRule
+        // validates every person-picker against `org_user` rather than `users` — so
+        // deleting it would also unpick them from the work they actually did.
+        $this->assertDatabaseHas('org_user', ['org_id' => $org->id, 'user_id' => $juanId]);
     }
 
     public function test_a_voluntary_separation_takes_effect_on_the_last_day_not_before(): void

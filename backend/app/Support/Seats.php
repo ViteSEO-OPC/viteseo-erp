@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Support;
 
 use App\Models\Subscription;
+use App\Models\User;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -28,7 +29,19 @@ class Seats
     /** How many seats the org is currently using (members of the org). */
     public static function used(int $orgId): int
     {
-        return DB::table('org_user')->where('org_id', $orgId)->count();
+        return DB::table('org_user')
+            ->join('users', 'users.id', '=', 'org_user.user_id')
+            ->where('org_user.org_id', $orgId)
+            // A seat is a person who can sign in. Someone who has left is neither,
+            // and the org should stop paying for them the day they go.
+            //
+            // The membership row itself deliberately STAYS: rehire needs it, and
+            // OrgUserRule validates every person-picker (project member, task
+            // assignee, lead owner) against `org_user` rather than `users`, so
+            // deleting it would also unpick them from the work they actually did.
+            ->where('users.status', '!=', User::STATUS_INACTIVE)
+            ->whereNull('users.deleted_at')
+            ->count();
     }
 
     /** The org's seat cap (its subscription's limit, or the base if none). */
