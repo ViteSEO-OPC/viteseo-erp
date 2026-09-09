@@ -14,6 +14,16 @@ namespace App\Support;
  * `hr_officer`, who has no business minting a platform owner or another module's
  * admin, so what it may grant is a closed list rather than "any role".
  *
+ * WHERE THE LINE IS. A role is grantable at hire if a new hire could reasonably
+ * need it on day one for the job they were hired to do AND it cannot irreversibly
+ * rewrite records. That keeps the worker tiers and the project MANAGER (pm_apm is
+ * a job title people are hired into), and it keeps out every *_admin — the
+ * administrator of a module's configuration, which is granted by someone who
+ * already holds that authority, from the module's own screen where the blast
+ * radius is visible. acc_admin is the sharpest case: reversing a journal or
+ * deleting an account rewrites recorded financial history, and access to it is a
+ * decision that belongs with the books, not the hire form.
+ *
  * HR's own roles are deliberately absent. `hr_employee` is assigned to everyone by
  * EmployeeService::create(), and `hr_officer` is granted through the management
  * toggle on the employee record, which is where that decision belongs.
@@ -34,8 +44,8 @@ final class GrantableRoles
      */
     public const BY_MODULE = [
         'pms' => ['pm_member', 'pm_apm'],
-        'crm' => ['crm_bd', 'crm_admin'],
-        'accounting' => ['acc_viewer', 'acc_accountant', 'acc_admin'],
+        'crm' => ['crm_bd'],
+        'accounting' => ['acc_viewer', 'acc_accountant'],
     ];
 
     /**

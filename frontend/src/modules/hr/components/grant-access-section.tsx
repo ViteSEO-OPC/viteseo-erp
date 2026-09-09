@@ -33,7 +33,6 @@ const MODULES: { feature: string; label: string; roles: { value: string; label: 
     label: "CRM",
     roles: [
       { value: "crm_bd", label: "Business developer", hint: "Works their own leads." },
-      { value: "crm_admin", label: "Manager", hint: "Manages the whole pipeline and the team." },
     ],
   },
   {
@@ -42,7 +41,6 @@ const MODULES: { feature: string; label: string; roles: { value: string; label: 
     roles: [
       { value: "acc_viewer", label: "Viewer", hint: "Read-only across the books." },
       { value: "acc_accountant", label: "Accountant", hint: "Posts entries and payroll." },
-      { value: "acc_admin", label: "Finance admin", hint: "Everything, including reversals." },
     ],
   },
 ];
