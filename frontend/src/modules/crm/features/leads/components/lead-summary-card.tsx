@@ -82,7 +82,10 @@ export function LeadSummaryCard({ lead }: Props) {
   ).filter((entry): entry is [string, string, LucideIcon] => !!entry[1] && entry[1].trim() !== "");
 
   return (
-    <div className="rounded-2xl border border-border bg-card p-6 shadow-card sm:p-7">
+    // p-6 at every width. `sm:p-7` made this the only card on the page with a different inner
+    // padding, so from 640px up its content sat 4px inboard of the Quick Actions card sharing its
+    // row — the labels of two side-by-side cards not starting on the same line.
+    <div className="rounded-2xl border border-border bg-card p-6 shadow-card">
       <div className="flex items-start justify-between gap-4">
         <div className="flex items-start gap-4">
           <AvatarInitials

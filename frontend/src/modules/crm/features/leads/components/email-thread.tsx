@@ -87,7 +87,8 @@ function MessageCard({ message }: { message: EmailThreadMessage }) {
         {attribution ? <span className="ml-1.5">· {attribution}</span> : null}
       </p>
 
-      <p className="mt-1 text-sm font-semibold text-card-foreground">
+      {/* `break-words` like the body below: an inbound subject is whatever the sender typed. */}
+      <p className="mt-1 break-words text-sm font-semibold text-card-foreground">
         {message.subject || "(no subject)"}
       </p>
       <p className="mt-1 whitespace-pre-wrap break-words text-sm text-muted-foreground">
@@ -144,7 +145,12 @@ export function EmailThread({ leadId }: Props) {
   }
 
   return (
-    <div className="rounded-2xl border border-border bg-card p-6 shadow-card">
+    // `contain-inline-size`, for the same reason as the Files & Downloads card: the card's WIDTH never
+    // depends on what is inside it. The from → to line is `truncate`, and `break-words` still lets a
+    // long URL in a body count at full width, so either used to climb to the page's `76fr` track, whose
+    // bare `fr` cannot shrink below its content. The card always fills its column, so nothing in it
+    // relies on its intrinsic width.
+    <div className="rounded-2xl border border-border bg-card p-6 shadow-card contain-inline-size">
       <h3 className="mb-5 text-lg font-bold text-card-foreground">Email Conversation</h3>
 
       {isLoading ? (

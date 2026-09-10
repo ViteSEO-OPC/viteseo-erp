@@ -62,7 +62,12 @@ export function QuickActionsCard({
   isLost,
 }: Props) {
   return (
-    <div className="rounded-2xl border border-border bg-card p-6 shadow-card">
+    // `flex flex-col` + the `mt-auto` on the outcome row below: this card shares a grid row with
+    // the Lead Overview from xl up, so on a lead whose overview carries a Digital Presence section
+    // it is stretched past its own content. Laying it out as a column sends that spare height to
+    // the gap ABOVE the Won/Lose pair, which then sits on the card's bottom edge like a footer,
+    // instead of leaving it stranded underneath them.
+    <div className="flex flex-col rounded-2xl border border-border bg-card p-6 shadow-card">
       <h3 className="mb-5 text-lg font-bold text-card-foreground">Quick Actions</h3>
 
       {/* Lead Status */}
@@ -142,7 +147,7 @@ export function QuickActionsCard({
       {/* Sales outcomes — Won creates a Deal; Lose records a lost opportunity (no Deal). Both stay
           enabled on a lead that already carries the outcome: Won is guarded server-side (one Deal
           per lead) and a repeat Lost is a legitimate append-only audit entry. */}
-      <div className="mt-4 grid grid-cols-2 gap-2">
+      <div className="mt-auto grid grid-cols-2 gap-2 pt-4">
         <button
           type="button"
           onClick={onWon}
