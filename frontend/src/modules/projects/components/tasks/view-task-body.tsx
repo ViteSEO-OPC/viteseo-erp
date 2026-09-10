@@ -147,7 +147,7 @@ function SubtaskRow({
   };
 
   return (
-    <li className="rounded-xl border border-line-warm bg-white px-3 py-2.5">
+    <li className="rounded-xl border border-line-warm bg-surface px-3 py-2.5">
       <div className="flex items-start gap-3">
         <span className="shrink-0">
           {subtask.assignee ? (
