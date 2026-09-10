@@ -33,7 +33,12 @@ export function LeadTimelinePanel({ leadId, activities, activitiesLoading, activ
   ];
 
   return (
-    <div className="rounded-2xl border border-border bg-card p-6 shadow-card">
+    // Its OWN height, not its row's (`xl:self-start`) — the same rule as Files & Downloads. From xl
+    // this card shares a subgrid row with the Internal Notes + Call pair, and a grid item stretches to
+    // its row by default, so a long note history used to stretch this card far past its 300px list and
+    // leave a blank block under it. Its size is its content: the tabs plus the capped list. `xl:` ONLY:
+    // below xl the rail is a flex column, where `self-start` aligns HORIZONTALLY and would shrink it.
+    <div className="rounded-2xl border border-border bg-card p-6 shadow-card xl:self-start">
       <div
         className="mb-5 flex w-full items-center gap-1 rounded-xl border border-border bg-card p-1"
         role="group"
