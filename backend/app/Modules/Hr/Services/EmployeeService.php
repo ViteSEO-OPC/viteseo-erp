@@ -735,16 +735,35 @@ class EmployeeService
      * be remembered and undone. The membership row in particular STAYS, because
      * OrgUserRule validates every person-picker against it: deleting it would unpick
      * the person from the work they actually did.
+     *
+     * And one audit entry, only when the account actually closes: "why can't they
+     * sign in?" has to be answerable from the trail, and for a resignation the
+     * closing happens days after the separation entry, from the scheduler
+     * (hr:apply-separations), with no one's name on it.
      */
-    private function closeAccount(Employee $employee): void
+    public function closeAccount(Employee $employee, string $why): void
     {
-        $employee->user?->forceFill(['status' => User::STATUS_INACTIVE])->save();
+        $user = $employee->user;
+
+        if ($user === null || $user->status === User::STATUS_INACTIVE) {
+            return;
+        }
+
+        $user->forceFill(['status' => User::STATUS_INACTIVE])->save();
+        $this->audit->log('updated', 'People', "Closed {$user->name}'s account — {$why}", $employee);
     }
 
     /** Open it again. The mirror of closeAccount(), and just as small. */
-    private function openAccount(Employee $employee): void
+    private function openAccount(Employee $employee, string $why): void
     {
-        $employee->user?->forceFill(['status' => User::STATUS_ACTIVE])->save();
+        $user = $employee->user;
+
+        if ($user === null || $user->status === User::STATUS_ACTIVE) {
+            return;
+        }
+
+        $user->forceFill(['status' => User::STATUS_ACTIVE])->save();
+        $this->audit->log('reopened', 'People', "Reopened {$user->name}'s account — {$why}", $employee);
     }
 
     /**
@@ -795,7 +814,7 @@ class EmployeeService
              * has nothing to put back. See EnsureAccountIsActive.
              */
             if ($data['separation_type'] === 'involuntary') {
-                $this->closeAccount($employee);
+                $this->closeAccount($employee, 'terminated, access ends immediately');
             }
 
             $this->audit->log(
@@ -834,7 +853,7 @@ class EmployeeService
             $employee->load('user');
             // Reinstatement's claim is that the ending never happened, so the account
             // opens again on the token the person was already holding.
-            $this->openAccount($employee);
+            $this->openAccount($employee, 'reinstated with continuous service');
             $this->audit->log(
                 'reopened',
                 'People',
@@ -877,7 +896,7 @@ class EmployeeService
             $previousHire = $employee->hire_date?->toDateString();
 
             $employee->restore();
-            $this->openAccount($employee);
+            $this->openAccount($employee, "rehired from {$hireDate}");
             $employee->update([
                 'separation_type' => null,
                 'separation_date' => null,

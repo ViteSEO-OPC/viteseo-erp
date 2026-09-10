@@ -6,6 +6,7 @@ namespace App\Modules\Hr\Console\Commands;
 
 use App\Models\User;
 use App\Modules\Hr\Models\Employee;
+use App\Modules\Hr\Services\EmployeeService;
 use App\Support\CurrentOrg;
 use Illuminate\Console\Command;
 use Illuminate\Support\Carbon;
@@ -36,7 +37,7 @@ class ApplySeparations extends Command
      * pass per tenant instead — the same fence hr:leave-accrual carries, and for the
      * same reason: unpinned, this would report success having done no work.
      */
-    public function handle(): int
+    public function handle(EmployeeService $employees): int
     {
         $tz = config('app.timezone_local');
         $asOf = $this->option('as-of')
@@ -46,7 +47,7 @@ class ApplySeparations extends Command
         $dryRun = (bool) $this->option('dry-run');
         $closed = 0;
 
-        CurrentOrg::eachOrg(function (int $orgId) use ($asOf, $dryRun, &$closed): void {
+        CurrentOrg::eachOrg(function (int $orgId) use ($asOf, $dryRun, $employees, &$closed): void {
             // withTrashed(): separation soft-deletes the employee row and stamps
             // deleted_at with the last working day, so every row this command is
             // looking for is already trashed by the time it looks.
@@ -67,7 +68,11 @@ class ApplySeparations extends Command
                 ));
 
                 if (! $dryRun) {
-                    $employee->user?->forceFill(['status' => User::STATUS_INACTIVE])->save();
+                    // Through the service, so the closing is audited like a termination's is.
+                    $employees->closeAccount(
+                        $employee,
+                        'last working day '.($employee->separation_date?->toDateString() ?? '?'),
+                    );
                     $closed++;
                 }
             }
