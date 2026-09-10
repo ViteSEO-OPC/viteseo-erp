@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import type { User } from "@/core/types";
 import { Avatar, Badge, Button, Modal, PriorityBadge } from "@/core/ui";
@@ -45,7 +46,11 @@ export function MemberDetailModal({
   groups: Group[];
   onClose: () => void;
 }) {
-  const memberGroups = member ? groupsForUser(groups, member.id) : [];
+
+  const [shown, setShown] = useState(member);
+  if (member && member !== shown) setShown(member);
+
+  const memberGroups = shown ? groupsForUser(groups, shown.id) : [];
 
   // A project reached through two groups is still one project.
   const projectCount = new Set(
@@ -66,24 +71,24 @@ export function MemberDetailModal({
         </div>
       }
     >
-      {member && (
+      {shown && (
         <>
           <div className="flex items-start gap-4">
-            <Avatar name={member.name} src={member.avatar} size={56} />
+            <Avatar name={shown.name} src={shown.avatar} size={56} />
             <div className="min-w-0 flex-1">
               <p className="truncate text-base font-bold text-ink">
-                {member.name}
+                {shown.name}
               </p>
-              <p className="truncate text-sm text-ink-soft">{member.email}</p>
+              <p className="truncate text-sm text-ink-soft">{shown.email}</p>
               <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2">
-                <RoleBadge role={member.role} />
+                <RoleBadge role={shown.role} />
                 {/* The table says "Workload" in a column header; here the
                     number needs to say it itself. */}
                 <span className="flex items-center gap-2">
                   <span className="text-2xs font-bold uppercase tracking-wide text-ink-faint">
                     Workload
                   </span>
-                  <UserWorkloadBadge userId={member.id} />
+                  <UserWorkloadBadge userId={shown.id} />
                 </span>
               </div>
             </div>
@@ -110,7 +115,7 @@ export function MemberDetailModal({
             <div className="mt-4 rounded-xl border border-dashed border-line p-6 text-center">
               <p className="text-sm font-bold text-ink">No groups</p>
               <p className="mt-1 text-xs text-ink-soft">
-                Add {member.name.split(" ")[0]} to a group to bring them onto
+                Add {shown.name.split(" ")[0]} to a group to bring them onto
                 its projects.
               </p>
             </div>
@@ -120,7 +125,7 @@ export function MemberDetailModal({
                 <GroupBlock
                   key={g.id}
                   group={g}
-                  isLead={g.leader?.id === member.id}
+                  isLead={g.leader?.id === shown.id}
                   onNavigate={onClose}
                 />
               ))}
