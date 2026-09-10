@@ -278,6 +278,20 @@ function FilterOptionRow({
 const MEMBER_COLS = "md:grid-cols-[2fr_1fr_1.2fr_1fr]";
 
 /**
+ * Height of a full page of rows, so the frame doesn't shrink to fit a short
+ * page. Without it a page holding one member makes the whole grid row one
+ * member tall, and the groups panel beside it — which is sized by that row —
+ * collapses with it, so the panel's height jumped around as you paged or
+ * filtered.
+ *
+ * 40px header band + 1px rule, then `PAGE_SIZE` (8) rows of 68px (a 40px
+ * avatar inside `py-3.5`) with a hairline between them: 41 + 8x68 + 7 = 592.
+ * It's a floor rather than a hard height so a row whose group tags wrap can
+ * still grow instead of being clipped.
+ */
+const MEMBERS_TABLE_MIN_H = "md:min-h-[592px]";
+
+/**
  * Members list. Columns: Member · Role · Group · Workload (group is derived
  * from group membership).
  *
@@ -302,7 +316,10 @@ export function MembersTable({
   isLoading: boolean;
 }) {
   return (
-    <TableFrame scroll={false} className="min-w-0">
+    <TableFrame
+      scroll={false}
+      className={`min-w-0 ${MEMBERS_TABLE_MIN_H}`}
+    >
       {/* Column labels are meaningless once the rows stack, so below md the
           band collapses away entirely. */}
       <div
