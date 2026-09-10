@@ -7,10 +7,22 @@ import type { AppNotification } from "@/modules/projects/types/notification";
 /**
  * Bell dropdown popover — matches the Figma "notification-dropdown".
  *
- * Anchored to the bell's right edge, so its width is what has to give on a
- * narrow screen: a flat 380px pushed the panel off the left of a phone viewport
- * (heading clipped, avatars cut) with nothing to scroll to reach it. It now
- * caps at the viewport minus the topbar's gutters.
+ * From `sm` up it hangs off the bell's right edge. Below that it can't: the
+ * bell is not the last control in the header — the theme, app-switcher and
+ * account buttons sit to its right — so `right-0` puts the panel's right edge
+ * ~130px in from the viewport's, and a 358px panel then started at -104px, off
+ * the left of a 390px phone with no way to scroll to it. Capping the WIDTH
+ * never fixed that; the anchor was the problem.
+ *
+ * So on phones it stops being a popover and becomes a sheet pinned to the
+ * header's own gutters (`inset-x-4` matches the header's `px-4`, `top-18` clears
+ * its `h-16` plus the usual 8px). The shell's header is in a `fixed inset-0`
+ * layout and never scrolls, so a fixed panel stays put under it.
+ *
+ * 560px, not `sm`: the popover needs its 380px plus the ~156px of header
+ * controls to the bell's right plus a gutter, so it fits from ~552px — and at
+ * `sm` (640px) the sheet was still stretching a two-line notification across
+ * 607px for no reason.
  */
 export function NotificationDropdown({
   items,
@@ -25,7 +37,7 @@ export function NotificationDropdown({
   onClose: () => void;
 }) {
   return (
-    <div className="absolute right-0 top-[calc(100%+8px)] z-20 w-[min(380px,calc(100vw_-_2rem))] overflow-hidden rounded-2xl border border-line bg-surface shadow-xl">
+    <div className="fixed inset-x-4 top-18 z-20 overflow-hidden rounded-2xl border border-line bg-surface shadow-xl min-[560px]:absolute min-[560px]:inset-x-auto min-[560px]:right-0 min-[560px]:top-[calc(100%+8px)] min-[560px]:w-[380px]">
       <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-4 sm:px-5">
         <h3 className="text-base font-bold text-ink">Notifications</h3>
         <button
