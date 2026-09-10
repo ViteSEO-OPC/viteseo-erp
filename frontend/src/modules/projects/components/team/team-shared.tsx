@@ -277,43 +277,19 @@ function FilterOptionRow({
 /** Column template — one source of truth for the header and every row. */
 const MEMBER_COLS = "md:grid-cols-[2fr_1fr_1.2fr_1fr]";
 
-/**
- * Height of a full page of rows, so the frame doesn't shrink to fit a short
- * page. Without it a page holding one member makes the whole grid row one
- * member tall, and the groups panel beside it — which is sized by that row —
- * collapses with it, so the panel's height jumped around as you paged or
- * filtered.
- *
- * 40px header band + 1px rule, then `PAGE_SIZE` (8) rows of 68px (a 40px
- * avatar inside `py-3.5`) with a hairline between them: 41 + 8x68 + 7 = 592.
- * It's a floor rather than a hard height so a row whose group tags wrap can
- * still grow instead of being clipped.
- */
 const MEMBERS_TABLE_MIN_H = "md:min-h-[592px]";
 
-/**
- * Members list. Columns: Member · Role · Group · Workload (group is derived
- * from group membership).
- *
- * Below `md` each member is a stacked card — identity on top, then role,
- * groups and workload wrapping beneath — so the list never needs a sideways
- * scroll on a phone. From `md` up the same markup becomes the four-column
- * table via `md:contents` on the secondary-fields wrapper.
- *
- * The frame is the list's own (`TableFrame`), so callers place it directly on
- * the page rather than inside a `<Card>` — two nested white boxes on the warm
- * canvas only ever read as a rendering mistake. The "Members" heading is the
- * caller's too, so it sits on the canvas beside the "Groups" heading it pairs
- * with, and the band inside the frame carries column labels only.
- */
 export function MembersTable({
   rows,
   groupsByUser,
   isLoading,
+  onSelect,
 }: {
   rows: User[];
   groupsByUser: Map<number, GroupTag[]>;
   isLoading: boolean;
+  /** Clicking a row hands the member back; the caller opens the detail modal. */
+  onSelect: (user: User) => void;
 }) {
   return (
     <TableFrame
@@ -338,13 +314,16 @@ export function MembersTable({
         // Separate cards below md; one divided table from md up.
         <div className="space-y-3 p-4 md:space-y-0 md:p-0 md:divide-y md:divide-line">
           {rows.map((u) => (
-            <div
+            <button
               key={u.id}
+              type="button"
+              onClick={() => onSelect(u)}
+              aria-label={`View ${u.name}'s groups and projects`}
               // Padding is stated per breakpoint rather than reused from
               // TABLE_GRID_ROW: below md this is a card with its own inset, and
               // `p-4` + `px-5 py-3.5` on one element resolves by stylesheet
               // order, not by which was written last.
-              className={`flex flex-col gap-3 rounded-xl border border-line p-4 transition-colors md:grid md:items-center md:gap-4 md:rounded-none md:border-0 md:px-5 md:py-3.5 md:hover:bg-black/[0.02] ${MEMBER_COLS}`}
+              className={`flex w-full flex-col gap-3 rounded-xl border border-line p-4 text-left outline-none transition-colors hover:bg-black/[0.02] focus-visible:ring-[3px] focus-visible:ring-ring/50 md:grid md:items-center md:gap-4 md:rounded-none md:border-0 md:px-5 md:py-3.5 ${MEMBER_COLS}`}
             >
               <div className="flex min-w-0 items-center gap-3">
                 <Avatar name={u.name} src={u.avatar} size={40} />
@@ -374,7 +353,7 @@ export function MembersTable({
                   <UserWorkloadBadge userId={u.id} />
                 </MemberField>
               </div>
-            </div>
+            </button>
           ))}
         </div>
       )}

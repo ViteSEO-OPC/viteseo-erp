@@ -6,6 +6,9 @@ import { Card, Input, SearchIcon } from "@/core/ui";
 import { useGroups } from "@/modules/projects/hooks/use-groups";
 import { useUsers } from "@/modules/projects/hooks/use-users";
 import {
+  MemberDetailModal,
+} from "@/modules/projects/components/team/member-detail-modal";
+import {
   GroupsPanel,
   MembersTable,
   TeamFilterPopover,
@@ -34,6 +37,9 @@ export function MemberTeamView() {
   const [roleFilter, setRoleFilter] = useState<"all" | UserRole>("all");
   const [groupFilter, setGroupFilter] = useState("all");
   const [page, setPage] = useState(0);
+
+  // The member whose detail modal is open.
+  const [selectedMember, setSelectedMember] = useState<User | null>(null);
 
   const isLoading = usersQuery.isLoading || groupsQuery.isLoading;
   const isError = usersQuery.isError || groupsQuery.isError;
@@ -139,6 +145,7 @@ export function MemberTeamView() {
                 rows={pageRows}
                 groupsByUser={groupsByUser}
                 isLoading={isLoading}
+                onSelect={setSelectedMember}
               />
             </div>
             <Pagination
@@ -153,6 +160,12 @@ export function MemberTeamView() {
           <GroupsPanel groups={groups} isLoading={isLoading} />
         </div>
       )}
+
+      <MemberDetailModal
+        member={selectedMember}
+        groups={groups}
+        onClose={() => setSelectedMember(null)}
+      />
     </div>
   );
 }

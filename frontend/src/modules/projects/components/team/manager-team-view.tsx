@@ -11,6 +11,9 @@ import {
   CreateGroupModal,
 } from "@/modules/projects/components/groups/create-group-modal";
 import {
+  MemberDetailModal,
+} from "@/modules/projects/components/team/member-detail-modal";
+import {
   GroupsPanel,
   MembersTable,
   TeamFilterPopover,
@@ -38,6 +41,9 @@ export function ManagerTeamView() {
   const [groupFilter, setGroupFilter] = useState("all");
   const [page, setPage] = useState(0);
   const [createGroupOpen, setCreateGroupOpen] = useState(false);
+
+  // The member whose detail modal is open.
+  const [selectedMember, setSelectedMember] = useState<User | null>(null);
 
   const isLoading = usersQuery.isLoading || groupsQuery.isLoading;
   const isError = usersQuery.isError || groupsQuery.isError;
@@ -163,6 +169,7 @@ export function ManagerTeamView() {
                 rows={pageRows}
                 groupsByUser={groupsByUser}
                 isLoading={isLoading}
+                onSelect={setSelectedMember}
               />
             </div>
             <Pagination
@@ -181,6 +188,12 @@ export function ManagerTeamView() {
           />
         </div>
       )}
+
+      <MemberDetailModal
+        member={selectedMember}
+        groups={groups}
+        onClose={() => setSelectedMember(null)}
+      />
 
       {/* Create Group modal */}
       <CreateGroupModal
