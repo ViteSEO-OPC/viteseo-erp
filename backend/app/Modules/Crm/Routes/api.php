@@ -355,6 +355,12 @@ Route::middleware(['auth:sanctum', 'set-current-org', 'subscription-active', 'fe
         Route::get('/leads/{lead}/attachments/{attachment}/download', [LeadAttachmentController::class, 'download'])
             ->scopeBindings()
             ->can('view', 'lead');
+        // Same bytes, different shape — so deliberately the SAME authorization as download above,
+        // not a weaker one. Returns a bounded JSON window of a spreadsheet; every other file type
+        // 422s and falls back to download.
+        Route::get('/leads/{lead}/attachments/{attachment}/preview', [LeadAttachmentController::class, 'preview'])
+            ->scopeBindings()
+            ->can('view', 'lead');
         Route::delete('/leads/{lead}/attachments/{attachment}', [LeadAttachmentController::class, 'destroy'])
             ->scopeBindings()
             ->can('delete', 'attachment');

@@ -6,6 +6,12 @@ import { notify as toast } from "@/core/lib/notify";
 import { apiClient } from "@/modules/crm/lib/axios";
 import { getApiErrorMessage } from "@/modules/crm/lib/api-error";
 import { queryKeys } from "@/modules/crm/lib/query-keys";
+import { previewKindFor, type PreviewKind } from "@/modules/crm/features/leads/lib/attachment-preview";
+import {
+  decodeAttachmentText,
+  MAX_PREVIEW_BYTES,
+  type DecodedText,
+} from "@/modules/crm/features/leads/lib/attachment-text";
 
 /**
  * Raw API shape from GET /leads/{lead}/attachments (LeadAttachmentResource).
@@ -143,26 +149,65 @@ export function useDownloadAttachment(leadId: string) {
   return { downloadAttachment, downloadingId };
 }
 
-/** The attachment currently open in the viewer, with the blob URL its element renders from. */
+/** The bounded spreadsheet window returned by GET .../attachments/{id}/preview. */
+export type SheetPreview = {
+  kind: "sheet";
+  sheetName: string;
+  sheetCount: number;
+  /** Row-major, already truncated and stringified server-side. Rendered as text, never as markup. */
+  rows: string[][];
+  /** The sheet's REAL size, so the viewer can say what it is not showing. */
+  totalRows: number;
+  totalColumns: number;
+  truncated: boolean;
+  maxRows: number;
+  maxColumns: number;
+};
+
+/**
+ * The attachment currently open in the viewer.
+ *
+ * One shape for every kind rather than a union, because the dialog switches on `kind` anyway and a
+ * union would push a discriminator check into every consumer for no additional safety. Exactly one
+ * of `url` / `text` / `sheet` is populated; which one is determined by `kind`:
+ *
+ *   image, pdf  → `url`   an object URL over the downloaded bytes
+ *   text, csv   → `text`  bytes decoded and bounded client-side
+ *   sheet       → `sheet` a bounded JSON window parsed server-side
+ */
 export type AttachmentPreview = {
   id: string;
   name: string;
   mimeType: string;
-  url: string;
+  kind: PreviewKind | null;
+  url: string | null;
+  text: DecodedText | null;
+  sheet: SheetPreview | null;
 };
 
 /**
  * Open one attachment for inline viewing.
  *
- * Fetches the SAME authorized download endpoint as `useDownloadAttachment` — the bytes are on the
- * private disk, so a bare `<img src>` would arrive without the Bearer token and 401. The response's
- * `Content-Disposition: attachment` is irrelevant here: that header governs navigation, and reading
- * the body as a blob bypasses it entirely. No backend change is needed to view a file inline.
+ * THREE STRATEGIES, ONE AUTHORIZATION MODEL. Images and PDFs, and now TXT and CSV, come from the
+ * SAME authorized download endpoint as `useDownloadAttachment` — the bytes are on the private disk,
+ * so a bare `<img src>` would arrive without the Bearer token and 401. The response's
+ * `Content-Disposition: attachment` is irrelevant: that header governs navigation, and reading the
+ * body as a blob bypasses it entirely. Spreadsheets instead call the dedicated preview endpoint,
+ * which is guarded by exactly the same policy and scope binding, because parsing a workbook belongs
+ * on the server and its output is a bounded JSON window rather than a file.
  *
- * Object-URL lifecycle is the one thing this hook must get right. Unlike the download path — which
- * revokes immediately after the click — a preview has to hold its URL for as long as the viewer is
- * open, so the URL is revoked on close, when a different attachment replaces it, and on unmount. The
- * ref mirrors the state purely so the unmount cleanup can revoke without re-running on every change.
+ * No new access path and no public URL was introduced for any of them.
+ *
+ * TXT AND CSV ARE BOUNDED AT THE BLOB, NOT AFTER DECODING. `blob.slice` caps the ArrayBuffer before
+ * a string is ever built, so a huge text file costs one megabyte of memory rather than freezing the
+ * tab; the extra byte is what lets the decoder distinguish "exactly at the cap" from "longer than
+ * the cap" without a second size parameter.
+ *
+ * Object-URL lifecycle is the one thing this hook must get right, and it now applies to fewer kinds:
+ * only image and pdf allocate a URL. Unlike the download path — which revokes immediately after the
+ * click — a preview holds its URL for as long as the viewer is open, so it is revoked on close, when
+ * a different attachment replaces it, and on unmount. The ref mirrors the state purely so the
+ * unmount cleanup can revoke without re-running on every change.
  */
 export function usePreviewAttachment(leadId: string) {
   const [preview, setPreview] = useState<AttachmentPreview | null>(null);
@@ -181,20 +226,55 @@ export function usePreviewAttachment(leadId: string) {
 
   const openPreview = useCallback(
     async (attachment: Pick<LeadAttachment, "id" | "name" | "mimeType">) => {
+      const kind = previewKindFor(attachment.mimeType, attachment.name);
       setPreviewingId(attachment.id);
+
+      const base: Omit<AttachmentPreview, "url" | "text" | "sheet"> = {
+        id: attachment.id,
+        name: attachment.name,
+        mimeType: attachment.mimeType,
+        kind,
+      };
+
       try {
+        if (kind === "sheet") {
+          const res = await apiClient.get(
+            `/leads/${leadId}/attachments/${attachment.id}/preview`,
+          );
+
+          // No object URL for this kind, but a previously open image or PDF still holds one.
+          release();
+          setPreview({ ...base, url: null, text: null, sheet: res.data.data as SheetPreview });
+          return;
+        }
+
         const res = await apiClient.get(
           `/leads/${leadId}/attachments/${attachment.id}/download`,
           { responseType: "blob" },
         );
+        const blob = res.data as Blob;
+
+        if (kind === "text" || kind === "csv") {
+          // Bound BEFORE decoding: one extra byte over the cap is enough to know the file was
+          // longer, without holding the whole thing in memory to find out.
+          const buffer = await blob.slice(0, MAX_PREVIEW_BYTES + 1).arrayBuffer();
+
+          release();
+          setPreview({ ...base, url: null, text: decodeAttachmentText(buffer), sheet: null });
+          return;
+        }
 
         // Replacing an open preview must not strand the previous URL.
         release();
-        const url = URL.createObjectURL(res.data as Blob);
+        const url = URL.createObjectURL(blob);
         urlRef.current = url;
-        setPreview({ id: attachment.id, name: attachment.name, mimeType: attachment.mimeType, url });
-      } catch {
-        toast.error("Could not open the file. Please try again.");
+        setPreview({ ...base, url, text: null, sheet: null });
+      } catch (err) {
+        // The spreadsheet endpoint answers an unreadable workbook with its own safe sentence
+        // ("corrupt, password-protected, or an unsupported format") — surface that rather than the
+        // generic line, since it tells the user what to do next. It is a server constant, never an
+        // exception message.
+        toast.error(getApiErrorMessage(err, "Could not open the file. Please try again."));
       } finally {
         setPreviewingId(null);
       }

@@ -30,9 +30,22 @@ class LeadAttachmentStore
      * removed, so the disk never accumulates files with no record pointing at them. The stored
      * filename is randomised by Laravel — the client's name is kept only as display metadata and
      * never becomes part of a path.
+     *
+     * `mime_type` is DERIVED FROM THE CONTENT (`getMimeType()`, which guesses from the bytes), not
+     * copied from the request's `Content-Type` part header as it once was. The client-supplied value
+     * was display metadata for as long as the only consumers were an icon and an `<img>` vs
+     * `<iframe>` choice; it stops being harmless the moment anything routes a file INTO A PARSER by
+     * it. Rows written before this change still hold the client's string, so nothing may treat this
+     * column as authoritative either — {@see \App\Modules\Crm\Services\Attachments\SpreadsheetPreviewReader}
+     * re-identifies the format from the bytes on disk and never consults it.
      */
     public function store(Lead $lead, UploadedFile $file, ?User $uploader): LeadAttachment
     {
+        // BEFORE the move, not after: getMimeType() inspects the bytes at the temp path, and
+        // store() moves the file out from under it. getClientMimeType() had no such ordering
+        // requirement, which is why this was previously read inside the transaction below.
+        $mimeType = $file->getMimeType() ?? 'application/octet-stream';
+
         $path = $file->store($this->directoryFor($lead), self::DISK);
 
         if ($path === false) {
@@ -40,7 +53,7 @@ class LeadAttachmentStore
         }
 
         try {
-            return DB::transaction(function () use ($lead, $file, $uploader, $path): LeadAttachment {
+            return DB::transaction(function () use ($lead, $file, $uploader, $path, $mimeType): LeadAttachment {
                 $attachment = new LeadAttachment();
                 $attachment->lead_id = $lead->id;
                 $attachment->user_id = $uploader?->id;
@@ -48,7 +61,7 @@ class LeadAttachmentStore
                 // getClientOriginalName is client-controlled; it is stored as display text only and
                 // is escaped/encoded wherever it is rendered or sent as a download filename.
                 $attachment->original_name = $file->getClientOriginalName();
-                $attachment->mime_type = $file->getClientMimeType();
+                $attachment->mime_type = $mimeType;
                 $attachment->size = $file->getSize() ?: 0;
                 $attachment->save();
 
