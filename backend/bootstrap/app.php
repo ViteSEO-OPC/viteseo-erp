@@ -16,11 +16,28 @@ return Application::configure(basePath: dirname(__DIR__))
     // Reverb channels. Channels themselves are defined per-module (see
     // routes/channels.php). Realtime stays inert until a broadcaster is configured
     // (BROADCAST_CONNECTION), so this is safe even when Reverb is off.
+    //
+    // EnsureAccountIsActive is repeated here because this endpoint is NOT in the
+    // api group — it was the one authenticated route a closed account could still
+    // reach, and a socket is as good as an endpoint for reading live data.
     ->withBroadcasting(
         __DIR__.'/../routes/channels.php',
-        ['middleware' => ['auth:sanctum']],
+        ['middleware' => ['auth:sanctum', \App\Http\Middleware\EnsureAccountIsActive::class]],
     )
     ->withMiddleware(function (Middleware $middleware): void {
+        /*
+         * A closed account is refused on EVERY api route, not per module.
+         *
+         * Appended to the group rather than listed on each route group because the
+         * thing being checked is not "may you use HR" but "may you act at all", and
+         * a per-module list is a list someone forgets to add the next module to. It
+         * is a no-op for guests, so the login route itself is unaffected — that one
+         * is refused inside AuthController, where the account is known.
+         */
+        $middleware->api(append: [
+            \App\Http\Middleware\EnsureAccountIsActive::class,
+        ]);
+
         // Spatie permission middleware aliases — used to gate HR-only routes
         // with role:hr_officer / permission:hr.<resource>.<action>.
         $middleware->alias([

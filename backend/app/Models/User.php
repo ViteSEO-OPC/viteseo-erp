@@ -39,6 +39,30 @@ class User extends Authenticatable
     use HasApiTokens, HasRoles, HasFactory, Notifiable, SoftDeletes;
 
     /**
+     * Platform-level account state — whether this person may sign in at all.
+     *
+     * NOT the CRM's notion of status. `Crm\Resources\UserResource` exposes a field
+     * of the same name computed from `CrmAccessService::isSuspended()`, which is
+     * CRM-scoped and lives in `crm_user_access`. This column is the whole account:
+     * inactive here and no module is reachable, because the account cannot
+     * authenticate. Keep the two apart when reading a payload.
+     *
+     * The column arrived with the CRM's additive users migration for exactly this
+     * purpose ("reversible user deactivate") and was never wired to anything; CRM
+     * solved its own case with a scoped table instead. Offboarding is the platform
+     * case it was made for.
+     */
+    public const STATUS_ACTIVE = 'active';
+
+    public const STATUS_INACTIVE = 'inactive';
+
+    /** May this account sign in and hold a session? */
+    public function isActive(): bool
+    {
+        return $this->status !== self::STATUS_INACTIVE;
+    }
+
+    /**
      * Get the attributes that should be cast.
      *
      * @return array<string, string>
