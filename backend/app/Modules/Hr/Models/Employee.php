@@ -171,11 +171,14 @@ class Employee extends Model
      * @return array<string, string|null>
      */
     /**
-     * The name as a roster lists it: "Dela Cruz Jr., Juan Santos".
+     * The name as a roster lists it: "Dela Cruz Jr., Juan S.".
      *
      * A suffix belongs to the surname, not to the given names — "Dela Cruz, Juan Jr." files the
      * Jr. under Juan and reads as a second given name. Records from before the name was split have
      * no `last_name` to file under, so they keep the composed name rather than being guessed at.
+     *
+     * The middle name is carried as an INITIAL. Someone with none is listed exactly as before —
+     * surname, then first name — because there is nothing to abbreviate.
      */
     public function listingName(): ?string
     {
@@ -189,11 +192,33 @@ class Employee extends Model
         $surname = $suffix === '' ? $last : "{$last} {$suffix}";
 
         $given = implode(' ', array_filter(
-            [trim((string) $this->first_name), trim((string) $this->middle_name)],
-            fn (string $part) => $part !== '',
+            [trim((string) $this->first_name), $this->middleInitial()],
+            fn (?string $part) => $part !== null && $part !== '',
         ));
 
         return $given === '' ? $surname : "{$surname}, {$given}";
+    }
+
+    /**
+     * The middle name as an initial — "Reyes" becomes "R." — or null when there is none.
+     *
+     * A middle name on a Philippine record is the mother's maiden surname, and a roster carries
+     * it as the M.I.: it is there to tell two Juan Dela Cruzes apart, not to be read. A compound
+     * one ("Dela Cruz") gives its first letter only, which is what the forms this mirrors do.
+     *
+     * `mb_` throughout — a name is the last place to assume one byte is one letter, and the
+     * first letter of "Ñ" truncated mid-sequence is not a letter at all.
+     */
+    private function middleInitial(): ?string
+    {
+        $middle = trim((string) $this->middle_name);
+
+        if ($middle === '') {
+            return null;
+        }
+
+        // A record already holding just "R" or "R." must not come back as "R..".
+        return mb_strtoupper(mb_substr($middle, 0, 1)) . '.';
     }
 
     /**
