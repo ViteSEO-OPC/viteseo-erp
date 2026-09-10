@@ -1,6 +1,7 @@
 <?php
 
 use App\Modules\Hr\Support\StatutoryContributions;
+use App\Support\CurrentOrg;
 use Illuminate\Database\Migrations\Migration;
 
 /**
@@ -19,7 +20,10 @@ return new class extends Migration
 {
     public function up(): void
     {
-        StatutoryContributions::install();
+        // Scope off: this runs BEFORE 2026_09_03_100002 adds org_id to the hr_*
+        // tables, and install() writes through Eloquent models that now carry the
+        // tenant scope. Without this, migrate:fresh dies here.
+        CurrentOrg::suspendScope(static fn () => StatutoryContributions::install());
     }
 
     public function down(): void

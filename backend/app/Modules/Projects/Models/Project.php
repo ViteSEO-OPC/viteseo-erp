@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Modules\Projects\Models;
 
+use App\Models\Concerns\BelongsToOrg;
 use App\Models\User;
 use App\Modules\Projects\Concerns\HasPublicUuid;
 use App\Modules\Projects\Database\Factories\ProjectFactory;
@@ -21,6 +22,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  */
 class Project extends Model
 {
+    use BelongsToOrg;
     /** @use HasFactory<ProjectFactory> */
     use HasFactory, HasPublicUuid, SoftDeletes;
 

@@ -2,6 +2,7 @@
 
 namespace App\Modules\Crm\Models;
 
+use App\Models\Concerns\BelongsToOrg;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
@@ -31,6 +32,7 @@ use Illuminate\Support\Carbon;
 #[Fillable(['suspended_at', 'suspended_by'])]
 class CrmUserAccess extends Model
 {
+    use BelongsToOrg;
     protected $table = 'crm_user_access';
 
     /**

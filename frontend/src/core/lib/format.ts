@@ -10,6 +10,40 @@ export function formatPeso(amount: number | string): string {
   }).format(n);
 }
 
+/**
+ * Money in the accounting convention: negatives are shown in parentheses —
+ * e.g. -1234 → "(₱1,234.00)" — instead of a minus sign. Use for signed figures
+ * (variance, net income, net cash), keeping colour as a secondary cue only.
+ */
+export function formatPesoAccounting(amount: number | string): string {
+  const n = typeof amount === "string" ? parseFloat(amount) : amount;
+  if (Number.isNaN(n)) return "—";
+  const formatted = formatPeso(Math.abs(n));
+  return n < 0 ? `(${formatted})` : formatted;
+}
+
+/**
+ * Read a peso figure out of whatever a person typed. The inverse of
+ * {@link formatPeso}, and it exists because of that pairing: the screen prints
+ * PHP 252,560.00, so that is the shape typed back in — pasted off a bank
+ * statement, copied from another system, or simply written the way people write
+ * money.
+ *
+ * A `type="number"` input cannot take it. The HTML value-sanitisation rule
+ * reports an EMPTY value for any string that is not a bare float, so the field
+ * looks filled while the page reads nothing, and whatever depends on it sits
+ * there disabled with no way to say why. That cost a real reconciliation on
+ * 2026-09-07.
+ *
+ * Returns NaN when there is no number in the string, so callers keep their own
+ * guard: this parses, it does not decide.
+ */
+export function parseAmount(input: string): number {
+  const cleaned = input.replace(/[^0-9.-]/g, "");
+
+  return cleaned === "" ? Number.NaN : Number(cleaned);
+}
+
 export function formatDate(iso: string | null | undefined): string {
   if (!iso) return "—";
   return new Date(iso).toLocaleDateString("en-PH", {

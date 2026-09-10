@@ -2,6 +2,7 @@
 
 namespace App\Modules\Crm\Models;
 
+use App\Models\Concerns\BelongsToOrg;
 use App\Modules\Crm\Database\Factories\DealFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -21,6 +22,7 @@ use Illuminate\Support\Carbon;
 #[Fillable(['lead_id', 'amount', 'converted_at'])]
 class Deal extends Model
 {
+    use BelongsToOrg;
     protected $table = 'crm_deals';
 
     protected static function newFactory(): DealFactory

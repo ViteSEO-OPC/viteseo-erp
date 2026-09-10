@@ -2,6 +2,7 @@
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 /**
  * Carry the CRM suspensions that already exist in `users.status` into `crm_user_access`.
@@ -46,16 +47,32 @@ return new class extends Migration
             ->distinct()
             ->pluck('users.updated_at', 'users.id');
 
+        /*
+         * The tenant, when this runs after multi-tenancy rather than before it.
+         *
+         * In a clean `migrate` this migration lands BEFORE add_org_id_to_crm_tables, so
+         * `crm_user_access` has no org_id yet and that later migration's backfill claims
+         * these rows for the first org. Run against today's schema instead — a targeted
+         * re-run, or a database where this one was skipped — org_id is NOT NULL and the
+         * insertOrIgnore below would swallow the violation and write NOTHING, silently
+         * reactivating every suspended BD: the exact failure this migration exists to
+         * prevent, in the exact shape it was written to avoid.
+         */
+        $orgId = Schema::hasColumn('crm_user_access', 'org_id')
+            ? DB::table('orgs')->orderBy('id')->value('id')
+            : null;
+
         foreach ($suspended as $userId => $updatedAt) {
             // insertOrIgnore, not insert: the unique constraint on user_id already forbids a second
             // row, and a re-run of this migration must be a no-op rather than an error.
-            DB::table('crm_user_access')->insertOrIgnore([
+            DB::table('crm_user_access')->insertOrIgnore(array_filter([
+                'org_id' => $orgId,
                 'user_id' => $userId,
                 'suspended_at' => $updatedAt ?? $now,
                 'suspended_by' => null,
                 'created_at' => $now,
                 'updated_at' => $now,
-            ]);
+            ], static fn ($value): bool => $value !== null));
         }
     }
 

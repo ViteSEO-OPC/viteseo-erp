@@ -16,11 +16,15 @@ async function getNotifications(
 }
 
 // Polls every 15s (+ refetch on window focus) so the bell and nav badges stay
-// live without wiring every mutation. Shared by TopBar + Sidebar.
-export function useNotifications(limit: number, offset: number) {
+// live without wiring every mutation. Shared by TopBar + Sidebar. `enabled`
+// exists because this is the HR feed: portals that mount the same shell but
+// render no HR bell (Kiosk, Sprintly, Zerem) must not poll an endpoint whose
+// result they never show.
+export function useNotifications(limit: number, offset: number, enabled = true) {
   return useQuery({
     queryKey: ["hr", "me", "notifications", { limit, offset }],
     queryFn: () => getNotifications(limit, offset),
     refetchInterval: 15000,
+    enabled,
   });
 }

@@ -3,6 +3,7 @@
 namespace App\Modules\Hr\Console\Commands;
 
 use App\Modules\Hr\Services\ManagementAttendanceService;
+use App\Support\CurrentOrg;
 use Illuminate\Console\Command;
 
 /** Writes the attendance rows for management staff (see ManagementAttendanceService). */
@@ -17,7 +18,23 @@ class GenerateManagementAttendance extends Command
 
     protected $description = 'Generate attendance rows for attendance-exempt management staff';
 
+    /**
+     * TENANT FENCE: the console has no authenticated user, so `CurrentOrg::id()` fell
+     * through to the FIRST org and only that tenant's management staff ever got their
+     * attendance rows. One pinned pass per tenant.
+     */
     public function handle(ManagementAttendanceService $service): int
+    {
+        CurrentOrg::eachOrg(function (int $orgId) use ($service): void {
+            $this->line("Org #{$orgId}:");
+            $this->generateForCurrentOrg($service);
+        });
+
+        return self::SUCCESS;
+    }
+
+    /** The generation for whichever tenant is pinned. */
+    private function generateForCurrentOrg(ManagementAttendanceService $service): void
     {
         $dryRun = (bool) $this->option('dry-run');
 
@@ -55,7 +72,5 @@ class GenerateManagementAttendance extends Command
         if ($result['recomputed']) {
             $this->line('  Violations recomputed.');
         }
-
-        return self::SUCCESS;
     }
 }

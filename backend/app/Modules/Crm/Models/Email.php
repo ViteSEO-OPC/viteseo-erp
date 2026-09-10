@@ -2,6 +2,7 @@
 
 namespace App\Modules\Crm\Models;
 
+use App\Models\Concerns\BelongsToOrg;
 use App\Models\User;
 
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -59,6 +60,7 @@ use Illuminate\Support\Carbon;
 ])]
 class Email extends Model
 {
+    use BelongsToOrg;
     protected $table = 'crm_emails';
 
     protected function casts(): array

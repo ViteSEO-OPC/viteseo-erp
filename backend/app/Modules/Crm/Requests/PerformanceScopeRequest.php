@@ -5,6 +5,7 @@ namespace App\Modules\Crm\Requests;
 use App\Models\User;
 use App\Modules\Crm\Services\CrmAccessService;
 use App\Modules\Crm\Support\PerformanceScope;
+use App\Support\OrgUserRule;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Foundation\Http\FormRequest;
@@ -37,7 +38,7 @@ class PerformanceScopeRequest extends FormRequest
             // Drill into ONE Business Development Manager. Absent → the requester's own scope
             // (which is "All Reports" for an Admin/SA). Must reference an existing user; the extra
             // "active BD" constraint is enforced in withValidator (needs a role/status lookup).
-            'user_id' => ['sometimes', 'nullable', 'integer', Rule::exists('users', 'id')],
+            'user_id' => ['sometimes', 'nullable', 'integer', OrgUserRule::exists()],
             // FUTURE reporting filters slot in here (department_id, branch_id, from/to, report_id, …)
             // — see PerformanceScope's extension-seam note. No controller/service change required.
         ];
@@ -70,7 +71,7 @@ class PerformanceScopeRequest extends FormRequest
         $userId = $this->input('user_id');
 
         if ($userId !== null && $userId !== '') {
-            return new PerformanceScope(User::findOrFail((int) $userId), 'bd');
+            return new PerformanceScope(User::query()->inCurrentOrg()->findOrFail((int) $userId), 'bd');
         }
 
         // No elevated params → the requester's own portfolio. For Admin/SA that resolves to the whole
@@ -86,7 +87,7 @@ class PerformanceScopeRequest extends FormRequest
     {
         // "Active" means Zerem access is not suspended (`crm_user_access`), not the shared
         // `users.status` column — a BD who has left keeps their account for TeamOra and Sprintly.
-        return app(CrmAccessService::class)->excludeSuspended(User::query())
+        return app(CrmAccessService::class)->excludeSuspended(User::query()->inCurrentOrg())
             ->whereKey($userId)
             ->whereHas('roles', fn (Builder $query) => $query->where('name', 'crm_bd'))
             ->exists();

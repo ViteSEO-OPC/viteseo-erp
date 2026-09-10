@@ -13,7 +13,6 @@ import { useAvatarUrl } from "@/modules/crm/features/profile/hooks/use-profile";
 import { useAuth } from "@/modules/crm/providers/auth-provider";
 import { usePermissions } from "@/modules/crm/providers/permissions-provider";
 import { cn } from "@/modules/crm/lib/utils";
-import { getAccessibleModules } from "@/core/access";
 
 type UserMenuProps = {
   className?: string;
@@ -28,10 +27,6 @@ export function UserMenu({ className }: UserMenuProps) {
   const router = useRouter();
 
   if (!user) return null;
-
-  // Multi-system users get a "Switch app" jump back to the launcher.
-  const canSwitchApp =
-    getAccessibleModules(user.roles, user.permissions).length > 1;
 
   /**
    * ONE self-service entry, resolved per role — the same rules the sidebar already uses.
@@ -68,12 +63,10 @@ export function UserMenu({ className }: UserMenuProps) {
           {user.name}
         </span>
       </DropdownMenuTrigger>
+      {/* "Switch app" used to be the first item here. It is now the header's
+          AppSwitcher — same gate (the accessible launcher tiles), same
+          destinations, but in the position every other portal puts it in. */}
       <DropdownMenuContent align="end" className="w-48">
-        {canSwitchApp && (
-          <DropdownMenuItem onClick={() => router.push("/")}>
-            Switch app
-          </DropdownMenuItem>
-        )}
         {settingsHref && (
           <DropdownMenuItem onClick={() => router.push(settingsHref)}>
             Settings

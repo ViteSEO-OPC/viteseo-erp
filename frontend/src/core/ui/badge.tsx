@@ -14,12 +14,12 @@ const badgeVariants = cva(
   {
     variants: {
       tone: {
-        accent: "bg-brand-soft text-[#0f8f8b]",
+        accent: "bg-brand-soft text-[#0f8f8b] dark:text-brand",
         success: "bg-success-soft text-success",
         warning: "bg-warning-soft text-warning",
         danger: "bg-danger-soft text-danger",
         info: "bg-info-soft text-info",
-        neutral: "bg-black/5 text-ink-soft",
+        neutral: "bg-black/5 text-ink-soft dark:bg-white/10",
       },
     },
     defaultVariants: {

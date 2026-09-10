@@ -2,10 +2,12 @@
 
 namespace App\Modules\Hr\Models;
 
+use App\Models\Concerns\BelongsToOrg;
 use Illuminate\Database\Eloquent\Model;
 
 class LeaveSetting extends Model
 {
+    use BelongsToOrg;
     protected $table = 'hr_leave_settings';
 
     protected $fillable = [

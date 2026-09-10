@@ -2,12 +2,14 @@
 
 namespace App\Modules\Hr\Models;
 
+use App\Models\Concerns\BelongsToOrg;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Candidate extends Model
 {
+    use BelongsToOrg;
     use SoftDeletes;
 
     protected $table = 'hr_candidates';

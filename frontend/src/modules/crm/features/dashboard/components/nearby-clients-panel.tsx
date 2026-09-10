@@ -80,7 +80,6 @@ export function NearbyClientsPanel() {
               onPlanVisit={goToPage}
               onDirections={goToPage}
               onQualify={goToPage}
-              qualifyingId={null} /* panel navigates; no claim is ever in flight here */
               className={PANEL_HEIGHT}
             />
           </div>

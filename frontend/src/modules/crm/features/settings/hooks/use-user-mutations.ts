@@ -5,6 +5,7 @@ import { notify as toast } from "@/core/lib/notify";
 import { apiClient } from "@/modules/crm/lib/axios";
 import { getApiErrorMessage } from "@/modules/crm/lib/api-error";
 import { queryKeys } from "@/modules/crm/lib/query-keys";
+import { TEAM_ACCOUNTS_QUERY_KEY } from "@/core/team/use-team-accounts";
 import { mapUser } from "@/modules/crm/features/settings/hooks/use-users-data";
 import type {
   CreatedUser,
@@ -12,6 +13,18 @@ import type {
   TeamUser,
   UpdateUserPayload,
 } from "@/modules/crm/features/settings/types/user-types";
+
+/**
+ * Every write here goes to /users; the screen that shows the result LISTS from
+ * /crm/team.
+ *
+ * That split is deliberate — /users cannot see a member holding one of the org's
+ * own roles — but it means the cache these mutations change is not the cache the
+ * member rows read. Each one therefore invalidates BOTH: the /users caches that
+ * still feed the owner pickers, and the platform list the Team & Roles rows are
+ * drawn from. Dropping the second is invisible in review and shows up as a row
+ * that keeps its old name, role or status until the page is reloaded.
+ */
 
 /**
  * Create a Team Account, OR grant CRM access to an existing centralized user — one endpoint, the
@@ -34,6 +47,7 @@ export function useCreateUser() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.users.lists() });
+      queryClient.invalidateQueries({ queryKey: TEAM_ACCOUNTS_QUERY_KEY });
       // The granted user's CRM role changed, so any cached lookup for their address is stale.
       queryClient.invalidateQueries({ queryKey: [...queryKeys.users.all, "lookup"] });
     },
@@ -59,6 +73,7 @@ export function useUpdateUser() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.users.lists() });
+      queryClient.invalidateQueries({ queryKey: TEAM_ACCOUNTS_QUERY_KEY });
     },
     onError: (err) => {
       toast.error(getApiErrorMessage(err, "Failed to update account"));
@@ -83,6 +98,7 @@ export function useReassignAllLeads() {
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.users.lists() });
+      queryClient.invalidateQueries({ queryKey: TEAM_ACCOUNTS_QUERY_KEY });
       queryClient.invalidateQueries({ queryKey: queryKeys.leads.all });
       toast.success(
         data.leads_reassigned === 0 && data.standalone_events_transferred === 0
@@ -103,6 +119,7 @@ export function useDeleteUser() {
     mutationFn: (id: string) => apiClient.delete(`/users/${id}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.users.lists() });
+      queryClient.invalidateQueries({ queryKey: TEAM_ACCOUNTS_QUERY_KEY });
       toast.success("Account deleted");
     },
     onError: (err) => {

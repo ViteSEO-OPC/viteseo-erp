@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Modules\Projects\Models;
 
+use App\Models\Concerns\BelongsToOrg;
 use App\Models\User;
 use App\Modules\Projects\Concerns\HasPublicUuid;
 use Illuminate\Database\Eloquent\Builder;
@@ -17,6 +18,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class Notification extends Model
 {
+    use BelongsToOrg;
     use HasPublicUuid;
 
     protected $table = 'pm_notifications';

@@ -2,6 +2,7 @@
 
 namespace App\Modules\Crm\Models;
 
+use App\Models\Concerns\BelongsToOrg;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Carbon;
@@ -26,6 +27,7 @@ use Illuminate\Support\Carbon;
 ])]
 class MailboxSync extends Model
 {
+    use BelongsToOrg;
     protected $table = 'crm_mailbox_syncs';
 
     protected function casts(): array

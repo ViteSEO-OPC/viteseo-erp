@@ -2,6 +2,7 @@
 
 namespace App\Modules\Hr\Models;
 
+use App\Models\Concerns\BelongsToOrg;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -9,6 +10,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 /** One execution of a scheduled HR job — see the migration for why it is recorded. */
 class JobRun extends Model
 {
+    use BelongsToOrg;
     protected $table = 'hr_job_runs';
 
     /** The management-attendance generator (`hr:generate-management-attendance`). */

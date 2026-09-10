@@ -2,6 +2,7 @@
 
 namespace App\Modules\Hr\Services;
 
+use App\Support\CurrentOrg;
 use App\Modules\Hr\Models\Attendance;
 use App\Modules\Hr\Models\Employee;
 use App\Modules\Hr\Models\LeaveRequest;
@@ -677,7 +678,17 @@ class ViolationService
         // index (employee_id, type, work_date) is the same constraint updateOrCreate matched on,
         // and only severity/details are overwritten — so `resolved` survives a recompute exactly
         // as it did before, which is what keeps an HR resolution from being undone.
+        // See the note in TaxVersionService: upsert() is a query-builder call and
+        // BelongsToOrg's stamp does not reach it.
+        $orgId = CurrentOrg::id();
+
         foreach (array_chunk($computed, self::UPSERT_CHUNK) as $batch) {
+            $batch = array_map(static function (array $row) use ($orgId): array {
+                $row['org_id'] = $orgId;
+
+                return $row;
+            }, $batch);
+
             Violation::upsert($batch, ['employee_id', 'type', 'work_date'], ['severity', 'details']);
         }
 

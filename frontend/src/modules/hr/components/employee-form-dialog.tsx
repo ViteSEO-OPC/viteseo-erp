@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -21,7 +21,9 @@ import {
   dialogScrollbar,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+import { CredentialsCard } from "@/core/team/team-accounts-manager";
 import { useDepartments } from "@/modules/hr/hooks/use-departments";
+import { GrantAccessSection } from "@/modules/hr/components/grant-access-section";
 import { useCreateEmployee, useEmployees } from "@/modules/hr/hooks/use-employees";
 import { SiblingsFields } from "@/modules/hr/components/siblings-fields";
 import {
@@ -104,6 +106,9 @@ const schema = z
     hire_date: requiredDate("Hire date"),
     base_salary: requiredMoney("Base salary"),
     is_management: z.boolean(),
+    // Access in the other modules, given as the person is hired. The backend
+    // re-checks every value against GrantableRoles, so this stays a plain list.
+    grant_roles: z.array(z.string()),
     bank_name: optionalText(),
     bank_account: optionalText(100),
     bank_account_name: optionalText(),
@@ -147,7 +152,7 @@ const EMPTY: FormValues = {
   emergency_contact_relationship: "", emergency_contact_phone: "",
   department_id: "", manager_id: "", job_title: "",
   employment_status: "regular", work_location: "", employee_role: "",
-  hire_date: "", base_salary: "", is_management: false, bank_name: "",
+  hire_date: "", base_salary: "", is_management: false, grant_roles: [], bank_name: "",
   bank_account: "", height: "", weight: "", health_condition: "",
   pay_frequency: "semi_monthly", currency: "PHP", bank_account_type: "",
   bank_account_name: "",
@@ -165,6 +170,14 @@ export function EmployeeFormDialog({
   const { data: allEmployees } = useEmployees();
   const createMut = useCreateEmployee();
 
+  // The hand-over, set only by a create that came back with a password. It lives
+  // in component state and nowhere else: the server keeps only the hash, so once
+  // this is dropped the password is gone for good.
+  const [handover, setHandover] = useState<{
+    account: { name: string; email: string };
+    password: string;
+  } | null>(null);
+
   const {
     register,
     control,
@@ -177,7 +190,12 @@ export function EmployeeFormDialog({
   } = useForm<FormValues>({ resolver: zodResolver(schema), defaultValues: EMPTY });
 
   useEffect(() => {
-    if (open) reset(EMPTY);
+    if (open) {
+      reset(EMPTY);
+      // Cleared on the way IN rather than on the way out, so the card stays put
+      // while the dialog animates closed.
+      setHandover(null);
+    }
   }, [open, reset]);
 
   async function onSubmit(v: FormValues) {
@@ -198,6 +216,7 @@ export function EmployeeFormDialog({
       hire_date: v.hire_date,
       base_salary: Number(v.base_salary),
       is_management: v.is_management,
+      grant_roles: v.grant_roles.length ? v.grant_roles : undefined,
       phone: s(v.phone),
       address_house_no: s(v.address_house_no),
       address_street: s(v.address_street),
@@ -244,9 +263,14 @@ export function EmployeeFormDialog({
     };
 
     try {
-      await createMut.mutateAsync(input);
+      const { employee, temporary_password } = await createMut.mutateAsync(input);
       toast.success("Employee created — login provisioned");
-      onOpenChange(false);
+      // No password on the response — an older backend, or a proxy that dropped
+      // the key — means there is nothing to hand over, so close as before rather
+      // than show a card with a blank where the password should be. The account
+      // still exists; a password reset is the way in.
+      if (temporary_password) setHandover({ account: employee, password: temporary_password });
+      else onOpenChange(false);
     } catch (err) {
       if (err instanceof AxiosError && err.response?.status === 422) {
         const serverErrors = err.response.data?.errors ?? {};
@@ -266,6 +290,30 @@ export function EmployeeFormDialog({
   const positionOptions =
     (departments ?? []).find((d) => String(d.id) === selectedDeptId)?.positions ?? [];
 
+  // The hand-over takes the dialog over: the form has done its job, and the one
+  // thing left is the password nobody can read back. Returned as its own tree
+  // rather than wrapped around the form below — same <Dialog> in the same place,
+  // so React swaps the body without the dialog closing and reopening.
+  if (handover) {
+    return (
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="max-w-[calc(100%-3rem)] sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Employee created</DialogTitle>
+            <DialogDescription>
+              {handover.account.name} can sign in with these details.
+            </DialogDescription>
+          </DialogHeader>
+          <CredentialsCard
+            account={handover.account}
+            password={handover.password}
+            onDone={() => onOpenChange(false)}
+          />
+        </DialogContent>
+      </Dialog>
+    );
+  }
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       {/*
@@ -277,7 +325,8 @@ export function EmployeeFormDialog({
         <DialogHeader className="shrink-0">
           <DialogTitle>Add employee</DialogTitle>
           <DialogDescription>
-            Creates the employee, their login (password: password), and leave balances.
+            Creates the employee, their login and leave balances. The temporary
+            password is shown once, right after this, for you to hand over.
           </DialogDescription>
         </DialogHeader>
 
@@ -548,6 +597,18 @@ export function EmployeeFormDialog({
               </Field>
             </div>
 
+            <Controller
+              control={control}
+              name="grant_roles"
+              render={({ field }) => (
+                <GrantAccessSection
+                  value={field.value}
+                  onChange={field.onChange}
+                  employmentStatus={watch("employment_status")}
+                />
+              )}
+            />
+            
             {/* Compensation */}
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field label="Base salary (₱ / month)" error={errors.base_salary?.message}>

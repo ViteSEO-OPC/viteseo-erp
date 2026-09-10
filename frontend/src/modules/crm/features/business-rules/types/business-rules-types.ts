@@ -41,9 +41,6 @@ export type BusinessRuleVersion = {
   reasonForChange: string | null;
   createdBy: string | null;
   publishedBy: string | null;
-  /** Resolved identities — present only when the endpoint eager-loads them (Version History does). */
-  creator?: { id: string; name: string } | null;
-  publisher?: { id: string; name: string } | null;
   publishedAt: string | null;
   createdAt: string | null;
   rules: BusinessRule[];

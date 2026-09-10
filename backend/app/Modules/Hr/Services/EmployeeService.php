@@ -2,7 +2,10 @@
 
 namespace App\Modules\Hr\Services;
 
+use App\Models\Org;
 use App\Models\User;
+use App\Support\CurrentOrg;
+use App\Support\GrantableRoles;
 use App\Modules\Hr\Models\Attendance;
 use App\Modules\Hr\Models\ContributionSetting;
 use App\Modules\Hr\Models\Employee;
@@ -166,6 +169,12 @@ class EmployeeService
 
         if (array_key_exists('email', $data)) {
             $changes['email'] = $data['email'];
+        }
+
+        // Same seam as the name: the HR record is where a phone is maintained, and
+        // `users` is where the other three systems read it.
+        if (array_key_exists('phone', $data)) {
+            $changes['phone'] = $data['phone'];
         }
 
         $nameParts = array_flip(['first_name', 'middle_name', 'last_name', 'name_extension']);
@@ -408,11 +417,37 @@ class EmployeeService
             $user = User::create([
                 'name' => $this->displayName($data),
                 'email' => $data['email'],
-                // MVP: a known default so demo logins work; real onboarding would
-                // email a set-password link.
-                'password' => Hash::make($data['password'] ?? 'password'),
+                // CRM and Projects read users.phone; they have no employee row to
+                // read, because a client may not have availed HR at all.
+                'phone' => $data['phone'] ?? null,
+                // SECURITY: no guessable default. When no password is supplied the
+                // account gets an unusable random one — the employee sets their own
+                // via the forgot-password flow. (Demo logins come from seeders,
+                // which pass an explicit password.)
+                'password' => Hash::make($data['password'] ?? \Illuminate\Support\Str::random(40)),
             ]);
             $user->assignRole('hr_employee');
+
+            /*
+             * Whatever access they were hired with. Validated in StoreEmployeeRequest
+             * against GrantableRoles -- a closed list, the org's entitlements, and the
+             * tier cap on trainees -- so by the time it reaches here it is safe to
+             * assign. Additive by construction: assignRole() attaches, and nothing in
+             * this method removes a role from anyone.
+             */
+            foreach (array_intersect((array) ($data['grant_roles'] ?? []), GrantableRoles::all()) as $role) {
+                $user->assignRole($role);
+            }
+
+            // 1a) Membership is what makes them a person in this org, and without it
+            // the account is not merely empty -- it cannot sign in at all. The login
+            // audit row carries org_id NOT NULL, resolved from membership, so the
+            // first sign-in died on a constraint violation before this line existed.
+            // Employees added through People had no way in; only the Team screen,
+            // which attaches separately, produced a usable account.
+            if (($orgId = CurrentOrg::id()) !== null) {
+                Org::find($orgId)?->users()->attach($user->id, ['is_default' => true]);
+            }
 
             // 2) The HR record hangs off that user. employee_no derives from the
             // (unique) user id, so it's guaranteed unique too.
@@ -608,6 +643,13 @@ class EmployeeService
         }
 
         $employee->load('user');
+        /*
+         * `users.avatar` is a SHARED column, and this is a path on the SAME private
+         * disk the CRM writes to — so ProfilePhotoService::url() serves it unchanged.
+         * Its owns() claims only `crm/profile-photos/`, which is what makes sharing
+         * safe in the other direction: the CRM's cleanup can never unlink an HR file.
+         */
+        $this->mirrorAvatar($employee);
         $this->audit->log('updated', 'People', "Updated {$employee->user?->name}'s profile photo", $employee);
 
         return $employee->load(['user.roles', 'department', 'manager.user', 'employmentHistories']);
@@ -623,6 +665,8 @@ class EmployeeService
             Storage::disk('local')->delete($previous);
 
             $employee->load('user');
+            // Otherwise the avatar points at a file that is no longer there.
+            $this->mirrorAvatar($employee);
             $this->audit->log('removed', 'People', "Removed {$employee->user?->name}'s profile photo", $employee);
         }
 
@@ -672,6 +716,38 @@ class EmployeeService
     public const SEPARATION_TYPES = ['voluntary', 'involuntary'];
 
     /**
+     * Carry the employee's photo path onto the shared `users.avatar` column.
+     *
+     * Only ever writes an HR-owned path or null, so it cannot clobber a photo the
+     * CRM uploaded into `crm/profile-photos/` with something that module would then
+     * refuse to clean up.
+     */
+    private function mirrorAvatar(Employee $employee): void
+    {
+        $employee->user?->forceFill(['avatar' => $employee->photo_path])->save();
+    }
+
+    /**
+     * Refuse the account behind an employee. Idempotent.
+     *
+     * Writes one column on `users` and nothing else — deliberately not a role
+     * change, a token revocation or a membership delete, all of which would have to
+     * be remembered and undone. The membership row in particular STAYS, because
+     * OrgUserRule validates every person-picker against it: deleting it would unpick
+     * the person from the work they actually did.
+     */
+    private function closeAccount(Employee $employee): void
+    {
+        $employee->user?->forceFill(['status' => User::STATUS_INACTIVE])->save();
+    }
+
+    /** Open it again. The mirror of closeAccount(), and just as small. */
+    private function openAccount(Employee $employee): void
+    {
+        $employee->user?->forceFill(['status' => User::STATUS_ACTIVE])->save();
+    }
+
+    /**
      * End someone's employment.
      *
      * @param  array{separation_type:string, separation_date:string, reason?:string|null}  $data
@@ -705,6 +781,23 @@ class EmployeeService
             ]);
 
             $employee->load('user');
+
+            /*
+             * Close the account, or leave it for the sweep to close on the day.
+             *
+             * A termination ends access now — that is the point of it, and a notice
+             * period is not something an involuntary separation grants. A resignation
+             * is worked out: the person is still doing the job until their last day,
+             * so `hr:apply-separations` closes theirs when the date arrives.
+             *
+             * Nothing else is touched. No role is removed, no token revoked, no task
+             * reassigned — the account is refused, not dismantled, so reinstatement
+             * has nothing to put back. See EnsureAccountIsActive.
+             */
+            if ($data['separation_type'] === 'involuntary') {
+                $this->closeAccount($employee);
+            }
+
             $this->audit->log(
                 'updated',
                 'People',
@@ -739,6 +832,9 @@ class EmployeeService
             $this->reopenTimelineOnReinstatement($employee);
 
             $employee->load('user');
+            // Reinstatement's claim is that the ending never happened, so the account
+            // opens again on the token the person was already holding.
+            $this->openAccount($employee);
             $this->audit->log(
                 'reopened',
                 'People',
@@ -781,6 +877,7 @@ class EmployeeService
             $previousHire = $employee->hire_date?->toDateString();
 
             $employee->restore();
+            $this->openAccount($employee);
             $employee->update([
                 'separation_type' => null,
                 'separation_date' => null,

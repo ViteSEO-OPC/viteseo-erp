@@ -2,6 +2,7 @@
 
 namespace App\Modules\Crm\Models;
 
+use App\Models\Concerns\BelongsToOrg;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
@@ -15,6 +16,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 #[Fillable(['name', 'level', 'active'])]
 class ServiceArea extends Model
 {
+    use BelongsToOrg;
     protected $table = 'crm_service_areas';
 
     use SoftDeletes;

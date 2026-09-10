@@ -9,7 +9,7 @@ const AVATAR_COLORS = [
   "bg-warning text-white",
   "bg-danger text-white",
   "bg-success text-white",
-  "bg-dark-teal text-white",
+  "bg-teal-ink text-white",
 ];
 
 const SIZES = {

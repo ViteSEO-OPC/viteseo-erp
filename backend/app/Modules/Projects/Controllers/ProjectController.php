@@ -12,6 +12,7 @@ use App\Modules\Projects\Requests\StoreProjectRequest;
 use App\Modules\Projects\Requests\UpdateProjectRequest;
 use App\Modules\Projects\Resources\ProjectResource;
 use App\Modules\Projects\Services\ProjectService;
+use App\Support\OrgUserRule;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Http\Response;
@@ -83,7 +84,7 @@ class ProjectController extends Controller
         $this->authorize('manageMembers', $project);
 
         $validated = $request->validate([
-            'user_id' => ['required', 'integer', 'exists:users,id'],
+            'user_id' => ['required', 'integer', OrgUserRule::exists()],
         ]);
 
         $user = User::findOrFail($validated['user_id']);

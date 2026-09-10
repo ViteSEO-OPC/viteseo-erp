@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\Auth\LoginRequest;
+use App\Models\User;
 use App\Http\Resources\UserResource;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -28,9 +29,16 @@ class AuthController extends Controller
     {
         $credentials = $request->validated();
 
-        // Auth::attempt checks the email/password against the users table
-        // (password is hashed). Returns false on any mismatch.
-        if (! Auth::attempt($credentials)) {
+        /*
+         * validate() checks the email/password without logging anyone in.
+         *
+         * attempt() would do both in one call, and that is precisely the problem:
+         * it fires the Login event, which writes "signed in" to the audit trail —
+         * so a closed account refused on the next line would leave a permanent
+         * record saying it had signed in. Credentials first, account state second,
+         * and only then a login that is true.
+         */
+        if (! Auth::validate($credentials)) {
             // Same generic error whether the email or the password was wrong —
             // don't reveal which, and keep the { message, errors } envelope.
             throw ValidationException::withMessages([
@@ -38,7 +46,26 @@ class AuthController extends Controller
             ]);
         }
 
-        $user = $request->user();
+        /** @var User $user */
+        $user = User::where('email', $credentials['email'])->firstOrFail();
+
+        /*
+         * Credentials were right; the account is closed.
+         *
+         * Deliberately NOT folded into the generic refusal above. That message
+         * exists to hide WHICH half was wrong from someone guessing, and it earns
+         * that cost. Here there is nothing to hide: the person proved they own the
+         * account. Saying so is what stops a separated employee and the HR officer
+         * helping them from spending days on password resets for an account that
+         * will never open again.
+         */
+        if (! $user->isActive()) {
+            abort(403, 'This account is no longer active. Contact HR.');
+        }
+
+        // Now it is a real sign-in: this is what fires Login, stamps last_login_at
+        // and writes the audit row.
+        Auth::login($user);
 
         // A named token so it's identifiable; the plain text is shown once.
         $token = $user->createToken('web')->plainTextToken;
@@ -92,6 +119,26 @@ class AuthController extends Controller
             // Management staff are exempt from attendance (self-service clock hidden).
             'is_management' => (bool) $employee->is_management,
         ];
+    }
+
+    /**
+     * POST /api/v1/auth/change-password
+     *
+     * Verify the current password, set the new one, and revoke every OTHER
+     * token so a stolen session can't outlive the change.
+     */
+    public function changePassword(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'current_password' => ['required', 'current_password'],
+            'password' => ['required', 'confirmed', \Illuminate\Validation\Rules\Password::min(8)],
+        ]);
+
+        $user = $request->user();
+        $user->forceFill(['password' => \Illuminate\Support\Facades\Hash::make($data['password'])])->save();
+        $user->tokens()->where('id', '!=', $user->currentAccessToken()->id)->delete();
+
+        return response()->json(['data' => ['message' => 'Password updated.']]);
     }
 
     /**

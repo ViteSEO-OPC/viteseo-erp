@@ -3,6 +3,7 @@
 namespace App\Modules\Hr\Console\Commands;
 
 use App\Modules\Hr\Services\ViolationService;
+use App\Support\CurrentOrg;
 use Illuminate\Console\Command;
 use Illuminate\Support\Carbon;
 
@@ -26,7 +27,26 @@ class RecomputeViolations extends Command
 
     protected $description = 'Rebuild attendance violation flags (nightly; also the manual catch-up)';
 
+    /**
+     * TENANT FENCE: this is the NIGHTLY rebuild and the console has no authenticated
+     * user, so `CurrentOrg::id()` fell through to the FIRST org — every other tenant's
+     * closed day was never rebuilt, and an absence nobody clocked into simply never
+     * became an absence. One pinned pass per tenant.
+     */
     public function handle(ViolationService $violations): int
+    {
+        $status = self::SUCCESS;
+
+        CurrentOrg::eachOrg(function (int $orgId) use ($violations, &$status): void {
+            $this->line("Org #{$orgId}:");
+            $status = max($status, $this->recomputeCurrentOrg($violations));
+        });
+
+        return $status;
+    }
+
+    /** The rebuild for whichever tenant is pinned. */
+    private function recomputeCurrentOrg(ViolationService $violations): int
     {
         if ($this->option('all')) {
             $violations->recomputeHistory();

@@ -2,6 +2,8 @@
 
 namespace App\Modules\Hr\Services;
 
+use App\Support\CurrentOrg;
+use App\Models\Org;
 use App\Modules\Hr\Models\CompanyProfile;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
@@ -14,17 +16,25 @@ use Illuminate\Support\Facades\Storage;
 class CompanyProfileService
 {
     /**
-     * The opening values, matching what those documents printed before this table existed.
+     * The opening values for an org that has not filled its own in yet.
+     *
+     * These used to be the PROVIDER's legal name and Makati address -- correct when this
+     * was one company's HRIS, and a tenancy leak the moment it was not. get() creates the
+     * row for whichever org is current, so onboarding a client handed them a company
+     * profile carrying the vendor's legal entity. A payslip is a legal document. Measured
+     * on a demo client org: its legal_name read VITE SEO DIGITAL ADVERTISING OPC.
+     *
+     * The org's own name is the only honest opening value; the rest is theirs to enter,
+     * and blank beats somebody else's address.
      * Also the safety net: a database whose row was somehow deleted still renders a payslip
      * with the right letterhead rather than a blank one.
      *
      * @var array<string, mixed>
      */
     public const DEFAULTS = [
-        'legal_name' => 'VITE SEO DIGITAL ADVERTISING OPC',
-        'trade_name' => 'Viteseo',
-        'address' => '26L Burgundy Corporate Tower, 252 Sen. Gil Puyat Avenue, '
-            .'Pio Del Pilar 1230 City of Makati NCR, Fourth District Philippines',
+        'legal_name' => null,
+        'trade_name' => null,
+        'address' => null,
         'tin' => null,
         'sss_employer_number' => null,
         'philhealth_employer_number' => null,
@@ -47,7 +57,20 @@ class CompanyProfileService
 
     public function get(): CompanyProfile
     {
-        return $this->memo ??= CompanyProfile::firstOrCreate([], self::DEFAULTS);
+        if ($this->memo !== null) {
+            return $this->memo;
+        }
+
+        $profile = CompanyProfile::query()->first();
+        if ($profile !== null) {
+            return $this->memo = $profile;
+        }
+
+        // A letterhead with no name helps nobody, so seed the one fact the platform
+        // already knows about this tenant -- the org's own name.
+        $orgName = Org::query()->whereKey(CurrentOrg::id())->value('name');
+
+        return $this->memo = CompanyProfile::create([...self::DEFAULTS, 'legal_name' => $orgName]);
     }
 
     /**

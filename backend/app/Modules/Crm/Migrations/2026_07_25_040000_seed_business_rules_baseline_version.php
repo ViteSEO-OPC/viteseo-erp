@@ -1,5 +1,6 @@
 <?php
 
+use App\Modules\Crm\Support\CrmRuleDefaults;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Support\Facades\DB;
 
@@ -61,74 +62,11 @@ return new class extends Migration
 
     public function up(): void
     {
-        DB::transaction(function (): void {
-            // (1) Idempotency guard (first): if the baseline already exists, do nothing (§2.2/§2.3).
-            $exists = DB::table('crm_business_rule_versions')
-                ->where('module', 'lead_scoring')
-                ->where('version_number', 1)
-                ->exists();
-
-            if ($exists) {
-                return;
-            }
-
-            $points = config('scoring.points');
-            $now = now();
-
-            // (3) Insert ACTIVE Version 1 (System-attributed baseline).
-            $versionId = DB::table('crm_business_rule_versions')->insertGetId([
-                'module' => 'lead_scoring',
-                'version_number' => 1,
-                'state' => 'active',
-                'computation_spec_version' => self::SPEC_VERSION,
-                'reason_for_change' => 'System baseline seeded from the frozen Business Computation Specification v1.0.',
-                'created_by' => null,
-                'published_by' => null,
-                'published_at' => $now,
-                'created_at' => $now,
-                'updated_at' => $now,
-            ]);
-
-            // (4) Insert the rule rows — point_value read from config('scoring') so it equals the file.
-            $order = 0;
-            $rows = [];
-            foreach ($this->ruleset() as [$ruleKey, $category, $description, $isEnabled]) {
-                // Fail-safe: a missing frozen point value must abort the whole seed (transaction rolls
-                // back) rather than seed an invalid baseline (§2.5).
-                if (! array_key_exists($ruleKey, $points)) {
-                    throw new RuntimeException(
-                        "Baseline seed aborted: scoring point value for '{$ruleKey}' is missing from config('scoring')."
-                    );
-                }
-
-                $rows[] = [
-                    'version_id' => $versionId,
-                    'rule_key' => $ruleKey,
-                    'description' => $description,
-                    'category' => $category,
-                    'point_value' => (int) $points[$ruleKey],
-                    'is_enabled' => $isEnabled,
-                    'display_order' => ++$order,
-                    'created_at' => $now,
-                    'updated_at' => $now,
-                ];
-            }
-            DB::table('crm_business_rules')->insert($rows);
-
-            // (5) Insert the seed audit row (System-attributed; append-only).
-            DB::table('crm_business_rule_audit')->insert([
-                'module' => 'lead_scoring',
-                'action' => 'seed',
-                'rule_key' => null,
-                'previous_value' => null,
-                'new_value' => 'Version 1 baseline (13 rules) seeded from the frozen Business Computation Specification v1.0.',
-                'version_number' => 1,
-                'computation_spec_version' => self::SPEC_VERSION,
-                'reason_for_change' => 'Initial system baseline.',
-                'user_id' => null,
-                'created_at' => $now,
-            ]);
-        });
+        // Delegated on 2026-09-04. The ruleset metadata now has ONE home --
+        // CrmRuleDefaults -- because the same baseline must also be installed for
+        // every org onboarded after this migration ran, and two copies of a list
+        // like this drift the first time somebody edits one of them.
+        CrmRuleDefaults::installScoringFor(null);
     }
 
     /**

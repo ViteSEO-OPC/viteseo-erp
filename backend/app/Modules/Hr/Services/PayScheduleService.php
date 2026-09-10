@@ -73,7 +73,30 @@ class PayScheduleService
     {
         switch ($frequency) {
             case 'monthly':
-                return [$ref->copy()->startOfMonth(), $ref->copy()->endOfMonth()];
+                // No anchor date set → the plain calendar month, exactly as before.
+                if ($anchor === null) {
+                    return [$ref->copy()->startOfMonth(), $ref->copy()->endOfMonth()];
+                }
+
+                // Anchored: the cycle runs from the anchor's day-of-month up to the day before
+                // that same day in the next month — an anchor on the 16th gives 16th … 15th.
+                // A 29th-31st anchor falls back to the last day of a shorter month, so February
+                // still yields a period rather than overflowing into March.
+                $day = (int) $anchor->day;
+                $on = static fn (Carbon $m): Carbon => $m->copy()->startOfDay()->day(min($day, $m->daysInMonth));
+
+                $refDay = $ref->copy()->startOfDay();
+                $start = $on($refDay);
+                if ($refDay->lt($start)) {
+                    // Before this month's anchor day, so we are still inside the period that
+                    // opened last month.
+                    $start = $on($refDay->copy()->startOfMonth()->subMonthNoOverflow());
+                }
+
+                // Walk from the START's own month so a short-month clamp cannot drift the cycle.
+                $end = $on($start->copy()->startOfMonth()->addMonthNoOverflow())->subDay();
+
+                return [$start, $end];
 
             case 'weekly':
             case 'bi_weekly':

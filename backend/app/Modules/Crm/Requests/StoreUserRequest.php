@@ -43,9 +43,12 @@ class StoreUserRequest extends FormRequest
         if (! $this->lookupDone) {
             $email = trim((string) $this->input('email'));
 
+            // Same fence as UserController::lookup -- the picker and the write must
+            // agree, or an admin is told "no such colleague" and can still grant to
+            // one by posting the address directly.
             $this->existingUser = $email === ''
                 ? null
-                : User::query()->where('email', $email)->first();
+                : User::query()->inCurrentOrg()->where('email', $email)->first();
 
             $this->lookupDone = true;
         }

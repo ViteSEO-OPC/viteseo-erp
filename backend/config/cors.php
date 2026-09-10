@@ -22,7 +22,9 @@ return [
 
     'allowed_methods' => ['*'],
 
-    'allowed_origins' => ['*'],
+    // Comma-separated list in production (e.g. "https://erp.kiplo.com").
+    // Defaults open for local dev where the frontend port moves around.
+    'allowed_origins' => array_map('trim', explode(',', (string) env('CORS_ALLOWED_ORIGINS', '*'))),
 
     'allowed_origins_patterns' => [],
 

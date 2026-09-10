@@ -9,6 +9,7 @@ use App\Modules\Projects\Enums\TaskPriority;
 use App\Modules\Projects\Models\ProjectStatus;
 use App\Modules\Projects\Models\Task;
 use App\Modules\Projects\Support\PublicId;
+use App\Support\OrgUserRule;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -62,7 +63,7 @@ class StoreSubtaskRequest extends FormRequest
             'name' => ['required', 'string', 'max:255'],
             'description' => ['nullable', 'string'],
             // Subtasks may be created unassigned (default).
-            'assignee_id' => ['nullable', 'integer', 'exists:users,id'],
+            'assignee_id' => ['nullable', 'integer', OrgUserRule::exists()],
             'status_id' => ['required', 'integer', 'exists:pm_project_statuses,id'],
             'priority' => ['required', Rule::in(array_column(TaskPriority::cases(), 'value'))],
             // Effort runs on a fixed 0–10 scale (matches the UI slider/input).

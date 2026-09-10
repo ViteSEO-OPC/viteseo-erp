@@ -7,8 +7,11 @@ use App\Modules\Hr\Models\AttendancePolicy;
 use App\Modules\Hr\Services\AttendancePolicyService;
 use Database\Seeders\RolesAndPermissionsSeeder;
 use Illuminate\Contracts\Console\Kernel;
+use Illuminate\Foundation\Testing\RefreshDatabaseState;
 use Illuminate\Testing\TestResponse;
 use Laravel\Sanctum\Sanctum;
+use PDO;
+use PDOException;
 use RuntimeException;
 use Spatie\Permission\Models\Role;
 use Tests\TestCase;
@@ -22,12 +25,64 @@ abstract class HrTestCase extends TestCase
     /** The connection these tests run on — registered in createApplication(). */
     protected const CONNECTION = 'hr_testing';
 
+    /**
+     * RefreshDatabase's "already migrated" flag, kept per connection.
+     *
+     * The trait guards its one migration per process behind a single global flag,
+     * RefreshDatabaseState::$migrated, which records only THAT something was migrated —
+     * never WHICH connection. This suite runs on two: sqlite ':memory:' for the rest of
+     * the platform and this MySQL database for HR. One flag cannot speak for both, and
+     * every symptom below is that flag answering for the wrong one:
+     *
+     *  - tests/Feature/Crm sorts before tests/Feature/Hr, so the flag is already true when
+     *    the first HR test starts. RefreshDatabase skips migrating, and the HR tests run
+     *    against whatever schema this database was left in by some previous run — which is
+     *    how it goes stale, and why a column added today ('org_id') is simply absent.
+     *    Running one HR file alone hides the bug completely: the flag is then still false.
+     *
+     *  - the reverse, once the first problem is fixed: a sqlite test that breaks its
+     *    transaction resets the flag to false, and the next HR test answers by dropping and
+     *    re-migrating the MySQL database mid-run. That re-migration races the connection
+     *    still open on it and dies (1213 deadlock / 1412 table definition has changed),
+     *    leaving the schema half-wiped and every later HR test erroring on a missing table.
+     *    That cost 1,115 of the 1,130 failures in the run before this fix.
+     *
+     * So each connection carries its own flag, and HR's is swapped in for the duration of
+     * an HR test. Not overridden in refreshTestDatabase(), because each test class pulls in
+     * the RefreshDatabase trait itself and a trait method in the subclass beats an inherited
+     * one — an override on this base class would never be called.
+     */
+    private static bool $hrMigrated = false;
+
+    /** The flag as the non-HR (sqlite) tests left it, restored in tearDown(). */
+    private static bool $otherMigrated = false;
+
     public function createApplication()
     {
         $app = require __DIR__ . '/../../../bootstrap/app.php';
         $app->make(Kernel::class)->bootstrap();
 
-        $database = env('HR_TEST_DB_DATABASE', 'viteseo_platform_test');
+        /*
+         * ONE DATABASE PER RUN, not one per machine.
+         *
+         * This used to be a single shared name, and RefreshDatabase is allowed to
+         * WIPE it. Two concurrent runs on the same box therefore destroyed each
+         * other: one run's `migrate:fresh` dropped the schema under the other
+         * mid-suite, which surfaces as hundreds of phantom failures in tables that
+         * were fine a second earlier. That happened twice while this work was going
+         * on, and cost more time diagnosing than the fix takes.
+         *
+         * TEST_TOKEN is what `--parallel` sets, so parallel workers get one database
+         * each for free. Falling back to the PID gives concurrent *separate* runs the
+         * same isolation. An explicit HR_TEST_DB_DATABASE still wins, for CI or for
+         * pinning a database you want to inspect after a failure.
+         */
+        $database = env('HR_TEST_DB_DATABASE');
+
+        if ($database === null) {
+            $token = env('TEST_TOKEN') ?? getmypid();
+            $database = "viteseo_platform_{$token}_test";
+        }
 
         // Never let a test run drop the real database. RefreshDatabase is destructive and
         // the dev DB is shared with another clone — this guard is not optional.
@@ -54,7 +109,76 @@ abstract class HrTestCase extends TestCase
             'database.default' => self::CONNECTION,
         ]);
 
+        $this->ensureTestDatabaseExists($database);
+
+        // Hand RefreshDatabase this connection's own migration state. @see $hrMigrated
+        self::$otherMigrated = RefreshDatabaseState::$migrated;
+        RefreshDatabaseState::$migrated = self::$hrMigrated;
+
         return $app;
+    }
+
+    protected function tearDown(): void
+    {
+        parent::tearDown();
+
+        // Keep whatever the trait decided about THIS connection (it clears the flag when a
+        // test leaves the database dirty, so the next HR test re-migrates), and give the
+        // sqlite tests their own state back.
+        self::$hrMigrated = RefreshDatabaseState::$migrated;
+        RefreshDatabaseState::$migrated = self::$otherMigrated;
+    }
+
+    /**
+     * Create the test schema if it is missing, so a clean checkout can run these tests.
+     *
+     * Without it the first HR test dies on "Unknown database 'viteseo_platform_test'" and
+     * the only fix is a mysql command nobody has written down. Creating it is safe for the
+     * same reason RefreshDatabase is allowed to wipe it: the name must end in '_test'.
+     */
+    private function ensureTestDatabaseExists(string $database): void
+    {
+        if (self::$hrMigrated || ! preg_match('/^[A-Za-z0-9_]+$/', $database)) {
+            return;
+        }
+
+        $config = config('database.connections.' . self::CONNECTION);
+
+        try {
+            $pdo = new PDO(
+                "mysql:host={$config['host']};port={$config['port']}",
+                $config['username'],
+                $config['password'],
+            );
+
+            $pdo->exec("CREATE DATABASE IF NOT EXISTS `{$database}`");
+
+            /*
+             * Sweep the databases of runs that are no longer running.
+             *
+             * One database per run is what stops two suites wiping each other, but a
+             * name keyed on a PID accumulates one husk per run forever. Dropping them
+             * on the way OUT is not reliable -- a killed or crashed run never gets
+             * there, which is exactly the run that leaves a mess. So each run tidies
+             * up after the dead on the way in, and only for a pid that is provably
+             * gone; a live sibling suite is left strictly alone.
+             */
+            foreach ($pdo->query("SHOW DATABASES LIKE 'viteseo\_platform\_%\_test'")->fetchAll(\PDO::FETCH_COLUMN) as $stale) {
+                if ($stale === $database || ! preg_match('/^viteseo_platform_(\d+)_test$/', (string) $stale, $m)) {
+                    continue;
+                }
+
+                // posix_kill with signal 0 asks "does this process exist" without touching it.
+                if (function_exists('posix_kill') && posix_kill((int) $m[1], 0)) {
+                    continue;
+                }
+
+                $pdo->exec("DROP DATABASE IF EXISTS `{$stale}`");
+            }
+        } catch (PDOException) {
+            // Not reachable, or not permitted to create it — let the connection itself
+            // report the real problem rather than masking it with a second one.
+        }
     }
 
     /**

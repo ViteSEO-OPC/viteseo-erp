@@ -153,7 +153,6 @@ export function NearbyClientsPage() {
           onPlanVisit={setPlanClient}
           onDirections={onDirections}
           onQualify={onQualify}
-          qualifyingId={qualify.isPending ? (qualify.variables ?? null) : null}
         />
       </div>
 

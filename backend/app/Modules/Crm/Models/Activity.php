@@ -2,6 +2,7 @@
 
 namespace App\Modules\Crm\Models;
 
+use App\Models\Concerns\BelongsToOrg;
 use App\Models\User;
 
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -17,6 +18,7 @@ use Illuminate\Database\Eloquent\Relations\MorphTo;
 #[Fillable(['event', 'description', 'properties', 'causer_id'])]
 class Activity extends Model
 {
+    use BelongsToOrg;
     protected $table = 'crm_activities';
 
     public const UPDATED_AT = null;

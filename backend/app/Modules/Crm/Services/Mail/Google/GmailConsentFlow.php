@@ -5,6 +5,7 @@ namespace App\Modules\Crm\Services\Mail\Google;
 use App\Models\User;
 use App\Modules\Crm\Exceptions\GmailConsentFailedException;
 use App\Modules\Crm\Services\Mail\MailboxOauthTokenStore;
+use App\Support\CurrentOrg;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
@@ -100,7 +101,14 @@ class GmailConsentFlow
 
         Cache::put(
             self::STATE_PREFIX.hash('sha256', $state),
-            ['user_id' => $user->getKey(), 'mailbox' => $mailbox],
+            // The ORG is carried in the state for the same reason the mailbox is: the
+            // callback is unauthenticated, so the tenant cannot be resolved there. THIS
+            // request is authenticated and knows it. Without it, `complete()` writes the
+            // grant with no user in context, `CurrentOrg::id()` falls through to the first
+            // org, and BelongsToOrg stamps a tenant's Gmail credential onto the provider --
+            // which then cannot be read back by the org that connected it (the global scope
+            // hides it), so the connection silently appears never to have happened.
+            ['user_id' => $user->getKey(), 'org_id' => CurrentOrg::id(), 'mailbox' => $mailbox],
             self::STATE_TTL_SECONDS,
         );
 
@@ -184,12 +192,24 @@ class GmailConsentFlow
 
         // The ONLY write path for grants outside the refresh flow. Encryption, the unique-per-email
         // row and refresh-token preservation are all the store's business, not this class's.
-        $this->tokens->put(
-            $granted,
-            $accessToken,
-            $refreshToken,
-            $this->tokens->expiryFromLifetime(is_numeric($grant['expires_in'] ?? null) ? (int) $grant['expires_in'] : null),
-        );
+        //
+        // Pinned to the org the CONSENT was started from (carried in the state above), because
+        // nothing else here can name it: Google's redirect carries no session.
+        $orgId = isset($context['org_id']) ? (int) $context['org_id'] : null;
+
+        $store = function () use ($granted, $accessToken, $refreshToken, $grant): void {
+            $this->tokens->put(
+                $granted,
+                $accessToken,
+                $refreshToken,
+                $this->tokens->expiryFromLifetime(is_numeric($grant['expires_in'] ?? null) ? (int) $grant['expires_in'] : null),
+            );
+        };
+
+        // A state issued before this org was carried (a link in flight across the deploy) has
+        // no org to pin to. Fall through to the default resolution rather than pinning NULL,
+        // which would stamp a null org_id and 500 on a flow that used to work.
+        $orgId === null ? $store() : CurrentOrg::runAs($orgId, $store);
 
         Log::info('crm.gmail.mailbox_connected', ['mailbox' => $granted, 'user_id' => $context['user_id'] ?? null]);
 
@@ -209,7 +229,7 @@ class GmailConsentFlow
             throw GmailConsentFailedException::invalidState();
         }
 
-        /** @var array{user_id?: mixed, mailbox?: string}|null $context */
+        /** @var array{user_id?: mixed, org_id?: mixed, mailbox?: string}|null $context */
         $context = Cache::pull(self::STATE_PREFIX.hash('sha256', $state));
 
         if (! is_array($context)) {

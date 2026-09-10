@@ -55,7 +55,13 @@ class NerbyProviderSettingTest extends TestCase
         return $user;
     }
 
-    private function actingAsAdmin(string $role = 'crm_admin'): User
+    /**
+     * These settings hold VITE SEO's own API credentials, in the one CRM table
+     * with no org_id, so the whole screen is the platform super admin's. The
+     * default used to be crm_admin, which is what the route allowed and what
+     * let a client's admin replace the key every other client depends on.
+     */
+    private function actingAsAdmin(string $role = 'super_admin'): User
     {
         $admin = $this->user($role);
         Sanctum::actingAs($admin);
@@ -529,12 +535,16 @@ class NerbyProviderSettingTest extends TestCase
         $this->assertSame(0, NerbyProviderSetting::query()->count());
     }
 
-    public function test_both_admin_and_super_admin_are_allowed(): void
+    public function test_only_the_platform_super_admin_is_allowed(): void
     {
-        foreach (['crm_admin', 'super_admin'] as $role) {
-            Sanctum::actingAs($this->user($role));
-            $this->getJson(self::BASE)->assertOk();
-        }
+        Sanctum::actingAs($this->user('super_admin'));
+        $this->getJson(self::BASE)->assertOk();
+
+        // A client's own CRM admin is refused. The Gmail settings beside this one
+        // stay open to them, because a mailbox belongs to the org that connects it
+        // -- these keys do not.
+        Sanctum::actingAs($this->user('crm_admin'));
+        $this->getJson(self::BASE)->assertForbidden();
     }
 
     public function test_the_acting_admin_is_recorded_on_the_configuration(): void

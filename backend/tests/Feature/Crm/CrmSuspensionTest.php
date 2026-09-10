@@ -6,6 +6,7 @@ use App\Models\User;
 use App\Modules\Crm\Models\Lead;
 use App\Modules\Crm\Models\PlannerEvent;
 use App\Modules\Crm\Services\CrmAccessService;
+use App\Support\CurrentOrg;
 use Database\Seeders\RolesAndPermissionsSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -143,6 +144,9 @@ class CrmSuspensionTest extends TestCase
     {
         $bd = $this->multiModuleBd();
         DB::table('crm_performance_targets')->insert([
+            // A query-builder insert fires no model events, so BelongsToOrg never
+            // stamps the tenant — a raw insert has to carry org_id itself.
+            'org_id' => CurrentOrg::id(),
             'user_id' => $bd->id,
             'period_type' => 'monthly',
             'period_start' => '2026-08-01',

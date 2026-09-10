@@ -4,6 +4,7 @@ namespace App\Modules\Crm\Console\Commands;
 
 use App\Modules\Crm\Models\Lead;
 use App\Modules\Crm\Services\Scoring\LeadScorer;
+use App\Support\CurrentOrg;
 use Illuminate\Console\Command;
 use Illuminate\Support\Carbon;
 
@@ -28,12 +29,30 @@ class RecomputeLeadScoresCommand extends Command
 
     protected $description = 'Recompute the Personal Lead Score for all leads (backfill / registry change / staleness)';
 
+    /**
+     * One pinned pass per tenant. The console has no authenticated user, so
+     * `CurrentOrg::id()` fell through to the FIRST org: only that tenant's scores were
+     * ever recomputed, and — because ScoringConfig is itself org-scoped — a publish in
+     * any other tenant reported "recomputed" having changed nothing at all.
+     */
     public function handle(LeadScorer $scorer): int
     {
         $now = Carbon::now();
         $updated = 0;
         $processed = 0;
 
+        CurrentOrg::eachOrg(function () use ($scorer, $now, &$updated, &$processed): void {
+            $this->recomputeCurrentOrg($scorer, $now, $updated, $processed);
+        });
+
+        $this->info("Recomputed {$processed} lead score(s); {$updated} changed.");
+
+        return self::SUCCESS;
+    }
+
+    /** The recompute for whichever tenant is pinned. */
+    private function recomputeCurrentOrg(LeadScorer $scorer, Carbon $now, int &$updated, int &$processed): void
+    {
         Lead::query()
             ->orderBy('id')
             ->chunkById((int) $this->option('chunk'), function ($leads) use ($scorer, $now, &$updated, &$processed): void {
@@ -46,9 +65,5 @@ class RecomputeLeadScoresCommand extends Command
                     }
                 }
             });
-
-        $this->info("Recomputed {$processed} lead score(s); {$updated} changed.");
-
-        return self::SUCCESS;
     }
 }

@@ -2,6 +2,7 @@
 
 namespace App\Modules\Hr\Models;
 
+use App\Models\Concerns\BelongsToOrg;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -10,6 +11,7 @@ use Illuminate\Database\Eloquent\Relations\MorphTo;
 /** An outstanding payroll difference caused by a decision made after the period was paid. */
 class RetroFlag extends Model
 {
+    use BelongsToOrg;
     protected $table = 'hr_retro_flags';
 
     /** The employee was underpaid — settle it with an adjustment run. */

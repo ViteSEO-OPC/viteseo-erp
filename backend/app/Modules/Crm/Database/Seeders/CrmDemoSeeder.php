@@ -55,6 +55,14 @@ class CrmDemoSeeder extends Seeder
 
     public function run(): void
     {
+        // Demo data (incl. `password`-password logins) must never reach a real
+        // environment — same guard idea as the HR demo seeders.
+        if (! app()->environment(['local', 'testing'])) {
+            $this->command?->warn('  CrmDemoSeeder refused: demo data only seeds in local/testing.');
+
+            return;
+        }
+
         // Same output on every run — no drifting demo data between machines.
         fake()->seed(20260717);
         $this->now = Carbon::create(2026, 7, 17, 9, 0, 0);

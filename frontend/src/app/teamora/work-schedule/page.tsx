@@ -510,7 +510,7 @@ export default function TimeOffPage() {
   return (
     <div className="p-4 sm:p-8">
       <PageHeader
-        title="Work Schedule"
+        title="Leave & Requests"
         subtitle="Request leave, half-days, early-outs and overtime — and track your balance."
       />
 

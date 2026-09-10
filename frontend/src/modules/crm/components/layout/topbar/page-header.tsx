@@ -8,19 +8,21 @@ import { SearchInput } from "@/modules/crm/components/shared/search-input/search
 import { ThemeToggle } from "@/modules/crm/components/layout/topbar/theme-toggle";
 import { NotificationBell } from "@/modules/crm/features/notifications/components/notification-bell";
 import { UserMenu } from "@/modules/crm/components/layout/user-menu/user-menu";
+import { AppSwitcher } from "@/core/components/app-switcher";
 import { useHeaderSearch } from "@/modules/crm/providers/header-search-provider";
 import { useLeadSearch } from "@/modules/crm/features/leads/hooks/use-lead-search";
 
 type PageHeaderProps = {
-  title: string;
   onMenuClick?: () => void;
+  /** Drawer state, so the hamburger can report it to assistive tech. */
+  menuOpen?: boolean;
   className?: string;
 };
 
 /** Where a search with no page-specific handler goes — the CRM's existing results surface. */
 const LEADS_ROUTE = "/zerem/leads";
 
-export function PageHeader({ title, onMenuClick, className }: PageHeaderProps) {
+export function PageHeader({ onMenuClick, menuOpen = false, className }: PageHeaderProps) {
   const { value, setValue, registered, onSubmit } = useHeaderSearch();
   const router = useRouter();
   const pathname = usePathname();
@@ -92,23 +94,18 @@ export function PageHeader({ title, onMenuClick, className }: PageHeaderProps) {
           <button
             type="button"
             onClick={onMenuClick}
-            className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:hidden"
-            aria-label="Open navigation menu"
+            className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring lg:hidden"
+            aria-label="Open navigation"
+            aria-haspopup="dialog"
+            aria-expanded={menuOpen}
           >
             <Menu className="h-5 w-5" />
           </button>
-          {/* Responsive page title on the design-system typography scale (no custom sizes): compact on
-              mobile, slightly reduced on the tablet icon-rail breakpoint, and UNCHANGED on desktop (lg =
-              full-sidebar layout) so the approved desktop header stays pixel-identical. */}
-          <h1 className="font-primary text-subheading md:text-card-title lg:text-page-title font-bold text-card-foreground">
-            {title}
-          </h1>
-        </div>
-
-        <div className="flex items-center gap-2">
-          {/* Always controlled and always submittable. It used to be keyed on `registered` and fed
-              undefined handlers when no page had registered — precisely why search worked on two
-              routes and silently swallowed typing on the rest. */}
+          {/* Search sits on the LEFT, beside the hamburger — the position it holds in
+              core/components/top-bar.tsx, whose row reads
+              `[hamburger] [brand] [search] ··· [bell] [theme] [switcher] [user]`.
+              It was on the right because the page title occupied this slot; the title now sits
+              at the top of the page like every other portal, which frees it. */}
           <SearchInput
             className="hidden sm:block w-[240px]"
             value={value}
@@ -127,8 +124,14 @@ export function PageHeader({ title, onMenuClick, className }: PageHeaderProps) {
           >
             <Search className="h-4 w-4" />
           </button>
+        </div>
+
+        <div className="flex items-center gap-2">
+          {/* One order across every portal (see core/components/top-bar.tsx):
+              notifications → theme → app switcher → account. */}
           <NotificationBell />
           <ThemeToggle />
+          <AppSwitcher current="crm" />
           <UserMenu />
         </div>
       </div>

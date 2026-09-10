@@ -11,6 +11,7 @@ use App\Modules\Projects\Models\Link;
 use App\Modules\Projects\Models\Project;
 use App\Modules\Projects\Models\Subtask;
 use App\Modules\Projects\Models\Task;
+use App\Support\CurrentOrg;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
@@ -36,6 +37,30 @@ class User extends Authenticatable
 {
     /** @use HasFactory<UserFactory> */
     use HasApiTokens, HasRoles, HasFactory, Notifiable, SoftDeletes;
+
+    /**
+     * Platform-level account state — whether this person may sign in at all.
+     *
+     * NOT the CRM's notion of status. `Crm\Resources\UserResource` exposes a field
+     * of the same name computed from `CrmAccessService::isSuspended()`, which is
+     * CRM-scoped and lives in `crm_user_access`. This column is the whole account:
+     * inactive here and no module is reachable, because the account cannot
+     * authenticate. Keep the two apart when reading a payload.
+     *
+     * The column arrived with the CRM's additive users migration for exactly this
+     * purpose ("reversible user deactivate") and was never wired to anything; CRM
+     * solved its own case with a scoped table instead. Offboarding is the platform
+     * case it was made for.
+     */
+    public const STATUS_ACTIVE = 'active';
+
+    public const STATUS_INACTIVE = 'inactive';
+
+    /** May this account sign in and hold a session? */
+    public function isActive(): bool
+    {
+        return $this->status !== self::STATUS_INACTIVE;
+    }
 
     /**
      * Get the attributes that should be cast.
@@ -65,8 +90,13 @@ class User extends Authenticatable
             return ['crm_admin', 'crm_bd'];
         }
 
+        // An org's own admin may appoint a co-admin inside that org. Vite SEO
+        // creates a client's FIRST admin; who else runs the place after that is
+        // the client's business, not a support ticket. The org scope and the
+        // one-org-per-user rule keep this inside their own tenant, and
+        // super_admin stays absent from every list below.
         if ($this->hasRole('crm_admin')) {
-            return ['crm_bd'];
+            return ['crm_admin', 'crm_bd'];
         }
 
         return [];
@@ -79,6 +109,45 @@ class User extends Authenticatable
     public function employee(): HasOne
     {
         return $this->hasOne(Employee::class);
+    }
+
+    // --- Tenancy (multi-org membership) ------------------------------------
+
+    /**
+     * Orgs (tenants) this user belongs to. `is_default` marks the org resolved
+     * on login until the user switches (org switcher, later slice).
+     */
+    public function orgs(): BelongsToMany
+    {
+        return $this->belongsToMany(Org::class, 'org_user')
+            ->withPivot('is_default')
+            ->withTimestamps();
+    }
+
+    /**
+     * Restrict a user query to members of the CURRENT org.
+     *
+     * `users` is platform-wide on purpose (one account, many tenants), so it carries
+     * no `org_id` and the BelongsToOrg global scope cannot fence it. Every directory,
+     * picker and role listing that reads this table must apply this scope, or it
+     * enumerates every other tenant's staff — names and email addresses included.
+     *
+     * @param  \Illuminate\Database\Eloquent\Builder<User>  $query
+     */
+    public function scopeInCurrentOrg(\Illuminate\Database\Eloquent\Builder $query): void
+    {
+        $query->whereIn('users.id', function ($sub): void {
+            $sub->select('user_id')->from('org_user')->where('org_id', CurrentOrg::id());
+        });
+    }
+
+    /** The org id resolved for this user — default org first, else any. */
+    public function currentOrgId(): ?int
+    {
+        return $this->orgs()
+            ->orderByDesc('org_user.is_default')
+            ->orderBy('orgs.id')
+            ->value('orgs.id');
     }
 
     // --- Projects (PMS) module relationships -------------------------------

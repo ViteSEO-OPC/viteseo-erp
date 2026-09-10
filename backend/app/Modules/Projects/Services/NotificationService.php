@@ -243,7 +243,10 @@ class NotificationService
             ->map(fn ($id): int => (int) $id);
 
         if ($recipientIds->isEmpty()) {
+            // Fallback recipients: without the org fence this notified every tenant's
+            // managers about one tenant's task.
             $recipientIds = User::query()
+                ->inCurrentOrg()
                 ->role(UserRole::managerRoles())
                 ->pluck('id')
                 ->map(fn ($id): int => (int) $id);

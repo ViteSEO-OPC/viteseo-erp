@@ -246,7 +246,7 @@ export default function TimeLeavePage() {
   return (
     <div className="p-4 sm:p-8">
       <PageHeader
-        title="Work Schedule"
+        title="Leave & Requests"
         subtitle="Review and decide on leave, half-day, early-out, overtime and work requests."
       />
 
@@ -265,8 +265,12 @@ export default function TimeLeavePage() {
       </div>
 
       <div className="mt-6">
+        {/* The four sections below each carry a heading; the biggest table on the
+            page carried none, so the only thing an HR officer comes here for was
+            the one thing the page never named. */}
+        <h2 className="text-h3 font-bold text-foreground">Leave Requests</h2>
         {isLoading ? (
-          <p className="text-sm text-muted-foreground">Loading requests…</p>
+          <p className="mt-4 text-sm text-muted-foreground">Loading requests…</p>
         ) : isError ? (
           <p className="text-sm text-destructive">Could not load leave requests.</p>
         ) : (

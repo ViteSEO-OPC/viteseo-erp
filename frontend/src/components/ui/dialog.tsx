@@ -102,23 +102,25 @@ function DialogContent({
       <DialogPrimitive.Content
         className={cn(
           /*
-            Centred on the content area, not the viewport: from `xl` up the shell
-            puts a static 16rem sidebar on the left (`TeamoraShell` → core
-            `Sidebar`, `w-64`), so a viewport-centred modal reads as sitting
-            left of where the user is looking. `xl:left-64` moves the positioning
-            box to start after the sidebar; below `xl` the sidebar is an
-            off-canvas drawer and the box is the full width.
+            Centred on the content area, not the viewport: from `lg` up the shell
+            puts a static sidebar on the left, so a viewport-centred modal reads
+            as sitting left of where the user is looking.
 
-            This breakpoint is `TeamoraShell`'s, not a choice of its own — if the
-            shell's changes, this has to change with it or modals will offset
-            around a sidebar that isn't on screen.
+            The offset is READ, not restated: `AppShell` publishes its live
+            sidebar width as `--shell-sidebar-w` on <html> (16rem expanded,
+            4rem collapsed), and `lg:left-[var(--shell-sidebar-w,0rem)]` moves
+            the positioning box to start after it. This used to be a literal
+            `xl:left-64`, which meant a second copy of the shell's breakpoint
+            and width lived here and drifted the moment either changed — and it
+            could not follow the collapse rail at all. The `0rem` fallback is
+            what renders correctly outside any shell.
 
             `inset-x-0 + mx-auto` rather than `left-1/2 + -translate-x-1/2`:
             bounded on both sides, the auto margins split the slack evenly, so
             the modal centres inside that region for any width — no per-modal
             offset to keep in sync with the sidebar.
           */
-          "fixed inset-x-0 top-1/2 z-50 mx-auto w-full max-w-md -translate-y-1/2 rounded-card border border-border bg-card p-6 shadow-lg focus:outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 xl:left-64",
+          "fixed inset-x-0 top-1/2 z-50 mx-auto w-full max-w-md -translate-y-1/2 rounded-card border border-border bg-card p-6 shadow-lg focus:outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 lg:left-[var(--shell-sidebar-w,0rem)]",
           dialogScrollbar,
           className,
         )}

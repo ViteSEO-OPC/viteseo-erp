@@ -1,15 +1,15 @@
 import { cn } from "@/modules/crm/lib/utils";
-import { ROLE_SHORT_LABELS, isRole } from "@/modules/crm/lib/rbac";
 import type { TeamUserStatus } from "@/modules/crm/features/settings/types/user-types";
 
-export function RoleChip({ role }: { role: string | null }) {
-  const label = role && isRole(role) ? ROLE_SHORT_LABELS[role] : "—";
-  return (
-    <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-secondary-foreground">
-      {label}
-    </span>
-  );
-}
+/**
+ * There is deliberately no RoleChip here any more.
+ *
+ * It mapped a role slug through ROLE_SHORT_LABELS and fell back to an em dash,
+ * so every member on one of the org's OWN roles rendered as "—" — a person with
+ * real access shown as having none. Team & Roles now resolves the name against
+ * the presets AND the custom role the member actually holds, and passes the
+ * resulting label in.
+ */
 
 export function StatusPill({ status }: { status: TeamUserStatus }) {
   const isActive = status === "active";

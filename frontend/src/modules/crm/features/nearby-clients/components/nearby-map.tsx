@@ -24,8 +24,6 @@ type Props = {
   onPlanVisit: (client: NearbyClient) => void;
   onDirections: (client: NearbyClient) => void;
   onQualify: (client: NearbyClient) => void;
-  /** Id of the prospect whose claim is in flight — guards the popup button, as the list card does. */
-  qualifyingId: string | null;
   className?: string;
 };
 

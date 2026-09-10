@@ -2,6 +2,7 @@
 
 namespace App\Modules\Hr\Models;
 
+use App\Models\Concerns\BelongsToOrg;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -12,6 +13,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 /** A dated BIR graduated withholding-tax table. */
 class TaxVersion extends Model
 {
+    use BelongsToOrg;
     use HasFactory;
     use SoftDeletes;
 

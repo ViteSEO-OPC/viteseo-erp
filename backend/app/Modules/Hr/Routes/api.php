@@ -19,6 +19,7 @@ use App\Modules\Hr\Http\Controllers\OfficeExpenseController;
 use App\Modules\Hr\Http\Controllers\DepartmentController;
 use App\Modules\Hr\Http\Controllers\ReportController;
 use App\Modules\Hr\Http\Controllers\TaxTableController;
+use App\Modules\Hr\Http\Controllers\TeamController;
 use App\Modules\Hr\Http\Controllers\WorkRequestController;
 use App\Modules\Hr\Http\Controllers\WorkSuspensionController;
 use App\Modules\Hr\Http\Controllers\RetroFlagController;
@@ -47,7 +48,20 @@ use Illuminate\Support\Facades\Route;
 
 // All HR routes are auto-prefixed with /api/v1/hr (see HrServiceProvider).
 
-Route::middleware('auth:sanctum')->group(function () {
+/*
+ * THE THREE GATES, added 2026-09-03. Until then this module had NONE of them, and
+ * a plan was a price list: an org could avail Basic and reach every route Full
+ * sells, and an org whose subscription had lapsed -- or that never had one -- kept
+ * working exactly as before.
+ *
+ *   set-current-org      pins the tenant for the whole request, before anything reads
+ *   subscription-active  402s a lapsed or absent subscription (super_admin bypasses)
+ *   feature:hr     refuses an org that never availed this module at all
+ *
+ * Order matters: subscription-active and feature both ask CurrentOrg who the tenant
+ * is, so set-current-org has to run first.
+ */
+Route::middleware(['auth:sanctum', 'set-current-org', 'subscription-active', 'feature:hr'])->group(function () {
     // The employer's own details (Company → Settings). Read is open to any authenticated
     // user: the payslip on screen prints this letterhead for employees too. Writes are
     // hr_officer-only, further down.
@@ -185,6 +199,21 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('me/payslips/{payslip}/pdf', [PayrollController::class, 'myPayslipPdf'])->middleware('throttle:20,1,hr-pdf:');
 
     Route::middleware('role:hr_officer|super_admin')->group(function () {
+
+        /*
+         * Org-level team management: the CURRENT org's HR staff.
+         *
+         * This is how a client's own super admin gives their people accounts --
+         * one of the two halves of "create roles, then create the people who hold
+         * them". Guarded three ways and none of them is the URL: the admin check
+         * lives in TeamController::ensureAdmin, membership is fenced to the current
+         * org, and the role a member may be given is restricted to this module's
+         * presets. Seat count is capped by the org's subscription (see Seats).
+         */
+        Route::get('team', [TeamController::class, 'index']);
+        Route::post('team', [TeamController::class, 'store']);
+        Route::put('team/{user}', [TeamController::class, 'update']);
+        Route::delete('team/{user}', [TeamController::class, 'destroy']);
         Route::get('dashboard/stats', [DashboardController::class, 'hrStats']);
         // The withholding-tax bands. Editable, because the schedule is statute that CHANGES
         // (the BIR table has moved once already, and a bill to move it again is in the House

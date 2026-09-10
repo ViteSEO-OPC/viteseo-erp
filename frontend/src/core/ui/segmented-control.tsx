@@ -14,7 +14,7 @@ import { cn } from "@/core/lib/utils";
  */
 
 const ACTIVE_SEGMENT =
-  "bg-[#0f766e]/10 text-[#0f766e] font-bold";
+  "bg-[#0f766e]/10 text-[#0f766e] font-bold dark:bg-brand/15 dark:text-brand";
 const INACTIVE_SEGMENT = "text-ink-soft hover:text-ink";
 
 function SegmentedControl({

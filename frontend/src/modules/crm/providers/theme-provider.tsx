@@ -1,68 +1,53 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
+import { type ReactNode } from "react";
 
-type Theme = "light" | "dark";
-
-type ThemeContextValue = {
-  theme: Theme;
-  setTheme: (theme: Theme) => void;
-};
-
-const ThemeContext = createContext<ThemeContextValue | undefined>(undefined);
-
-const STORAGE_KEY = "zerem-theme";
+import { useTheme as usePlatformTheme } from "@/core/theme-provider";
 
 /**
- * Zerem-only theme context. The theme is applied to a Zerem-OWNED wrapper element
- * (`.zerem-theme-scope`, with `data-theme`), NOT the shared `<html>` — so the dark state can never
- * leak into HRIS / Sprintly / Admin / the launcher, and it unmounts cleanly when the user leaves
- * `/zerem/*`. The matching dark CSS variables live in the module-local, Zerem-only
- * `styles/zerem-theme.css` (imported solely from the Zerem layout). No shared asset is touched.
+ * Zerem's theme wrapper — now a thin adapter over the PLATFORM theme.
+ *
+ * It used to own a second, independent theme: its own `zerem-theme` storage key,
+ * its own state defaulting to "light", applied to this wrapper instead of <html>.
+ * Two switches for one lamp, and they disagreed in both directions:
+ *
+ *  - **Arriving in dark, the toggle did nothing.** The platform had already put
+ *    `.dark` on <html>, and the shared dark variant is `&:is(.dark *)` — every
+ *    element inside is a descendant, so every `dark:` utility fired no matter what
+ *    this wrapper said. Flipping the wrapper could not undo a class set two levels
+ *    above it, so the button looked broken.
+ *
+ *  - **Arriving in light, the page flipped itself to dark.** This provider read
+ *    `zerem-theme` from a previous visit and dressed its own subtree dark while the
+ *    rest of the platform stayed light.
+ *
+ * So the state is gone and the platform is the only source of truth. What stays is
+ * the WRAPPER: `styles/zerem-theme.css` keys on `.zerem-theme-scope[data-theme="dark"]`,
+ * so the element still has to be here and still has to carry the attribute — it just
+ * mirrors the platform now instead of competing with it.
+ *
+ * `useTheme()` keeps its shape, so the toggle, the settings page and the Nearby map
+ * import the same thing they always did; they now read and write the platform theme.
+ *
+ * The old `zerem-theme` key is simply left behind in whatever browsers still hold
+ * one. Nothing reads it any more.
  */
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setThemeState] = useState<Theme>("light");
-
-  // Restore the persisted choice on mount. Done in an effect (not the useState initializer) so the
-  // server-rendered markup and the first client render agree — avoiding a hydration mismatch. The
-  // key is Zerem-namespaced so it can't collide with any other app's storage.
-  useEffect(() => {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored === "light" || stored === "dark") {
-      setThemeState(stored);
-    }
-  }, []);
-
-  // Persist ONLY on an explicit user change — never in a mount effect, which would clobber the stored
-  // value with the "light" default before/while the restore runs (and re-clobber under StrictMode's
-  // double-invoked effects). The theme is applied via the wrapper's `data-theme` below, deliberately
-  // not the shared document element.
-  const setTheme = useCallback((next: Theme) => {
-    setThemeState(next);
-    localStorage.setItem(STORAGE_KEY, next);
-  }, []);
+  const { theme } = usePlatformTheme();
 
   return (
-    <ThemeContext.Provider value={{ theme, setTheme }}>
-      {/* BOTH hooks are required, and they drive different mechanisms:
-          - `data-theme` flips the CRM token ramp (`crm-theme.css` → `.dark, [data-theme="dark"]`)
-            and the Zerem-local shadcn surface tokens (`styles/zerem-theme.css`).
-          - the `dark` CLASS is what Tailwind's `dark:` utilities key on — the shared variant is
-            declared as `@custom-variant dark (&:is(.dark *))` in globals.css. Without it the ~74
-            `dark:` corrections across the CRM (badges/chips/inputs) never fire and render
-            dark-on-dark. Applying it HERE rather than on <html> keeps the match scoped to this
-            subtree, so no other app is affected. */}
-      <div className={theme === "dark" ? "zerem-theme-scope dark" : "zerem-theme-scope"} data-theme={theme}>
-        {children}
-      </div>
-    </ThemeContext.Provider>
+    <div
+      className={theme === "dark" ? "zerem-theme-scope dark" : "zerem-theme-scope"}
+      data-theme={theme}
+    >
+      {children}
+    </div>
   );
 }
 
+/** The platform theme, under the name the CRM already imports. */
 export function useTheme() {
-  const context = useContext(ThemeContext);
-  if (!context) {
-    throw new Error("useTheme must be used within a ThemeProvider");
-  }
-  return context;
+  const { theme, setTheme } = usePlatformTheme();
+
+  return { theme, setTheme };
 }

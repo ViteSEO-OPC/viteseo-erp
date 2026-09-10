@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Modules\Projects\Controllers\TeamController;
 use App\Modules\Projects\Controllers\ActivityLogController;
 use App\Modules\Projects\Controllers\ApprovalController;
 use App\Modules\Projects\Controllers\ArchiveController;
@@ -42,7 +43,20 @@ use Illuminate\Support\Facades\Route;
 | which is shared platform config and would silently change HR and CRM too.
 */
 Route::prefix('v1/projects')
-    ->middleware(['auth:sanctum', 'throttle:300,1,projects:'])
+/*
+ * THE THREE GATES, added 2026-09-03. Until then this module had NONE of them, and
+ * a plan was a price list: an org could avail Basic and reach every route Full
+ * sells, and an org whose subscription had lapsed -- or that never had one -- kept
+ * working exactly as before.
+ *
+ *   set-current-org      pins the tenant for the whole request, before anything reads
+ *   subscription-active  402s a lapsed or absent subscription (super_admin bypasses)
+ *   feature:pms     refuses an org that never availed this module at all
+ *
+ * Order matters: subscription-active and feature both ask CurrentOrg who the tenant
+ * is, so set-current-org has to run first.
+ */
+    ->middleware(['auth:sanctum', 'set-current-org', 'subscription-active', 'feature:pms', 'throttle:300,1,projects:'])
     ->group(function (): void {
         // User directory for member/assignee pickers (shared users table).
         //
@@ -58,6 +72,21 @@ Route::prefix('v1/projects')
         // a debounced keystroke, so it carries its own throttle.
         Route::get('search', [SearchController::class, 'index'])
             ->middleware('throttle:120,1,projects-search:');
+
+        /*
+         * Org-level team management: the CURRENT org's Projects staff.
+         *
+         * How a client's own super admin gives their people accounts -- one half
+         * of "create roles, then create the people who hold them". Guarded three
+         * ways and none of them is the URL: the admin check lives in
+         * TeamController::ensureAdmin, membership is fenced to the current org,
+         * and the role a member may be given is restricted to this module's
+         * presets. Seats are capped by the org's subscription.
+         */
+        Route::get('team', [TeamController::class, 'index']);
+        Route::post('team', [TeamController::class, 'store']);
+        Route::put('team/{user}', [TeamController::class, 'update']);
+        Route::delete('team/{user}', [TeamController::class, 'destroy']);
 
         // Workspaces
         Route::apiResource('workspaces', WorkspaceController::class);
