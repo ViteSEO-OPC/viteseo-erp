@@ -16,9 +16,13 @@ return Application::configure(basePath: dirname(__DIR__))
     // Reverb channels. Channels themselves are defined per-module (see
     // routes/channels.php). Realtime stays inert until a broadcaster is configured
     // (BROADCAST_CONNECTION), so this is safe even when Reverb is off.
+    //
+    // EnsureAccountIsActive is repeated here because this endpoint is NOT in the
+    // api group — it was the one authenticated route a closed account could still
+    // reach, and a socket is as good as an endpoint for reading live data.
     ->withBroadcasting(
         __DIR__.'/../routes/channels.php',
-        ['middleware' => ['auth:sanctum']],
+        ['middleware' => ['auth:sanctum', \App\Http\Middleware\EnsureAccountIsActive::class]],
     )
     ->withMiddleware(function (Middleware $middleware): void {
         /*
