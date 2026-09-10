@@ -109,7 +109,6 @@ export function AppShell({ children }: AppShellProps) {
       {/* Content region */}
       <div className="flex flex-1 flex-col overflow-hidden">
         <PageHeader
-          title={title}
           onMenuClick={() => setMobileOpen(true)}
           menuOpen={mobileOpen}
         />
@@ -125,6 +124,15 @@ export function AppShell({ children }: AppShellProps) {
             isLeadsPage ? "pt-6" : "pt-8",
           )}
         >
+          {/* The page title, at the top of the page rather than inside the header bar.
+              Every other portal puts it here (see core/components/page-header.tsx, which HR and
+              Sprintly pages render themselves); Zerem kept it in the header, and that is what
+              pushed its search over to the right and made this one module read differently from
+              the rest. Rendered by the shell rather than by each page because no Zerem page has
+              ever owned its own <h1> — the title has always arrived as a prop from the route. */}
+          <h1 className="font-primary text-subheading md:text-card-title lg:text-page-title mb-6 font-bold text-card-foreground">
+            {title}
+          </h1>
           {children}
         </main>
       </div>
