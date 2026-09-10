@@ -22,11 +22,14 @@ Every module mounts under this prefix:
 
 ## Authentication
 
-Auth is **Laravel Sanctum personal access tokens** (Bearer).
+Auth is **Laravel Sanctum**, in two shapes (details in [auth.md](./auth.md)):
 
-1. `POST /api/v1/auth/login` with `email` + `password`.
-2. The response returns `data.token` (plain-text, shown once).
-3. Send it on every subsequent request:
+- **The app (browser):** a session held in an httpOnly cookie. Fetch
+  `/api/sanctum/csrf-cookie`, then `POST /api/v1/auth/login` with `email` +
+  `password`; send cookies (`withCredentials`) and `X-XSRF-TOKEN` from then on.
+  No token is returned to the browser.
+- **Servers and automations:** a named, expiring token minted on the host with
+  `php8.4 artisan tokens:issue <email> <name>`, sent as:
 
 ```
 Authorization: Bearer <token>
@@ -60,7 +63,8 @@ Errors use Laravel's standard shape:
 { "message": "The given data was invalid.", "errors": { "field": ["reason"] } }
 ```
 
-Common status codes: `401` (no/invalid token), `403` (authenticated but lacks the
+Common status codes: `401` (not signed in / session or token expired), `419`
+(missing `X-XSRF-TOKEN`), `403` (authenticated but lacks the
 role/permission/ownership), `404` (not found or soft-deleted), `422` (validation).
 
 ## Roles (per-system)
@@ -100,6 +104,6 @@ module so a person can hold a high role in one system and a low one in another
 - Money is `decimal(12,2)`. Datetimes stored UTC; HR day-boundaries computed in
   Asia/Manila. HR records are soft-deleted.
 - "My X" endpoints never trust a client-sent `employee_id`; ownership comes from
-  the token.
+  the signed-in user.
 </content>
 </invoke>
