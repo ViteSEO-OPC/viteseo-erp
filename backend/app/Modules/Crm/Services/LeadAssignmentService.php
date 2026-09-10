@@ -44,10 +44,16 @@ class LeadAssignmentService
      * exists to fix — a lead that changed hands while its outstanding work stayed pointed at the
      * previous BD, invisible to the person now accountable for it.
      *
+     * `$assignedTo` may be NULL, which CLEARS the assignment — a lead handed back to nobody while
+     * an owner is decided. It is the same operation as any other handover and takes the same path:
+     * one transaction, one `lead.assigned` Activity, the same Planner rule. It is deliberately NOT a
+     * separate "unassign" method, because a second method is a second place for ownership to change.
+     *
+     * @param  int|null  $assignedTo  the new owner, or null to clear the assignment
      * @return bool false when the lead already belonged to that BD — a real occurrence in bulk
      *              handovers, and not something to log a handover Activity for.
      */
-    public function assign(Lead $lead, int $assignedTo, User $actor): bool
+    public function assign(Lead $lead, ?int $assignedTo, User $actor): bool
     {
         // Captured BEFORE the write — from that point on `$lead->assigned_to` is the NEW owner, and
         // the Planner transfer needs to know whose work is being handed over.
@@ -64,18 +70,21 @@ class LeadAssignmentService
             $lead->saveQuietly();
             $lead->load('assignedTo');
 
+            // `assignedTo` is null when the assignment was cleared, so the name is resolved rather
+            // than dereferenced. The event stays `lead.assigned`: clearing an owner IS an ownership
+            // change, and splitting it into a second event type would hide it from every audit
+            // surface that reads this one.
+            $newOwnerName = $lead->assignedTo?->name;
+
             $lead->activities()->create([
                 'causer_id' => $actor->id,
                 'event' => 'lead.assigned',
-                'description' => sprintf(
-                    '%s assigned %s to %s',
-                    $actor->name,
-                    $lead->business_name,
-                    $lead->assignedTo->name,
-                ),
+                'description' => $newOwnerName === null
+                    ? sprintf('%s removed the owner from %s', $actor->name, $lead->business_name)
+                    : sprintf('%s assigned %s to %s', $actor->name, $lead->business_name, $newOwnerName),
                 'properties' => [
                     'assigned_to' => $assignedTo,
-                    'to_name' => $lead->assignedTo->name,
+                    'to_name' => $newOwnerName,
                 ],
             ]);
 

@@ -13,6 +13,7 @@ import { Button } from "@/modules/crm/components/ui/button";
 import { FormField } from "@/modules/crm/components/forms/form-field/form-field";
 import { RelationshipSelect } from "@/modules/crm/components/shared/relationship-select/relationship-select";
 import { useBdUsers } from "@/modules/crm/hooks/use-bd-users";
+import { bdOptionsWithUnassigned, UNASSIGNED_BD } from "@/modules/crm/lib/bd-assignment";
 import { useAssignLead } from "@/modules/crm/features/leads/hooks/use-lead-mutations";
 import type { Lead } from "@/modules/crm/features/leads/types/lead-types";
 
@@ -25,7 +26,14 @@ type Props = {
   lead: Lead;
 };
 
-/** Assign / reassign a lead to a BD (Admin/SA only). Render with key={lead.id} to reset state. */
+/**
+ * Assign / reassign a lead to a BD, or clear its owner (Admin/SA only). Render with key={lead.id} to
+ * reset state.
+ *
+ * Offers the same Unassigned option as the bulk modal, from the same
+ * {@link bdOptionsWithUnassigned} source. Being able to take an owner off ten leads but not off one
+ * would be an arbitrary gap — it is the same operation, the same endpoint and the same policy check.
+ */
 export function AssignLeadModal({ open, onOpenChange, lead }: Props) {
   const { bdUsers, isLoading } = useBdUsers();
   const assignLead = useAssignLead();
@@ -55,14 +63,24 @@ export function AssignLeadModal({ open, onOpenChange, lead }: Props) {
 
         <div className="flex flex-col gap-4 px-6 py-5">
           <p className="text-sm text-muted-foreground">
-            Assign <span className="font-semibold text-foreground">{lead.business}</span> to a
-            Business Development Manager.
+            {assignedTo === UNASSIGNED_BD ? (
+              <>
+                Remove the owner from{" "}
+                <span className="font-semibold text-foreground">{lead.business}</span>. It stays in
+                the pipeline with no Business Development Manager.
+              </>
+            ) : (
+              <>
+                Assign <span className="font-semibold text-foreground">{lead.business}</span> to a
+                Business Development Manager.
+              </>
+            )}
           </p>
           <FormField label="Business Development Manager" required>
             <RelationshipSelect
               value={assignedTo}
               onValueChange={setAssignedTo}
-              options={bdUsers.map((u) => ({ value: u.id, label: u.name }))}
+              options={bdOptionsWithUnassigned(bdUsers)}
               placeholder={isLoading ? "Loading…" : "Select a BD"}
               // The lead already carries its owner's name, so the current BD resolves to a name even
               // if it falls outside the (paginated) options list — never a raw id.

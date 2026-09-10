@@ -62,8 +62,10 @@ class PlannerOwnershipTransfer
             return 0;
         }
 
-        // Never orphan work by moving it to nobody. `assign()` cannot reach this (AssignLeadRequest
-        // requires a BD), but qualification and any future caller must not be able to either.
+        // Never orphan work by moving it to nobody. `assign()` CAN now reach this — clearing an
+        // owner is a supported reassignment — and the rule is unchanged and deliberate: open Planner
+        // work stays with the BD currently holding it rather than becoming unowned. Reassigning the
+        // lead to a real BD later moves that work on, exactly as it always did.
         if ($newOwnerId === null) {
             return 0;
         }
