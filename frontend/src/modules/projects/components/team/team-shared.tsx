@@ -274,8 +274,21 @@ function FilterOptionRow({
   );
 }
 
-/** Column template — one source of truth for the header and every row. */
-const MEMBER_COLS = "md:grid-cols-[2fr_1fr_1.2fr_1fr]";
+/**
+ * Column template — one source of truth for the header and every row.
+ *
+ * Keyed to the TABLE's own width, not the viewport. The
+ * viewport says nothing useful here: at 1024px this table is a third of the
+ * page (sidebar + groups panel take the rest) and had ~300px for four columns,
+ * so names, role pills and workload all spilled out of the frame — while at the
+ * same 1024px with the sidebar collapsed it has room to spare.
+ *
+ * 560px is measured, not a scale step: at 567px the widest row — a "PROJECT
+ * MANAGER" pill, which is `shrink-0`, next to a two-line group tag — clears by
+ * a few pixels, and by 525px the two collide. Below the threshold the row falls
+ * back to a labelled card, which reads fine at any width.
+ */
+const MEMBER_COLS = "@min-[560px]/members:grid-cols-[2fr_1fr_1.2fr_1fr]";
 
 const MEMBERS_TABLE_MIN_H = "md:min-h-[592px]";
 
@@ -294,12 +307,12 @@ export function MembersTable({
   return (
     <TableFrame
       scroll={false}
-      className={`min-w-0 ${MEMBERS_TABLE_MIN_H}`}
+      className={`@container/members min-w-0 ${MEMBERS_TABLE_MIN_H}`}
     >
       {/* Column labels are meaningless once the rows stack, so below md the
           band collapses away entirely. */}
       <div
-        className={`hidden gap-4 md:grid ${MEMBER_COLS} ${TABLE_HEAD} ${TABLE_HEAD_PAD} ${TABLE_HEAD_TEXT}`}
+        className={`hidden gap-4 @min-[560px]/members:grid ${MEMBER_COLS} ${TABLE_HEAD} ${TABLE_HEAD_PAD} ${TABLE_HEAD_TEXT}`}
       >
         {["Member", "Role", "Group", "Workload"].map((h) => (
           <span key={h}>{h}</span>
@@ -311,19 +324,20 @@ export function MembersTable({
       ) : rows.length === 0 ? (
         <p className={TABLE_EMPTY}>No members match your filters.</p>
       ) : (
-        // Separate cards below md; one divided table from md up.
-        <div className="space-y-3 p-4 md:space-y-0 md:p-0 md:divide-y md:divide-line">
+        // Separate cards while the table is narrow; one divided table once it
+        // has the width for columns.
+        <div className="space-y-3 p-4 @min-[560px]/members:space-y-0 @min-[560px]/members:p-0 @min-[560px]/members:divide-y @min-[560px]/members:divide-line">
           {rows.map((u) => (
             <button
               key={u.id}
               type="button"
               onClick={() => onSelect(u)}
               aria-label={`View ${u.name}'s groups and projects`}
-              // Padding is stated per breakpoint rather than reused from
-              // TABLE_GRID_ROW: below md this is a card with its own inset, and
-              // `p-4` + `px-5 py-3.5` on one element resolves by stylesheet
+              // Padding is stated per size rather than reused from
+              // TABLE_GRID_ROW: while narrow this is a card with its own inset,
+              // and `p-4` + `px-5 py-3.5` on one element resolves by stylesheet
               // order, not by which was written last.
-              className={`flex w-full flex-col gap-3 rounded-xl border border-line p-4 text-left outline-none transition-colors hover:bg-black/[0.02] focus-visible:ring-[3px] focus-visible:ring-ring/50 md:grid md:items-center md:gap-4 md:rounded-none md:border-0 md:px-5 md:py-3.5 ${MEMBER_COLS}`}
+              className={`flex w-full flex-col gap-3 rounded-xl border border-line p-4 text-left outline-none transition-colors hover:bg-black/[0.02] focus-visible:ring-[3px] focus-visible:ring-ring/50 @min-[560px]/members:grid @min-[560px]/members:items-center @min-[560px]/members:gap-4 @min-[560px]/members:rounded-none @min-[560px]/members:border-0 @min-[560px]/members:px-5 @min-[560px]/members:py-3.5 ${MEMBER_COLS}`}
             >
               <div className="flex min-w-0 items-center gap-3">
                 <Avatar name={u.name} src={u.avatar} size={40} />
@@ -334,11 +348,11 @@ export function MembersTable({
                   <p className="truncate text-xs text-ink-soft">{u.email}</p>
                 </div>
               </div>
-              {/* Below md each field is a labelled row, so it reads without the
-                  column headers and every card comes out the same shape. From
-                  md up `md:contents` dissolves this box and the three fields
+              {/* While narrow each field is a labelled row, so it reads without
+                  the column headers and every card comes out the same shape.
+                  Once wide, `contents` dissolves this box and the three fields
                   become the grid's own columns. */}
-              <div className="flex flex-col gap-2 border-t border-line pt-3 md:contents">
+              <div className="flex flex-col gap-2 border-t border-line pt-3 @min-[560px]/members:contents">
                 <MemberField label="Role">
                   <RoleBadge role={u.role} />
                 </MemberField>
@@ -374,11 +388,11 @@ function MemberField({
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex items-start gap-3 md:block">
-      <span className="w-20 shrink-0 pt-0.5 text-xs font-bold uppercase tracking-wide text-ink-faint md:hidden">
+    <div className="flex items-start gap-3 @min-[560px]/members:block">
+      <span className="w-20 shrink-0 pt-0.5 text-xs font-bold uppercase tracking-wide text-ink-faint @min-[560px]/members:hidden">
         {label}
       </span>
-      <div className="min-w-0 flex-1 md:flex-none">{children}</div>
+      <div className="min-w-0 flex-1 @min-[560px]/members:flex-none">{children}</div>
     </div>
   );
 }
@@ -386,12 +400,16 @@ function MemberField({
 /**
  * Groups side panel, sized to match the members table it sits beside.
  *
- * From `lg` the inner column is absolutely positioned inside the grid cell, so
+ * From `xl` the inner column is absolutely positioned inside the grid cell, so
  * the groups contribute nothing to the row's height — the members table alone
  * decides how tall the row is, and the list fills exactly that and scrolls the
- * overflow. Below `lg` the panel is full-width with nothing beside it, so it
- * flows normally under a plain height cap. "View all groups" is the escape
- * hatch to the full Groups page either way.
+ * overflow.
+ *
+ * Below `xl` it flows normally under a plain height cap instead. That covers
+ * two cases: the full-width panel below `lg`, and the `lg`–`xl` band where the
+ * table beside it is too narrow for columns and falls back to tall stacked
+ * cards — matching THAT height would leave a column of whitespace next to
+ * four group cards. "View all groups" is the escape hatch either way.
  *
  * Pass `onCreate` to get the manager-only Create Group affordances.
  */
@@ -405,8 +423,8 @@ export function GroupsPanel({
   onCreate?: () => void;
 }) {
   return (
-    <section className="min-w-0 lg:relative">
-      <div className="flex flex-col lg:absolute lg:inset-0">
+    <section className="min-w-0 xl:relative">
+      <div className="flex flex-col xl:absolute xl:inset-0">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-lg font-bold text-ink">Groups</h2>
           <div className="flex items-center gap-2">
@@ -448,8 +466,14 @@ export function GroupsPanel({
         ) : (
           // `min-h-0` lets the flex child shrink below its content so the
           // overflow actually scrolls; `pr-1` keeps the cards' border clear of
-          // the scrollbar. Below lg the panel is full-width, so cards sit 2-up.
-          <div className="mt-4 grid max-h-[640px] grid-cols-1 gap-4 overflow-y-auto pr-1 sm:grid-cols-2 lg:max-h-none lg:min-h-0 lg:flex-1 lg:grid-cols-1">
+          // the scrollbar. Below lg the panel is full-width, so cards sit 2-up;
+          // from lg it's a side column, so they stack.
+          //
+          // `content-start` because the fill-the-row trick makes this grid as
+          // tall as the members table: without it the four cards divided that
+          // height between them and a group with one member came out as a
+          // half-empty box.
+          <div className="mt-4 grid max-h-[640px] grid-cols-1 content-start gap-4 overflow-y-auto pr-1 sm:grid-cols-2 lg:grid-cols-1 xl:max-h-none xl:min-h-0 xl:flex-1">
             {groups.map((g) => (
               <GroupCard key={g.id} group={g} />
             ))}

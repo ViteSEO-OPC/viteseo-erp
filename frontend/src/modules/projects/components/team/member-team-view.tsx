@@ -130,7 +130,14 @@ export function MemberTeamView() {
         // Rows stretch (the grid default) so the groups panel fills the same
         // height as the members card — GroupsPanel takes itself out of flow at
         // lg so only the card decides what that height is.
-        <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
+        //
+        // The panel's track is `min(380px, 34%)`, not a flat 380px: it holds a
+        // name, two pills and an avatar stack, while the table beside it has
+        // four columns to fit, so the panel is the one that should give up
+        // width first. 34% resolves to 380px at the design's 1440px and shrinks
+        // from there. A percentage rather than a vw so a collapsed sidebar
+        // hands the width back.
+        <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_min(380px,34%)]">
           {/* LEFT — Member List (read-only). The table draws its own frame, so
               it sits straight on the canvas rather than inside a Card, and its
               heading lines up with the Groups heading beside it. */}
