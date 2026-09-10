@@ -212,7 +212,7 @@ class OvertimeRequestService
         }
 
         return $this->paginateQueue(
-            $query,
+            $this->scopeToWindow($query, $filters, 'work_date'),
             $filters,
             ['reason'],
             priorityStatuses: ['pending'],

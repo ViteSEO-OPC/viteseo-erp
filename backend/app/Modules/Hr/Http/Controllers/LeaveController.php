@@ -66,7 +66,7 @@ class LeaveController extends Controller
         // Applied by the DATABASE. In the browser they would only narrow the page on screen.
         $requests = $this->service->listRequests(
             $request->user(),
-            $request->only(['search', 'status', 'per_page']),
+            $request->only(['search', 'status', 'per_page', 'from', 'to']),
         );
 
         return LeaveRequestResource::collection($requests)->response();

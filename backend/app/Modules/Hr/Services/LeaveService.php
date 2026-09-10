@@ -228,7 +228,7 @@ class LeaveService
         }
 
         return $this->paginateQueue(
-            $query,
+            $this->scopeToWindow($query, $filters, ['start_date', 'end_date']),
             $filters,
             ['reason'],
             priorityStatuses: ['pending'],

@@ -1,8 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Zap, Check, X, Ban, CalendarPlus } from "lucide-react";
 import { notify as toast } from "@/core/lib/notify";
+
+import { cn } from "@/lib/utils";
 
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/modules/hr/components/page-header";
@@ -20,12 +22,16 @@ import {
   type Column,
 } from "@/core/components/data-table";
 import { useServerTable } from "@/modules/hr/hooks/use-server-table";
+import type { DateWindow, QueueParams } from "@/modules/hr/api/queue";
 import { AutoOvertimeReview } from "@/modules/hr/components/auto-overtime-review";
 import { OvertimeCorrectionDialog } from "@/modules/hr/components/overtime-correction-dialog";
 import {
   type StatusFilterOption,
 } from "@/core/components/status-filter";
 import { formatDate, formatTimeManila } from "@/core/lib/format";
+import { manilaToday } from "@/modules/hr/lib/manila-date";
+import { SimpleSelect } from "@/modules/hr/ui/select";
+import { DatePicker } from "@/modules/hr/ui/date-picker";
 import {
   useLeaveRequests,
   useApproveLeaveRequest,
@@ -86,9 +92,344 @@ function RowActions({ children }: { children: React.ReactNode }) {
   );
 }
 
+type Period = "all" | "week" | "month" | "year" | "custom";
+
+const PERIOD_OPTIONS = [
+  { value: "all", label: "All time" },
+  { value: "week", label: "This week" },
+  { value: "month", label: "This month" },
+  { value: "year", label: "This year" },
+  { value: "custom", label: "Custom range…" },
+];
+
+/** Two digits, for building a 'Y-m-d' by hand. */
+const p2 = (n: number) => String(n).padStart(2, "0");
+
+/** Milliseconds back to the 'Y-m-d' the API filters on. */
+const ymd = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+
+const DAY_MS = 86_400_000;
+
+/**
+ * The inclusive window a named period covers, on the MANILA calendar (plan §5.5b) — "this week"
+ * has to mean the week it is in Manila, not the week it is in the reader's browser, or an HR
+ * officer abroad gets a different queue than the one their colleague is looking at.
+ *
+ * The arithmetic runs in UTC on purpose. These are calendar dates with no time on them, and UTC
+ * is the one zone where adding a day cannot land on 23:00 the same day.
+ */
+function periodWindow(period: Period, today: string): DateWindow {
+  if (period === "all" || period === "custom") return {};
+
+  const [y, m, d] = today.split("-").map(Number);
+
+  if (period === "year") return { from: `${y}-01-01`, to: `${y}-12-31` };
+
+  // Day 0 of the next month is the last day of this one.
+  if (period === "month") {
+    const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
+    return { from: `${y}-${p2(m)}-01`, to: `${y}-${p2(m)}-${p2(last)}` };
+  }
+
+  // Week — Monday through Sunday, the week the Philippine work week is counted in.
+  const t = Date.UTC(y, m - 1, d);
+  const monday = t - ((new Date(t).getUTCDay() + 6) % 7) * DAY_MS;
+  return { from: ymd(monday), to: ymd(monday + 6 * DAY_MS) };
+}
+
+/**
+ * The empty message a queue should show. "No leave requests yet" under a period filter is a
+ * false statement about the whole queue — the rows exist, they are just outside the window, and
+ * a reader told there are none has no reason to widen it.
+ */
+function emptyText(dateWindow: DateWindow, whole: string, filtered: string): string {
+  return dateWindow.from || dateWindow.to ? filtered : whole;
+}
+
+/** What the window reads as under the picker, so a narrowed queue always says what narrowed it. */
+function windowLabel({ from, to }: DateWindow): string | null {
+  if (from && to) return `${formatDate(from)} – ${formatDate(to)}`;
+  if (from) return `${formatDate(from)} onwards`;
+  if (to) return `Up to ${formatDate(to)}`;
+  return null;
+}
+
+/**
+ * Filters every queue on the page by the date the request is FOR — the day off, the shift, the
+ * overtime — rather than the day it was filed, because that is the date each table shows and
+ * the one a payroll cutoff is drawn around. Leave spans days, so a leave is in the window when
+ * it OVERLAPS it: one running Sep 28 to Oct 2 belongs to both months, not only to September.
+ */
+function PeriodFilter({
+  period,
+  onPeriodChange,
+  from,
+  to,
+  onFromChange,
+  onToChange,
+  dateWindow,
+  className,
+}: {
+  period: Period;
+  onPeriodChange: (period: Period) => void;
+  from: string;
+  to: string;
+  onFromChange: (value: string) => void;
+  onToChange: (value: string) => void;
+  dateWindow: DateWindow;
+  className?: string;
+}) {
+  const label = windowLabel(dateWindow);
+
+  return (
+    <div className={cn("flex flex-wrap items-center gap-3", className)}>
+      <label htmlFor="req-period" className="text-caption font-medium text-muted-foreground">
+        Dated
+      </label>
+      <SimpleSelect
+        id="req-period"
+        className="w-44"
+        value={period}
+        onValueChange={(v) => onPeriodChange(v as Period)}
+        options={PERIOD_OPTIONS}
+      />
+
+      {period === "custom" && (
+        <>
+          {/*
+           * Each bound caps the other, so the pair cannot be put the wrong way round — a
+           * backwards range is not an error worth reporting when it can simply be unpickable.
+           * Either half may be left empty: that is an open-ended window, which the API takes.
+           */}
+          <DatePicker
+            aria-label="Dated from"
+            className="w-40"
+            placeholder="From"
+            value={from}
+            max={to || undefined}
+            onChange={onFromChange}
+          />
+          <span className="text-muted-foreground">–</span>
+          <DatePicker
+            aria-label="Dated up to"
+            className="w-40"
+            placeholder="To"
+            value={to}
+            min={from || undefined}
+            onChange={onToChange}
+          />
+        </>
+      )}
+
+      {label && <span className="text-caption text-muted-foreground">{label}</span>}
+    </div>
+  );
+}
+
+type RequestTab = "leave" | "half" | "early" | "overtime" | "work";
+
+/**
+ * The description is the point of the card: five queue names alone do not say which of them a
+ * given request belongs in, and half-day / early-out especially are told apart by what they do
+ * to pay, not by their names.
+ */
+const REQUEST_TABS: { value: RequestTab; title: string; description: string }[] = [
+  {
+    value: "leave",
+    title: "Leave",
+    description: "Whole days off, filed against their leave credits.",
+  },
+  {
+    value: "half",
+    title: "Half-Day",
+    description: "Half a day off. Always unpaid — 0.5 day deducted.",
+  },
+  {
+    value: "early",
+    title: "Early-Out",
+    description: "Undertime: leaving before the schedule ends. Unpaid.",
+  },
+  {
+    value: "overtime",
+    title: "Overtime",
+    description: "Hours past the schedule. Approving adds pay.",
+  },
+  {
+    value: "work",
+    title: "Work",
+    description: "Time-ins on a rest day, or on a suspended day.",
+  },
+];
+
+/**
+ * One row, pending only — the row itself is thrown away and `total` is the count. These run on
+ * the same query keys the tables use, so a decision made on one tab drops that tab's badge
+ * through the invalidation the mutation already does; there is no second path to keep in step.
+ *
+ * They carry the date window too. A card reading "3 pending" over a table showing one, because
+ * the card counted the whole queue and the table counted the month, is a number that has to be
+ * mistrusted from then on.
+ */
+function pendingParams(dateWindow: DateWindow): QueueParams {
+  return { page: 1, per_page: 1, status: "pending", ...dateWindow };
+}
+
+/** `undefined` while a count is still in flight, so a loading queue doesn't read as an empty one. */
+function usePendingCounts(dateWindow: DateWindow): Record<RequestTab, number | undefined> {
+  const params = pendingParams(dateWindow);
+  const leave = useLeaveRequests(params);
+  const half = useHalfDayRequests(params);
+  const early = useEarlyOutRequests(params);
+  const overtime = useOvertimeRequests(params);
+  const work = useWorkRequests(params);
+
+  return {
+    leave: leave.data?.total,
+    half: half.data?.total,
+    early: early.data?.total,
+    overtime: overtime.data?.total,
+    work: work.data?.total,
+  };
+}
+
+/**
+ * The Attendance Summary tab cards, applied to the five request queues: a bordered card each,
+ * carrying the queue's name, what belongs in it, and how many of them are waiting on a decision.
+ * The active card is the brand-tinted one.
+ *
+ * They are buttons rather than links because these queues are one route, not five — but they
+ * carry the tab roles, so a screen reader is told the same thing the border says.
+ */
+function RequestTabs({
+  value,
+  onChange,
+  pending,
+  className,
+}: {
+  value: RequestTab;
+  onChange: (tab: RequestTab) => void;
+  pending: Record<RequestTab, number | undefined>;
+  className?: string;
+}) {
+  return (
+    <div
+      role="tablist"
+      aria-label="Request type"
+      className={cn("grid gap-4 sm:grid-cols-2 lg:grid-cols-3", className)}
+    >
+      {REQUEST_TABS.map((t) => {
+        const active = value === t.value;
+        const count = pending[t.value];
+
+        return (
+          <button
+            key={t.value}
+            type="button"
+            role="tab"
+            aria-selected={active}
+            onClick={() => onChange(t.value)}
+            className={cn(
+              "rounded-card border px-5 py-4 text-left transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+              active
+                ? "border-brand bg-brand-subtle"
+                : "border-border bg-card hover:border-brand/60",
+            )}
+          >
+            <div className="flex items-center justify-between gap-3">
+              <p className="font-bold text-foreground">{t.title}</p>
+              {/*
+               * Amber, the colour every Pending badge on the page below already uses. A queue
+               * with nothing waiting shows no badge at all: an empty count rendered as "0" is
+               * one more number to read on a card that has nothing to say.
+               */}
+              {count ? (
+                <span className="shrink-0 rounded-full bg-warning px-2.5 py-0.5 text-xs font-semibold whitespace-nowrap text-white">
+                  {count} pending
+                </span>
+              ) : null}
+            </div>
+            <p className="mt-1 text-caption text-muted-foreground">{t.description}</p>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function TimeLeavePage() {
+  const [tab, setTab] = useState<RequestTab>("leave");
+  const [period, setPeriod] = useState<Period>("all");
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
+
+  const dateWindow = useMemo(
+    () =>
+      period === "custom"
+        ? { from: customFrom || undefined, to: customTo || undefined }
+        : periodWindow(period, manilaToday()),
+    [period, customFrom, customTo],
+  );
+
+  const pending = usePendingCounts(dateWindow);
+
+  return (
+    <div className="p-4 sm:p-8">
+      <PageHeader
+        title="Leave & Requests"
+        subtitle="Review and decide on leave, half-day, early-out, overtime and work requests."
+      />
+
+      {/* Automation explainer */}
+      <div className="mt-6 flex items-start gap-3 rounded-card border border-brand/40 bg-brand-subtle px-4 py-3">
+        <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-brand text-brand-foreground">
+          <Zap className="size-4" fill="currentColor" />
+        </span>
+        <div>
+          <p className="text-sm font-semibold text-foreground">Leave automation is live</p>
+          <p className="text-caption text-muted-foreground">
+            When an employee submits a request it appears here — approving updates
+            their balance the moment you decide.
+          </p>
+        </div>
+      </div>
+
+      {/* Above the cards, because it scopes the counts on them as well as the table below. */}
+      <PeriodFilter
+        period={period}
+        onPeriodChange={setPeriod}
+        from={customFrom}
+        to={customTo}
+        onFromChange={setCustomFrom}
+        onToChange={setCustomTo}
+        dateWindow={dateWindow}
+        className="mt-6"
+      />
+
+      <RequestTabs value={tab} onChange={setTab} pending={pending} className="mt-4" />
+
+      {/*
+       * One queue mounted at a time — the four hidden ones stop fetching and stop paging in the
+       * background, so switching tabs asks the server for the queue being looked at and nothing
+       * else. Each keeps its own filter and page, and starts fresh when you come back to it.
+       */}
+      {tab === "leave" ? (
+        <LeaveSection dateWindow={dateWindow} />
+      ) : tab === "half" ? (
+        <HalfDaySection dateWindow={dateWindow} />
+      ) : tab === "early" ? (
+        <EarlyOutSection dateWindow={dateWindow} />
+      ) : tab === "overtime" ? (
+        <OvertimeSection dateWindow={dateWindow} />
+      ) : (
+        <WorkRequestSection dateWindow={dateWindow} />
+      )}
+    </div>
+  );
+}
+
+function LeaveSection({ dateWindow }: { dateWindow: DateWindow }) {
   // Server-paged. This queue holds every request of its kind anyone has ever filed.
-  const table = useServerTable();
+  const table = useServerTable(10, dateWindow);
   const { data, isLoading, isError, isFetching } = useLeaveRequests(table.params);
   const requests = data?.items ?? [];
   const approveMut = useApproveLeaveRequest();
@@ -244,31 +585,9 @@ export default function TimeLeavePage() {
     : [];
 
   return (
-    <div className="p-4 sm:p-8">
-      <PageHeader
-        title="Leave & Requests"
-        subtitle="Review and decide on leave, half-day, early-out, overtime and work requests."
-      />
-
-      {/* Automation explainer */}
-      <div className="mt-6 flex items-start gap-3 rounded-card border border-brand/40 bg-brand-subtle px-4 py-3">
-        <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-brand text-brand-foreground">
-          <Zap className="size-4" fill="currentColor" />
-        </span>
-        <div>
-          <p className="text-sm font-semibold text-foreground">Leave automation is live</p>
-          <p className="text-caption text-muted-foreground">
-            When an employee submits a request it appears here — approving updates
-            their balance the moment you decide.
-          </p>
-        </div>
-      </div>
-
-      <div className="mt-6">
-        {/* The four sections below each carry a heading; the biggest table on the
-            page carried none, so the only thing an HR officer comes here for was
-            the one thing the page never named. */}
-        <h2 className="text-h3 font-bold text-foreground">Leave Requests</h2>
+    <>
+      <div className="mt-8">
+        <h2 className="text-h3 font-bold text-foreground mb-8">Leave Requests</h2>
         {isLoading ? (
           <p className="mt-4 text-sm text-muted-foreground">Loading requests…</p>
         ) : isError ? (
@@ -281,7 +600,11 @@ export default function TimeLeavePage() {
             onRowClick={(r) => setDetailId(r.id)}
             pageSize={table.pageSize}
             searchPlaceholder="Search employee, type, reason…"
-            empty="No leave requests yet."
+            empty={emptyText(
+              dateWindow,
+              "No leave requests yet.",
+              "No leave falls in this period.",
+            )}
             // `needsAction` and `getSearchText` are gone deliberately: both worked on the
             // rows in hand. The query sorts pending first and searches across the whole
             // queue, so neither can be answered from a page any more.
@@ -345,14 +668,7 @@ export default function TimeLeavePage() {
         </RequestDetailDialog>
       )}
 
-      <HalfDaySection />
-
-      <EarlyOutSection />
-
-      <OvertimeSection />
-
-      <WorkRequestSection />
-    </div>
+    </>
   );
 }
 
@@ -385,9 +701,9 @@ function payLabel(r: WorkRequest) {
   );
 }
 
-function WorkRequestSection() {
+function WorkRequestSection({ dateWindow }: { dateWindow: DateWindow }) {
   // Server-paged. This queue holds every request of its kind anyone has ever filed.
-  const table = useServerTable();
+  const table = useServerTable(10, dateWindow);
   const { data, isLoading, isFetching } = useWorkRequests(table.params);
   const requests = data?.items ?? [];
   const approveMut = useApproveWorkRequest();
@@ -500,7 +816,7 @@ function WorkRequestSection() {
   ];
 
   return (
-    <div className="mt-10">
+    <div className="mt-8">
       <h2 className="text-h3 font-bold text-foreground">Work Requests</h2>
       <p className="mt-1 text-caption text-muted-foreground">
         Filed when someone presses Time in on a day nobody was expected in on — a rest day, or a
@@ -519,7 +835,11 @@ function WorkRequestSection() {
             onRowClick={(r) => setDetailId(r.id)}
             pageSize={table.pageSize}
             searchPlaceholder="Search employee, reason…"
-            empty="No work requests yet. They appear here when someone times in on a rest day, or on a suspended day that needs your permission."
+            empty={emptyText(
+              dateWindow,
+              "No work requests yet. They appear here when someone times in on a rest day, or on a suspended day that needs your permission.",
+              "No work requests dated in this period.",
+            )}
             // `needsAction` and `getSearchText` are gone deliberately: both worked on the
             // rows in hand. The query sorts pending first and searches across the whole
             // queue, so neither can be answered from a page any more.
@@ -571,9 +891,9 @@ function WorkRequestSection() {
 
 // ---- Half-day requests (separate from leave, always unpaid) ----
 
-function HalfDaySection() {
+function HalfDaySection({ dateWindow }: { dateWindow: DateWindow }) {
   // Server-paged. This queue holds every request of its kind anyone has ever filed.
-  const table = useServerTable();
+  const table = useServerTable(10, dateWindow);
   const { data, isLoading, isFetching } = useHalfDayRequests(table.params);
   const requests = data?.items ?? [];
   const approveMut = useApproveHalfDayRequest();
@@ -672,7 +992,7 @@ function HalfDaySection() {
   ];
 
   return (
-    <div className="mt-10">
+    <div className="mt-8">
       <h2 className="text-h3 font-bold text-foreground">Half-Day Requests</h2>
       <p className="mt-1 text-caption text-muted-foreground">
         Separate from leave — always unpaid. Approving deducts 0.5 day from that pay period.
@@ -688,7 +1008,11 @@ function HalfDaySection() {
             onRowClick={(r) => setDetailId(r.id)}
             pageSize={table.pageSize}
             searchPlaceholder="Search employee, reason…"
-            empty="No half-day requests yet."
+            empty={emptyText(
+              dateWindow,
+              "No half-day requests yet.",
+              "No half-day requests dated in this period.",
+            )}
             // `needsAction` and `getSearchText` are gone deliberately: both worked on the
             // rows in hand. The query sorts pending first and searches across the whole
             // queue, so neither can be answered from a page any more.
@@ -734,9 +1058,9 @@ function HalfDaySection() {
 
 // ---- Early-out requests (undertime — separate from leave, always unpaid) ----
 
-function EarlyOutSection() {
+function EarlyOutSection({ dateWindow }: { dateWindow: DateWindow }) {
   // Server-paged. This queue holds every request of its kind anyone has ever filed.
-  const table = useServerTable();
+  const table = useServerTable(10, dateWindow);
   const { data, isLoading, isFetching } = useEarlyOutRequests(table.params);
   const requests = data?.items ?? [];
   const approveMut = useApproveEarlyOutRequest();
@@ -814,7 +1138,7 @@ function EarlyOutSection() {
   ];
 
   return (
-    <div className="mt-10">
+    <div className="mt-8">
       <h2 className="text-h3 font-bold text-foreground">Early-Out Requests</h2>
       <p className="mt-1 text-caption text-muted-foreground">
         Undertime — leaving before the scheduled end. Always unpaid; approving deducts
@@ -831,7 +1155,11 @@ function EarlyOutSection() {
             onRowClick={(r) => setDetailId(r.id)}
             pageSize={table.pageSize}
             searchPlaceholder="Search employee, reason…"
-            empty="No early-out requests yet."
+            empty={emptyText(
+              dateWindow,
+              "No early-out requests yet.",
+              "No early-out requests dated in this period.",
+            )}
             // `needsAction` and `getSearchText` are gone deliberately: both worked on the
             // rows in hand. The query sorts pending first and searches across the whole
             // queue, so neither can be answered from a page any more.
@@ -876,9 +1204,9 @@ function EarlyOutSection() {
 
 // ---- Overtime requests (hours BEYOND the schedule — approving ADDS pay) ----
 
-function OvertimeSection() {
+function OvertimeSection({ dateWindow }: { dateWindow: DateWindow }) {
   // Server-paged. This queue holds every request of its kind anyone has ever filed.
-  const table = useServerTable();
+  const table = useServerTable(10, dateWindow);
   const { data, isLoading, isFetching } = useOvertimeRequests(table.params);
   const requests = data?.items ?? [];
   const approveMut = useApproveOvertimeRequest();
@@ -994,7 +1322,7 @@ function OvertimeSection() {
   ];
 
   return (
-    <div className="mt-10">
+    <div className="mt-8">
       {/*
        * Overtime the auto-pay cap held back, shown ABOVE the request table because the
        * table below is where it gets resolved: approving a request for that date releases it.
@@ -1003,7 +1331,7 @@ function OvertimeSection() {
 
       <OvertimeCorrectionDialog open={filingFor} onOpenChange={setFilingFor} />
 
-      <div className="mt-10 flex flex-wrap items-start justify-between gap-3">
+      <div className="mt-8 flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="text-h3 font-bold text-foreground">Overtime Requests</h2>
           <p className="mt-1 max-w-2xl text-caption text-muted-foreground">
@@ -1033,7 +1361,11 @@ function OvertimeSection() {
             onRowClick={(r) => setDetailId(r.id)}
             pageSize={table.pageSize}
             searchPlaceholder="Search employee, reason…"
-            empty="No overtime requests yet."
+            empty={emptyText(
+              dateWindow,
+              "No overtime requests yet.",
+              "No overtime requests dated in this period.",
+            )}
             // `needsAction` and `getSearchText` are gone deliberately: both worked on the
             // rows in hand. The query sorts pending first and searches across the whole
             // queue, so neither can be answered from a page any more.

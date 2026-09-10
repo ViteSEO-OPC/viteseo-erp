@@ -52,7 +52,7 @@ class HalfDayRequestService
         }
 
         return $this->paginateQueue(
-            $query,
+            $this->scopeToWindow($query, $filters, 'work_date'),
             $filters,
             ['period', 'reason'],
             priorityStatuses: ['pending'],
