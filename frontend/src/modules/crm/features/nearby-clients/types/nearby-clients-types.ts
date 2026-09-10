@@ -100,6 +100,21 @@ export type NearbyClient = {
    * provenance; never a vendor name, and nothing in the UI branches on it beyond the filter.
    */
   foundBy: "openstreetmap" | "ai-assisted";
+  /**
+   * CLAIM STATE — read-only, derived server-side from the qualification columns.
+   *
+   * The Nearby board is a SHARED pool: a prospect stays listed after a BD accepts it into the CRM,
+   * so every BD can see the pool moved rather than watching rows silently disappear. These three
+   * fields are what let the UI say so — mark the row, name the claimant, and stop offering an
+   * Accept the API would refuse with a 409.
+   */
+  qualified: boolean;
+  qualifiedAt: string | null;
+  /**
+   * Who claimed it. Optional because the API sends it via `whenLoaded`, and absent for an
+   * unclaimed prospect — so read it only alongside `qualified`, never as the claim test itself.
+   */
+  qualifiedBy?: { id: string; name: string } | null;
   /** Coordinate-derived distance in km — computed by the Interactive Map milestone (absent now). */
   distanceKm?: number;
   /** Coordinate-derived map layout position (%) — computed by the Interactive Map milestone (absent now). */

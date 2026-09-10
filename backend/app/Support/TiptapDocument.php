@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace App\Modules\Projects\Support;
+namespace App\Support;
 
 /**
  * Server-side handling of a Tiptap JSON document.

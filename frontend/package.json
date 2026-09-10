@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "copilot:gates": "node --experimental-strip-types --import ./scripts/copilot-gates/register.mjs ./scripts/copilot-gates/gates.ts"
+    "copilot:gates": "node --experimental-strip-types --import ./scripts/copilot-gates/register.mjs ./scripts/copilot-gates/gates.ts",
+    "preview:gates": "node --experimental-strip-types --import ./scripts/copilot-gates/register.mjs ./scripts/attachment-preview-gates/gates.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",

@@ -5,6 +5,7 @@ import { notify as toast } from "@/core/lib/notify";
 import { apiClient } from "@/modules/crm/lib/axios";
 import { getApiErrorMessage } from "@/modules/crm/lib/api-error";
 import { queryKeys } from "@/modules/crm/lib/query-keys";
+import type { JSONContent } from "@tiptap/react";
 import type { Note } from "@/modules/crm/features/leads/types/lead-detail-types";
 
 // Raw API shape from GET /leads/{lead}/notes (NoteResource). Mapped to the component-facing
@@ -17,9 +18,27 @@ type NoteApi = {
   initials: string;
   avatarUrl: string | null;
   body: string;
+  /** Tiptap document, or null for a legacy/imported plain-text note. */
+  bodyDoc: JSONContent | null;
   self: boolean;
   createdAt: string | null;
 };
+
+/** What a write sends. `body` is the plaintext projection; `bodyDoc` the document that produced it. */
+type NoteWritePayload = {
+  body: string;
+  bodyDoc?: JSONContent | null;
+};
+
+/**
+ * Both fields go on the wire, but only one is authoritative: when `bodyDoc` is present the server
+ * DISCARDS the submitted `body` and re-derives it with TiptapDocument::extractText(). `body` is still
+ * sent because it is `required` (a plain-text client must keep working) and because the stored column
+ * is never null.
+ */
+function writeBody(payload: NoteWritePayload) {
+  return { body: payload.body, body_doc: payload.bodyDoc ?? null };
+}
 
 function mapNote(api: NoteApi): Note {
   return {
@@ -29,6 +48,7 @@ function mapNote(api: NoteApi): Note {
     avatarUrl: api.avatarUrl ?? null,
     timestamp: api.createdAt ?? "",
     text: api.body,
+    doc: api.bodyDoc ?? null,
     self: api.self,
   };
 }
@@ -65,8 +85,10 @@ function useInvalidateNotes(leadId: string) {
 export function useCreateNote(leadId: string) {
   const invalidate = useInvalidateNotes(leadId);
   return useMutation({
-    mutationFn: (body: string) =>
-      apiClient.post(`/leads/${leadId}/notes`, { body }).then((r) => r.data.data as NoteApi),
+    mutationFn: (payload: NoteWritePayload) =>
+      apiClient
+        .post(`/leads/${leadId}/notes`, writeBody(payload))
+        .then((r) => r.data.data as NoteApi),
     onSuccess: () => {
       invalidate();
       toast.success("Note added");
@@ -79,9 +101,9 @@ export function useCreateNote(leadId: string) {
 export function useUpdateNote(leadId: string) {
   const invalidate = useInvalidateNotes(leadId);
   return useMutation({
-    mutationFn: ({ id, body }: { id: string; body: string }) =>
+    mutationFn: ({ id, ...payload }: NoteWritePayload & { id: string }) =>
       apiClient
-        .patch(`/leads/${leadId}/notes/${id}`, { body })
+        .patch(`/leads/${leadId}/notes/${id}`, writeBody(payload))
         .then((r) => r.data.data as NoteApi),
     onSuccess: () => {
       invalidate();
