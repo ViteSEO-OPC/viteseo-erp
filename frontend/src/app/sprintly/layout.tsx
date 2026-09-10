@@ -19,6 +19,8 @@ import { useIsManager } from "@/core/auth/AuthProvider";
 import { AppShell } from "@/core/components/app-shell";
 import type { NavEntry } from "@/core/nav";
 import { RealtimeProvider } from "@/core/realtime/RealtimeProvider";
+import { AccessChangedListener } from "@/core/realtime/access-changed-listener";
+import { RequireModule } from "@/core/require-module";
 import { NotificationBell } from "@/modules/projects/components/notifications/notification-bell";
 import { ProjectNotificationListener } from "@/modules/projects/components/projects/project-notification-listener";
 import { GlobalSearch } from "@/modules/projects/components/shared/global-search";
@@ -194,15 +196,19 @@ export default function ProjectsLayout({
 }) {
   return (
     <RequireAuth>
-      <RealtimeProvider>
-        {/* Projects' own live-notification handler. It used to be embedded inside
-            RealtimeProvider, which is how platform infrastructure ended up owning one
-            module's business logic — and how its cleanup could silence the CRM's
-            handler on the shared `user.{id}` channel. Mounted explicitly here. */}
-        <ProjectNotificationListener />
-        <SprintlyShell>{children}</SprintlyShell>
-        <GlobalTaskModal />
-      </RealtimeProvider>
+      <RequireModule module="projects">
+        <RealtimeProvider>
+          {/* Projects' own live-notification handler. It used to be embedded inside
+              RealtimeProvider, which is how platform infrastructure ended up owning one
+              module's business logic — and how its cleanup could silence the CRM's
+              handler on the shared `user.{id}` channel. Mounted explicitly here. */}
+          <ProjectNotificationListener />
+          {/* Access changed on the server: re-read who this is, and leave if Projects is gone. */}
+          <AccessChangedListener />
+          <SprintlyShell>{children}</SprintlyShell>
+          <GlobalTaskModal />
+        </RealtimeProvider>
+      </RequireModule>
     </RequireAuth>
   );
 }

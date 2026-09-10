@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Modules\Crm\Services;
 
+use App\Support\AccessLifecycle;
 use App\Models\User;
 use App\Modules\Crm\Models\CrmUserAccess;
 use Illuminate\Database\Eloquent\Builder;
@@ -152,6 +153,9 @@ class CrmAccessService
         // Associated rather than mass-assigned — `user_id` is the row's identity, never request data.
         $access->user()->associate($user);
         $access->save();
+
+        // Their open CRM pages close now -- and if the CRM was all they had, they are signed out.
+        AccessLifecycle::schedule($user, 'crm-suspended');
     }
 
     /**
@@ -165,6 +169,8 @@ class CrmAccessService
     public function restore(User $user): void
     {
         CrmUserAccess::query()->where('user_id', $user->id)->delete();
+
+        AccessLifecycle::schedule($user, 'crm-restored');
     }
 
     /**

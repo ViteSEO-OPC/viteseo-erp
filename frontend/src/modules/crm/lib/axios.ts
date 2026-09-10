@@ -1,12 +1,12 @@
 import axios from "axios";
-import { getStoredToken, removeToken } from "@/modules/crm/lib/auth";
+import { clearCachedUser } from "@/modules/crm/lib/auth";
 import { getSocketId } from "@/core/realtime/echo";
 
 /**
  * CRM module API client.
  *
- * In the unified platform there is ONE backend and ONE Sanctum token (stored
- * under `token` by the shared auth). This instance targets the CRM endpoint
+ * In the unified platform there is ONE backend and ONE session (an httpOnly
+ * cookie the shared auth signs in with). This instance targets the CRM endpoint
  * namespace `/api/v1/crm/*`, so module code keeps calling relative paths like
  * `/leads`, `/dashboard/kpis`, `/planner-events` unchanged — they resolve to
  * `/api/v1/crm/...`. Auth (login/logout/me) is NOT called here; the platform's
@@ -40,13 +40,13 @@ export const apiClient = axios.create({
     Accept: "application/json",
   },
   timeout: 30000,
+  // Same contract as the shared core client: the browser sends the httpOnly
+  // session cookie, and axios copies XSRF-TOKEN into the header writes need.
+  withCredentials: true,
+  withXSRFToken: true,
 });
 
 apiClient.interceptors.request.use((config) => {
-  const token = getStoredToken();
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
   // Same contract as the shared core client: identifies the originating socket
   // so a ->toOthers() broadcast skips the actor's own connection.
   const socketId = getSocketId();
@@ -59,8 +59,10 @@ apiClient.interceptors.request.use((config) => {
 apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
-      removeToken();
+    const status = error.response?.status;
+    // 419: the session died and took its CSRF token with it -- the same as 401.
+    if (status === 401 || status === 419) {
+      clearCachedUser();
       if (typeof window !== "undefined") {
         window.location.href = "/login";
       }

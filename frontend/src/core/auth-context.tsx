@@ -8,6 +8,7 @@ import {
   useState,
 } from "react";
 import { useRouter } from "next/navigation";
+import { isAxiosError } from "axios";
 
 import { fetchMe, loginRequest, logoutRequest } from "@/core/api/auth";
 import type { AuthUser, AuthEmployee, LoginResponse, Role } from "@/core/types/auth";
@@ -23,6 +24,12 @@ interface AuthContextValue {
   loading: boolean;
   login: (email: string, password: string) => Promise<LoginResponse>;
   logout: () => Promise<void>;
+  /**
+   * Re-read who this browser is, quietly: after an access change, or when a tab
+   * comes back to the front. A dead session leaves `user` null, and <RequireAuth>
+   * takes it from there.
+   */
+  refresh: () => Promise<void>;
   hasRole: (role: Role) => boolean;
   /** Merge a partial update into the cached auth user (e.g. after a self-service
    *  profile save) so headers/sidebars reflect it without a full /me refetch. */
@@ -37,22 +44,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [employee, setEmployee] = useState<AuthEmployee | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // On app load/refresh: if a token exists, restore the session via /me.
-  // If it's missing or invalid, we simply stay logged out.
+  // On app load/refresh: ask the server whether this browser's session cookie is
+  // still good. The cookie is httpOnly, so script cannot look first -- asking is
+  // the only way to know. Quietly: a signed-out visitor on /forgot-password must
+  // not be bounced to /login by the probe itself; <RequireAuth> decides that.
   useEffect(() => {
-    const token = localStorage.getItem("token");
-    if (!token) {
-      setLoading(false);
-      return;
-    }
-    fetchMe()
+    // The bearer token this app kept here before sessions replaced it. It opens
+    // nothing now, but it stayed readable in DevTools until something removed it.
+    localStorage.removeItem("token");
+
+    fetchMe({ quiet: true })
       .then((me) => {
         setUser(me.user);
         setRoles(me.roles);
         setEmployee(me.employee);
       })
       .catch(() => {
-        // Invalid/expired token — the 401 interceptor already cleared it.
+        // No session, or it has ended.
         setUser(null);
         setRoles([]);
         setEmployee(null);
@@ -62,7 +70,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = useCallback(async (email: string, password: string) => {
     const res = await loginRequest(email, password);
-    localStorage.setItem("token", res.token);
     setUser(res.user);
     setRoles(res.roles);
     setEmployee(res.employee);
@@ -77,12 +84,51 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch {
       // Even if the network call fails, drop the session locally.
     }
-    localStorage.removeItem("token");
     setUser(null);
     setRoles([]);
     setEmployee(null);
     router.replace("/login");
   }, [router]);
+
+  const refresh = useCallback(async () => {
+    try {
+      const me = await fetchMe({ quiet: true });
+      setUser(me.user);
+      setRoles(me.roles);
+      setEmployee(me.employee);
+    } catch (err) {
+      // Only an answer that says the session is gone clears it. A network blip
+      // while the laptop wakes up must not sign anyone out.
+      const status = isAxiosError(err) ? err.response?.status : undefined;
+      if (status === 401 || status === 403 || status === 419) {
+        setUser(null);
+        setRoles([]);
+        setEmployee(null);
+      }
+    }
+  }, []);
+
+  // A tab coming back to the front asks again. It is the one moment a page left
+  // open on HR or Accounting -- which hold no socket, so hear no AccessChanged --
+  // could still be showing access that was taken away. On return only, never on a
+  // timer: a timer would keep an unattended session alive for as long as the tab
+  // stayed open, and the two-day idle timeout would never come.
+  const userId = user?.id;
+  useEffect(() => {
+    if (userId == null) return;
+    let lastAsked = Date.now();
+    const onReturn = () => {
+      if (document.visibilityState !== "visible" || Date.now() - lastAsked < 15_000) return;
+      lastAsked = Date.now();
+      void refresh();
+    };
+    window.addEventListener("focus", onReturn);
+    document.addEventListener("visibilitychange", onReturn);
+    return () => {
+      window.removeEventListener("focus", onReturn);
+      document.removeEventListener("visibilitychange", onReturn);
+    };
+  }, [userId, refresh]);
 
   const hasRole = useCallback(
     (role: Role) => roles.includes(role),
@@ -98,7 +144,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ user, roles, permissions, employee, loading, login, logout, hasRole, updateUser }}
+      value={{ user, roles, permissions, employee, loading, login, logout, refresh, hasRole, updateUser }}
     >
       {children}
     </AuthContext.Provider>

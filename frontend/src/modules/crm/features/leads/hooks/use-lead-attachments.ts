@@ -103,8 +103,9 @@ export function useDeleteAttachment(leadId: string) {
 /**
  * Download one attachment.
  *
- * Goes through apiClient rather than a bare <a href> because the file lives on the PRIVATE disk —
- * the request must carry auth headers for the backend to authorize it against the lead. Mirrors the
+ * Goes through apiClient rather than a bare <a href>: the file lives on the PRIVATE disk and is
+ * authorized against the lead, and a failure then surfaces as an error rather than as a browser
+ * error page. Mirrors the
  * blob mechanics of useExportLeadPdf; the filename comes from Content-Disposition with the stored
  * display name as the fallback.
  */
@@ -155,7 +156,7 @@ export type AttachmentPreview = {
  * Open one attachment for inline viewing.
  *
  * Fetches the SAME authorized download endpoint as `useDownloadAttachment` — the bytes are on the
- * private disk, so a bare `<img src>` would arrive without the Bearer token and 401. The response's
+ * private disk, authorized against the lead on every read. The response's
  * `Content-Disposition: attachment` is irrelevant here: that header governs navigation, and reading
  * the body as a blob bypasses it entirely. No backend change is needed to view a file inline.
  *

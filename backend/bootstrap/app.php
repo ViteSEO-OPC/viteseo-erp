@@ -20,9 +20,18 @@ return Application::configure(basePath: dirname(__DIR__))
     // EnsureAccountIsActive is repeated here because this endpoint is NOT in the
     // api group — it was the one authenticated route a closed account could still
     // reach, and a socket is as good as an endpoint for reading live data.
+    //
+    // It needs the session started for it separately, for the same reason: the
+    // browser now proves who it is with a cookie, and nothing in the api group
+    // reaches this route to read one. Without it every socket goes dark.
     ->withBroadcasting(
         __DIR__.'/../routes/channels.php',
-        ['middleware' => ['auth:sanctum', \App\Http\Middleware\EnsureAccountIsActive::class]],
+        ['middleware' => [
+            \Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful::class,
+            'auth:sanctum',
+            \App\Http\Middleware\EnsureAccountIsActive::class,
+            \App\Http\Middleware\EndSessionsPastTheirCeiling::class,
+        ]],
     )
     ->withMiddleware(function (Middleware $middleware): void {
         /*
@@ -36,7 +45,18 @@ return Application::configure(basePath: dirname(__DIR__))
          */
         $middleware->api(append: [
             \App\Http\Middleware\EnsureAccountIsActive::class,
+            \App\Http\Middleware\EndSessionsPastTheirCeiling::class,
         ]);
+
+        /*
+         * The browser signs in with an httpOnly session cookie, not a bearer token.
+         *
+         * A token in localStorage is readable by every script the page runs and by
+         * anyone who opens DevTools. A request whose Origin is the app's own domain
+         * now gets a session instead; anything else is treated as a machine client
+         * and still authenticates by bearer token (n8n, the Zerem scraper).
+         */
+        $middleware->statefulApi();
 
         // Spatie permission middleware aliases — used to gate HR-only routes
         // with role:hr_officer / permission:hr.<resource>.<action>.

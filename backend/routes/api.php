@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\SessionController;
 use App\Http\Controllers\ConnectionController;
 use App\Http\Controllers\CustomRoleController;
 use App\Http\Controllers\EntitlementController;
@@ -34,6 +35,12 @@ Route::prefix('v1')->group(function () {
             Route::get('me', [AuthController::class, 'me']);
             Route::post('logout', [AuthController::class, 'logout']);
             Route::post('change-password', [AuthController::class, 'changePassword'])->middleware('throttle:10,1');
+
+            // The devices you are signed in on, and ending any of them. Keys are SHA-256
+            // of the session id -- never the id, which is the cookie's content.
+            Route::get('sessions', [SessionController::class, 'index']);
+            Route::delete('sessions', [SessionController::class, 'destroyOthers']);
+            Route::delete('sessions/{key}', [SessionController::class, 'destroy'])->where('key', '[0-9a-f]{64}');
         });
     });
 

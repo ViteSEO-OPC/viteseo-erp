@@ -75,7 +75,7 @@ class TheLiveInstallationGetsAnOrgTest extends TestCase
         $this->assertNotNull(Subscription::query()->where('org_id', $org->id)->first());
         $this->assertGreaterThan(0, DB::table('org_features')->where('org_id', $org->id)->count());
 
-        $this->postJson('/api/v1/auth/login', [
+        $this->fromTheApp()->postJson('/api/v1/auth/login', [
             'email' => 'kenneth@viteseo.ph',
             'password' => 'Kenneth2026!',
         ])->assertOk();

@@ -1,5 +1,16 @@
 import axios from "axios";
 
+declare module "axios" {
+  interface AxiosRequestConfig {
+    /**
+     * Hand a 401/419 back to the caller instead of bouncing to /login. For the
+     * sign-in probe on app load, which a signed-out visitor on a public page
+     * (forgot / reset password) fails as a matter of course.
+     */
+    skipAuthRedirect?: boolean;
+  }
+}
+
 const ENV_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api/v1";
 
@@ -26,33 +37,36 @@ function resolveBaseUrl(): string {
 export const apiClient = axios.create({
   baseURL: resolveBaseUrl(),
   headers: { Accept: "application/json" },
+  // The session is an httpOnly cookie: the browser sends it and script never sees
+  // it. withCredentials sends it when the API is on another port (local dev);
+  // withXSRFToken copies Laravel's XSRF-TOKEN cookie into the X-XSRF-TOKEN header
+  // that every cookie-authenticated write needs.
+  withCredentials: true,
+  withXSRFToken: true,
 });
 
-// Automatically attach the Sanctum token (saved at login) to every request.
+// No Authorization header: there is no token for script to attach any more.
 //
-// No X-Socket-Id here on purpose. That header only matters to a caller whose
-// writes are broadcast with ->toOthers(), which today is CRM alone, and it is
-// set by the CRM client (modules/crm/lib/axios.ts). Keeping it out of the shared
-// client leaves HR and the platform sending byte-identical requests to before
-// Reverb existed, and keeps laravel-echo/pusher-js out of their bundles.
-apiClient.interceptors.request.use((config) => {
-  if (typeof window !== "undefined") {
-    const token = localStorage.getItem("token");
-    if (token) config.headers.Authorization = `Bearer ${token}`;
-  }
-  return config;
-});
+// No X-Socket-Id here either, on purpose. That header only matters to a caller
+// whose writes are broadcast with ->toOthers(), which today is CRM alone, and it
+// is set by the CRM client (modules/crm/lib/axios.ts). Keeping it out of the
+// shared client keeps laravel-echo/pusher-js out of the HR and platform bundles.
 
-// Global 401 handling: an expired/revoked token means the session is dead —
-// clear it and bounce to /login. One place covers every screen (plan §5.5d).
+// Global handling for a session that has ended — signed out elsewhere, two days
+// idle, thirty days old, account closed: bounce to /login. One place covers every
+// screen (plan §5.5d). A 419 means the same thing: the session died and took its
+// CSRF token with it.
 apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (typeof window !== "undefined" && error.response?.status === 401) {
-      localStorage.removeItem("token");
-      if (window.location.pathname !== "/login") {
-        window.location.href = "/login";
-      }
+    const status = error.response?.status;
+    if (
+      typeof window !== "undefined" &&
+      (status === 401 || status === 419) &&
+      !error.config?.skipAuthRedirect &&
+      window.location.pathname !== "/login"
+    ) {
+      window.location.href = "/login";
     }
     return Promise.reject(error);
   },

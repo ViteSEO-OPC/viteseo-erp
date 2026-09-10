@@ -1,6 +1,7 @@
 "use client";
 
 import { RequireAuth } from "@/core/auth-context";
+import { RequireModule } from "@/core/require-module";
 import { AppShell } from "@/core/components/app-shell";
 import { SubscriptionGuard } from "@/core/components/subscription-guard";
 import { AccountingAlertsBell } from "@/modules/accounting/components/accounting-alerts-bell";
@@ -18,15 +19,17 @@ export default function AccountingLayout({
 }) {
   return (
     <RequireAuth>
-      <AppShell
-        variant="accounting"
-        searchSlot={<AccountingSearch />}
-        rightSlot={<AccountingAlertsBell />}
-      >
-        <div className="w-full px-4 py-6 sm:px-6 sm:py-8 lg:px-10">
-          <SubscriptionGuard>{children}</SubscriptionGuard>
-        </div>
-      </AppShell>
+      <RequireModule module="accounting">
+        <AppShell
+          variant="accounting"
+          searchSlot={<AccountingSearch />}
+          rightSlot={<AccountingAlertsBell />}
+        >
+          <div className="w-full px-4 py-6 sm:px-6 sm:py-8 lg:px-10">
+            <SubscriptionGuard>{children}</SubscriptionGuard>
+          </div>
+        </AppShell>
+      </RequireModule>
     </RequireAuth>
   );
 }

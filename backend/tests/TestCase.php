@@ -69,6 +69,19 @@ abstract class TestCase extends BaseTestCase
     }
 
     /**
+     * Make the requests that follow look like they come from the app itself.
+     *
+     * Sanctum treats a request as the first-party browser -- and starts a session
+     * for it -- only when its Origin (or Referer) is one of the stateful domains.
+     * A browser always sends one; a test sends none unless asked. The app's own
+     * URL is used because production serves the frontend and the API from it.
+     */
+    protected function fromTheApp(): static
+    {
+        return $this->withHeader('Origin', rtrim((string) config('app.url'), '/'));
+    }
+
+    /**
      * The org this test runs as — created on demand, rolled back with the test.
      *
      * Production has had exactly one org since before multi-tenancy: the provider,

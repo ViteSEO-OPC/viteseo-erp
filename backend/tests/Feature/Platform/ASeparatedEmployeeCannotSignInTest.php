@@ -81,7 +81,7 @@ class ASeparatedEmployeeCannotSignInTest extends TestCase
     {
         CurrentOrg::clear();
 
-        return $this->postJson('/api/v1/auth/login', [
+        return $this->fromTheApp()->postJson('/api/v1/auth/login', [
             'email' => 'juan@bituin.ph',
             'password' => self::PASSWORD,
         ]);

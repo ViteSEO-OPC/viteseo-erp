@@ -1,5 +1,6 @@
 import type { JSONContent } from "@tiptap/react";
 import apiClient from "@/core/api/client";
+import { xsrfToken } from "@/core/csrf";
 import type { ApiResource } from "@/core/types";
 import type {
   Note,
@@ -67,8 +68,9 @@ export function saveWithKeepalive(
   const body = JSON.stringify(payload);
   if (new Blob([body]).size > 64 * 1024) return false;
 
-  const token = localStorage.getItem("token");
-  if (!token) return false;
+  // No XSRF cookie means no session to save into; the draft layer keeps it.
+  const xsrf = xsrfToken();
+  if (!xsrf) return false;
 
   const base = (apiClient.defaults.baseURL ?? "").replace(/\/$/, "");
 
@@ -76,10 +78,12 @@ export function saveWithKeepalive(
     void fetch(`${base}${pathFor(target)}`, {
       method: "PUT",
       keepalive: true,
+      // fetch sends no cookie across ports (local dev) and no XSRF header unless told.
+      credentials: "include",
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json",
-        Authorization: `Bearer ${token}`,
+        "X-XSRF-TOKEN": xsrf,
       },
       body,
     });

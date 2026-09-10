@@ -105,7 +105,7 @@ class AnEmployeeCanActuallySignInTest extends TestCase
 
         // Before the fix this was a 500: the login audit row carries org_id NOT
         // NULL and there was no membership to resolve it from.
-        $this->postJson('/api/v1/auth/login', [
+        $this->fromTheApp()->postJson('/api/v1/auth/login', [
             'email' => 'juan@bituin.ph',
             'password' => 'JuanDC2026!',
         ])->assertOk()->assertJsonPath('data.user.email', 'juan@bituin.ph');
