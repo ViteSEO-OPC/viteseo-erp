@@ -318,10 +318,15 @@ that **everyone will be signed out once** and simply signs back in.
 1. `.env` — **delete `SESSION_LIFETIME=120`** (the default is now two days; left in,
    the idle timeout is two hours) and **add `SESSION_SECURE_COOKIE=true`**. Leave
    `CORS_ALLOWED_ORIGINS` unset in production.
-2. `git pull` → `php8.4 artisan migrate --force` (token expiry; deletes the `web`
-   tokens) → `optimize:clear` → `permission:cache-reset` → reload `php8.4-fpm` →
-   restart `vss-queue` and `vss-reverb` (`AccessChanged` is queued and broadcast
-   through them) → `npm run build` → `pm2 restart`.
+2. `git pull` → **`npm run build` first** → `php8.4 artisan migrate --force` (token
+   expiry; deletes the `web` tokens) → `optimize:clear` → `permission:cache-reset` →
+   reload `php8.4-fpm` → restart `vss-queue` and `vss-reverb` (`AccessChanged` is
+   queued and broadcast through them) → `pm2 restart`.
+
+   **Build before migrating.** The migration deletes the tokens the old frontend is
+   still sending, and the old frontend cannot sign anyone in against the new
+   backend. Built first, the new frontend replaces it seconds after the migration
+   instead of minutes.
 3. Re-mint the scraper's token (§8) and put it in `/var/lib/vss-scraper/.env`.
 4. Check from outside: `/api/sanctum/csrf-cookie` answers 204 and sets `XSRF-TOKEN`;
    a sign-in without an `Origin` is 403; a real sign-in sets an `HttpOnly; Secure;
