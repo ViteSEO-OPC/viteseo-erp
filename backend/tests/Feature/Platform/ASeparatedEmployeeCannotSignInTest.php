@@ -132,6 +132,32 @@ class ASeparatedEmployeeCannotSignInTest extends TestCase
         $this->getJson('/api/v1/auth/me')->assertStatus(403);
     }
 
+    public function test_they_cannot_authorize_a_realtime_channel_either(): void
+    {
+        ['org' => $org, 'employee' => $employee] = $this->orgWithOneEmployee();
+
+        $juan = User::where('email', 'juan@bituin.ph')->firstOrFail();
+
+        // /broadcasting/auth is not in the api group, so the gate appended there
+        // never saw it. A held token could still authorize a private channel and
+        // read every lead and task update as it happened -- no endpoint required.
+        $handshake = fn () => $this->postJson('/broadcasting/auth', [
+            'socket_id' => '1234.5678',
+            'channel_name' => 'private-user.' . $juan->id,
+        ]);
+
+        Sanctum::actingAs($juan);
+        $handshake()->assertOk();
+
+        CurrentOrg::runAs($org->id, fn () => app(EmployeeService::class)->separate($employee, [
+            'separation_type' => 'involuntary',
+            'separation_date' => now()->toDateString(),
+        ]));
+
+        Sanctum::actingAs($juan->fresh());
+        $handshake()->assertStatus(403);
+    }
+
     public function test_the_seat_they_held_is_released(): void
     {
         ['org' => $org, 'employee' => $employee] = $this->orgWithOneEmployee();
