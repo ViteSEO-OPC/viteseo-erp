@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useState } from "react";
 import { AvatarInitials } from "@/modules/crm/components/shared/avatar-initials/avatar-initials";
 import { Button } from "@/modules/crm/components/ui/button";
 import { Plus, Pencil, Trash2, Check, X, Loader2 } from "lucide-react";
@@ -15,143 +15,46 @@ import {
   useUpdateNote,
   useDeleteNote,
 } from "@/modules/crm/features/leads/hooks/use-lead-notes";
+import type { Editor } from "@tiptap/react";
+import { NoteRichEditor } from "@/modules/crm/features/leads/components/note-rich-editor";
+import { EMPTY_DOC, plainTextToDoc, withEditableRoot } from "@/core/editor/tiptap-doc";
+import { NoteBody } from "@/modules/crm/features/leads/components/note-body";
+import {
+  documentToBody,
+  documentToBodyDoc,
+} from "@/modules/crm/features/leads/lib/note-persistence";
 import type { Note } from "@/modules/crm/features/leads/types/lead-detail-types";
-
-/** `crm_notes.body` is `max:5000` in both StoreNoteRequest and UpdateNoteRequest. */
-const BODY_MAX = 5000;
-/** Below this many characters remaining the counter stops being decoration and starts being a warning. */
-const COUNTER_WARN_AT = 500;
-
-/**
- * The modifier key to NAME in the hint. The handler accepts both (`metaKey || ctrlKey`) exactly as
- * the Projects editor and global search do; only the label is platform-specific.
- *
- * Read through useSyncExternalStore rather than branching in render or setting state in an effect:
- * the server has no `navigator`, so a render-time check would hydrate one label over another, and
- * the effect form is what `react-hooks/set-state-in-effect` refuses. The server snapshot is "Ctrl",
- * the safer first paint — this CRM's users are predominantly on Windows.
- */
-function useModifierLabel(): string {
-  return useSyncExternalStore(subscribeToNothing, getModifierLabel, () => "Ctrl");
-}
-
-/** The platform never changes mid-session, so there is nothing to subscribe to. */
-function subscribeToNothing(): () => void {
-  return () => {};
-}
-
-/**
- * Cached: useSyncExternalStore re-reads the snapshot on every render and loops if the value is not
- * referentially stable. `userAgent` rather than the deprecated `navigator.platform`.
- */
-let modifierLabel: string | null = null;
-function getModifierLabel(): string {
-  modifierLabel ??= /Mac|iPhone|iPad|iPod/.test(navigator.userAgent) ? "⌘" : "Ctrl";
-  return modifierLabel;
-}
-
-/**
- * The note input, shared by the composer and the inline editor so the two cannot drift apart.
- *
- * Auto-grows from `minRows` up to `max-h-64`, after which it scrolls: a note is capped at 5000
- * characters, and a textarea that grows to all of them would push the Add button off-screen and
- * bury the note history above it.
- *
- * ⌘/Ctrl+Enter submits; plain Enter inserts a newline. That is the inverse of what this composer
- * used to do — it was an `<input type="text">` where Enter submitted, so a 5000-character field
- * could not hold a second line at all.
- */
-function NoteTextarea({
-  value,
-  onChange,
-  onSubmit,
-  disabled,
-  placeholder,
-  ariaLabel,
-  minRows = 3,
-  autoFocus,
-}: {
-  value: string;
-  onChange: (next: string) => void;
-  onSubmit: () => void;
-  disabled?: boolean;
-  placeholder?: string;
-  ariaLabel: string;
-  minRows?: number;
-  autoFocus?: boolean;
-}) {
-  const ref = useRef<HTMLTextAreaElement>(null);
-  const modifier = useModifierLabel();
-
-  // Reset to `auto` before reading scrollHeight: without it the element can only ever grow, because
-  // its own previous height becomes the floor for the next measurement.
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    el.style.height = "auto";
-    el.style.height = `${el.scrollHeight}px`;
-  }, [value]);
-
-  const remaining = BODY_MAX - value.length;
-  const nearLimit = remaining <= COUNTER_WARN_AT;
-
-  return (
-    <div className="flex flex-col gap-1.5">
-      <textarea
-        ref={ref}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        onKeyDown={(e) => {
-          if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-            e.preventDefault();
-            onSubmit();
-          }
-        }}
-        rows={minRows}
-        maxLength={BODY_MAX}
-        disabled={disabled}
-        placeholder={placeholder}
-        autoFocus={autoFocus}
-        aria-label={ariaLabel}
-        className="max-h-64 w-full resize-none overflow-y-auto rounded-lg border border-border bg-card px-3.5 py-2.5 text-sm leading-relaxed text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
-      />
-      <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
-        <span>
-          <kbd className="rounded border border-border px-1 py-0.5 font-sans text-[11px]">{modifier}</kbd>
-          <span className="mx-1">+</span>
-          <kbd className="rounded border border-border px-1 py-0.5 font-sans text-[11px]">Enter</kbd>
-          <span className="ml-1.5">to save</span>
-        </span>
-        {value.length > 0 && (
-          <span className={cn("tabular-nums", nearLimit && "font-medium text-amber-700 dark:text-amber-400")}>
-            {value.length.toLocaleString()} / {BODY_MAX.toLocaleString()}
-          </span>
-        )}
-      </div>
-    </div>
-  );
-}
 
 type NoteItemProps = {
   note: Note;
   /** Whether the current user may edit/delete (author, or Admin/SA). */
   canManage: boolean;
-  onSave: (body: string) => void;
+  onSave: (payload: { body: string; bodyDoc: ReturnType<typeof documentToBodyDoc> }) => void;
   onDelete: () => void;
   isBusy: boolean;
 };
 
 function NoteItem({ note, canManage, onSave, onDelete, isBusy }: NoteItemProps) {
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(note.text);
+  // The editor owns the draft; this only holds the handle needed to read it at save time. A string
+  // mirror would fight the editor for authorship on every keystroke.
+  const [editor, setEditor] = useState<Editor | null>(null);
+  // Whether the editor currently holds anything. Pushed up by the editor on each empty↔non-empty
+  // transition — the parent cannot read it during its own render, because typing does not re-render
+  // the parent (the editor instance it holds is referentially stable).
+  const [canSave, setCanSave] = useState(false);
 
   function save() {
-    const body = draft.trim();
-    if (!body || body === note.text) {
+    if (!editor) return;
+    const body = documentToBody(editor);
+    // Empty → close without a pointless request or Activity row. An unchanged TEXT body is NOT
+    // treated as unchanged any more: formatting can differ while the text is identical (bolding a
+    // word, turning lines into a list), and that is a real edit worth saving.
+    if (body === "") {
       setEditing(false);
       return;
     }
-    onSave(body);
+    onSave({ body, bodyDoc: documentToBodyDoc(editor) });
     setEditing(false);
   }
 
@@ -174,10 +77,7 @@ function NoteItem({ note, canManage, onSave, onDelete, isBusy }: NoteItemProps) 
             <div className="flex items-center gap-1 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
               <button
                 type="button"
-                onClick={() => {
-                  setDraft(note.text);
-                  setEditing(true);
-                }}
+                onClick={() => setEditing(true)}
                 className="rounded p-1 text-muted-foreground transition-colors hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 aria-label={`Edit note by ${note.author}`}
               >
@@ -198,16 +98,21 @@ function NoteItem({ note, canManage, onSave, onDelete, isBusy }: NoteItemProps) 
 
         {editing ? (
           <div className="mt-1.5 flex flex-col gap-2">
-            <NoteTextarea
-              value={draft}
-              onChange={setDraft}
+            {/* A rich note opens from its own stored document; a legacy plain-text note is wrapped
+                into one so it can be edited in the same editor — and saving it promotes it to rich
+                without any migration. `withEditableRoot` guards a stored document that somehow has
+                no children, which would otherwise mount an uneditable-looking editor. */}
+            <NoteRichEditor
+              initialContent={note.doc ? withEditableRoot(note.doc) : plainTextToDoc(note.text)}
+              onEditorReady={setEditor}
+              onEmptyChange={setCanSave}
               onSubmit={save}
               disabled={isBusy}
               ariaLabel="Edit note"
               autoFocus
             />
             <div className="flex items-center gap-2">
-              <Button size="sm" onClick={save} disabled={isBusy || !draft.trim()}>
+              <Button size="sm" onClick={save} disabled={isBusy || !canSave}>
                 {isBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
                 {isBusy ? "Saving…" : "Save"}
               </Button>
@@ -218,14 +123,14 @@ function NoteItem({ note, canManage, onSave, onDelete, isBusy }: NoteItemProps) 
             </div>
           </div>
         ) : (
-          <div
+          <NoteBody
+            text={note.text}
+            doc={note.doc}
             className={cn(
-              "mt-1.5 whitespace-pre-wrap rounded-lg px-4 py-3 text-sm leading-relaxed text-foreground",
+              "mt-1.5 rounded-lg px-4 py-3",
               note.self ? "bg-[var(--note-bg-self)]" : "bg-[var(--note-bg-other)]",
             )}
-          >
-            {note.text}
-          </div>
+          />
         )}
       </div>
     </div>
@@ -244,16 +149,29 @@ export function DiscussionNotes({ leadId }: Props) {
   const { hasMinRole } = usePermissions();
   const isManager = hasMinRole("crm_admin");
 
-  const [value, setValue] = useState("");
+  const [editor, setEditor] = useState<Editor | null>(null);
+  // The composer's live emptiness, reported by the editor. This is what restores the original Leads
+  // behaviour — Add note goes live the moment there is content, and dies again the moment there is
+  // not, including straight after a successful save clears the editor, so the next note can be typed
+  // and saved immediately.
+  const [canSubmit, setCanSubmit] = useState(false);
 
   function submit() {
-    const body = value.trim();
-    if (!body) return;
-    createNote.mutate(body, { onSuccess: () => setValue("") });
+    if (!editor) return;
+    const body = documentToBody(editor);
+    if (body === "") return;
+    createNote.mutate(
+      { body, bodyDoc: documentToBodyDoc(editor) },
+      { onSuccess: () => editor.commands.clearContent(true) },
+    );
   }
 
   return (
-    <div className="rounded-2xl border border-border bg-card p-6 shadow-card">
+    // `min-w-0`: this card is a grid item in Lead Detail's `[71fr_29fr]` row, where the default
+    // `min-width: auto` resolves to the min-content of everything inside. The wrapping rules above
+    // already keep that small, and this is the belt to their braces — no note, however it is
+    // formatted, can push the track wider than its share and start a horizontal page scroll.
+    <div className="min-w-0 rounded-2xl border border-border bg-card p-6 shadow-card">
       <h3 className="mb-5 text-lg font-bold text-card-foreground">Internal Notes</h3>
 
       {isLoading && (
@@ -272,13 +190,31 @@ export function DiscussionNotes({ leadId }: Props) {
       {!isLoading && !isError && (
         <>
           {notes && notes.length > 0 ? (
-            <div className="flex flex-col gap-5">
+            // The saved-notes LIST is the ONLY scroll boundary in the note history — deliberately
+            // one, not two. An individual note is NOT capped and never scrolls inside its own
+            // bubble: a note renders at its natural height and long ones are simply scrolled past
+            // here, which reads as one continuous history instead of a stack of little viewports
+            // each with its own scrollbar. Both problems a cap would solve — one enormous note, or
+            // very many notes — are handled by this single container.
+            //
+            // It goes on this element and not on the card, which is the point of the split: the
+            // heading above and the composer and Add-note button below are SIBLINGS of this div, so
+            // they stay pinned in place while only the history scrolls. Putting the overflow on the
+            // card would scroll the composer out of reach exactly when a busy lead needs it most.
+            //
+            // `max-h-96` (24rem / 384px) shows roughly four notes at the usual size — enough that a
+            // quiet lead never scrolls at all and the list keeps its natural height, few enough that
+            // the Notes card stays a readable panel beside the Active Call console it shares a row
+            // with. Being a scroll container also pins its min-content contribution at zero, which
+            // is the property that keeps the `fr` grid track from being inflated now that the note
+            // bodies are no longer scroll containers themselves.
+            <div className="flex max-h-96 min-w-0 flex-col gap-5 overflow-y-auto">
               {notes.map((note) => (
                 <NoteItem
                   key={note.id}
                   note={note}
                   canManage={note.self || isManager}
-                  onSave={(body) => updateNote.mutate({ id: note.id, body })}
+                  onSave={(payload) => updateNote.mutate({ id: note.id, ...payload })}
                   onDelete={() => deleteNote.mutate(note.id)}
                   isBusy={updateNote.isPending || deleteNote.isPending}
                 />
@@ -291,9 +227,10 @@ export function DiscussionNotes({ leadId }: Props) {
       )}
 
       <div className="mt-5 flex flex-col gap-2 border-t border-border-subtle pt-5">
-        <NoteTextarea
-          value={value}
-          onChange={setValue}
+        <NoteRichEditor
+          initialContent={EMPTY_DOC}
+          onEditorReady={setEditor}
+          onEmptyChange={setCanSubmit}
           onSubmit={submit}
           disabled={createNote.isPending}
           placeholder="Add an internal note… What happened, what was agreed, what happens next."
@@ -304,7 +241,7 @@ export function DiscussionNotes({ leadId }: Props) {
             variant="default"
             size="sm"
             onClick={submit}
-            disabled={!value.trim() || createNote.isPending}
+            disabled={!canSubmit || createNote.isPending}
           >
             {createNote.isPending ? (
               <Loader2 className="h-4 w-4 animate-spin" />

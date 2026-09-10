@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace Tests\Unit\Projects\Support;
+namespace Tests\Unit\Support;
 
-use App\Modules\Projects\Support\TiptapDocument;
+use App\Support\TiptapDocument;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
