@@ -7,6 +7,7 @@ import { apiClient } from "@/modules/crm/lib/axios";
 import { getApiErrorMessage } from "@/modules/crm/lib/api-error";
 import { queryKeys } from "@/modules/crm/lib/query-keys";
 import { EDITABLE_STATUS_OPTIONS } from "@/modules/crm/lib/lead-status";
+import { assignedToPayload, isUnassignedBd } from "@/modules/crm/lib/bd-assignment";
 import type {
   ImportResult,
   Lead,
@@ -68,7 +69,9 @@ export function useAssignLead() {
   return useMutation({
     mutationFn: ({ id, assignedTo }: { id: string; assignedTo: string }) =>
       apiClient
-        .patch(`/leads/${id}/assign`, { assigned_to: Number(assignedTo) })
+        // null clears the owner; the endpoint requires the key to be PRESENT either way, so this
+        // always sends it rather than omitting the field for the unassigned case.
+        .patch(`/leads/${id}/assign`, { assigned_to: assignedToPayload(assignedTo) })
         .then((r) => r.data.data as Lead),
     onSuccess: (lead) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.leads.lists() });
@@ -388,14 +391,19 @@ export function useBulkAssignLeads() {
       assignedTo,
     }: {
       ids: string[];
+      /** A BD id, or the UNASSIGNED_BD sentinel to clear the owner. */
       assignedTo: string;
-      /** Chosen BD's display name — used only for the success toast. */
+      /** Chosen owner's display name — used only for the success toast. */
       bdName: string;
     }): Promise<BulkAssignResult> => {
+      // Resolved ONCE, outside the fan-out: `Number("unassigned")` is NaN, which would serialize as
+      // null by accident rather than by intent. assignedToPayload says null deliberately, and the
+      // endpoint requires the key to be present for exactly that reason.
+      const assigned_to = assignedToPayload(assignedTo);
       const outcomes = await Promise.all(
         ids.map(async (id) => {
           try {
-            await apiClient.patch(`/leads/${id}/assign`, { assigned_to: Number(assignedTo) });
+            await apiClient.patch(`/leads/${id}/assign`, { assigned_to });
             return { id, ok: true as const };
           } catch (reason) {
             return { id, ok: false as const, reason };
@@ -408,7 +416,7 @@ export function useBulkAssignLeads() {
         .map((o) => ({ id: o.id, reason: "reason" in o ? o.reason : undefined }));
       return { succeeded, failed };
     },
-    onSuccess: ({ succeeded, failed }, { bdName }) => {
+    onSuccess: ({ succeeded, failed }, { bdName, assignedTo }) => {
       if (succeeded.length > 0) {
         queryClient.invalidateQueries({ queryKey: queryKeys.leads.lists() });
         // Each reassigned lead's detail (and, by prefix, its activity timeline) now shows a new owner.
@@ -418,8 +426,11 @@ export function useBulkAssignLeads() {
         queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.all });
         queryClient.invalidateQueries({ queryKey: queryKeys.performance.all });
         queryClient.invalidateQueries({ queryKey: queryKeys.activityLogs.all });
+        // "assigned to Unassigned" would be nonsense, so clearing gets its own sentence.
         toast.success(
-          `${succeeded.length} lead${succeeded.length === 1 ? "" : "s"} successfully assigned to ${bdName}`,
+          isUnassignedBd(assignedTo)
+            ? `${succeeded.length} lead${succeeded.length === 1 ? "" : "s"} are now unassigned`
+            : `${succeeded.length} lead${succeeded.length === 1 ? "" : "s"} successfully assigned to ${bdName}`,
         );
       }
       if (failed.length > 0) {

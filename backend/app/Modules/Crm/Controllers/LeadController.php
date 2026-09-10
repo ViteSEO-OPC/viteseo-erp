@@ -548,7 +548,10 @@ class LeadController extends Controller
         Lead $lead,
         LeadAssignmentService $assignment,
     ): JsonResponse {
-        $assignedTo = (int) $request->validated('assigned_to');
+        // Null is a legitimate value here — it clears the owner. Casting unconditionally would
+        // turn that into user 0 and silently fail the foreign key.
+        $assignedTo = $request->validated('assigned_to');
+        $assignedTo = $assignedTo === null ? null : (int) $assignedTo;
 
         // The handover itself now lives in LeadAssignmentService, shared with the resignation
         // handover in UserController so a bulk move cannot become a second ownership model with no
@@ -568,7 +571,11 @@ class LeadController extends Controller
         // that event would silently not run during an outage, and the assignment would
         // reach nobody. Persisting first makes the record independent of the transport,
         // which is the whole reason it is persisted.
-        $lead->assignedTo->notify(new LeadAssignedNotification($lead, $request->user()));
+        // Only when the lead HAS a new owner. Clearing an assignment has nobody to notify, and
+        // `$lead->assignedTo` is null — the previous owner is deliberately not told either: this
+        // endpoint has never notified the outgoing BD on a reassignment, and an unassignment is a
+        // reassignment. Nothing about that changed here.
+        $lead->assignedTo?->notify(new LeadAssignedNotification($lead, $request->user()));
 
         // Realtime push — only after the write and its activity have succeeded, so a subscriber is
         // never told about an assignment that didn't land. toOthers() excludes the assigning client
@@ -578,7 +585,13 @@ class LeadController extends Controller
         // Still separate from the notification above, and still worth having: this is the
         // transient toast for a BD who is looking right now, and it also updates the lead's
         // own stream for Admins watching it. The notification is the record; this is the nudge.
-        SafeBroadcast::toOthers(new LeadAssigned($lead, $request->user()));
+        // Skipped when the owner was cleared: LeadAssigned broadcasts on `user.{assignedToId}`,
+        // which with no owner is the meaningless channel `user.` — a push addressed to nobody. The
+        // Activity above is still written, so the change remains fully audited, and the acting
+        // client refetches on success regardless.
+        if ($lead->assigned_to !== null) {
+            SafeBroadcast::toOthers(new LeadAssigned($lead, $request->user()));
+        }
 
         return response()->json([
             'data' => new LeadResource($lead),
