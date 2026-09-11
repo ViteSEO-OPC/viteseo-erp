@@ -246,13 +246,13 @@ export default function OfficeExpensesPage() {
         title="Office Expenses"
         subtitle="Track company and office spending."
         actions={
-          <div className="flex items-center gap-3">
+          <>
             <Button onClick={() => { setEditing(null); setDialogOpen(true); }}>
               <Plus />
               Add Expense
             </Button>
             <Select value={range} onValueChange={setRange}>
-              <SelectTrigger aria-label="Filter by period" className="relative w-44 pl-9">
+              <SelectTrigger aria-label="Filter by period" className="relative w-36 max-w-full pl-9">
                 <Calendar className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                 <SelectValue />
               </SelectTrigger>
@@ -280,7 +280,7 @@ export default function OfficeExpensesPage() {
                 )}
               </SelectContent>
             </Select>
-          </div>
+          </>
         }
       />
 
