@@ -29,6 +29,11 @@ export type LeadAttachment = {
   uploadedById: string | null;
   uploadedBy: string;
   createdAt: string | null;
+  /**
+   * True when THIS server can render this attachment's Office format (DOC/DOCX/PPT/PPTX) to PDF.
+   * Optional so a payload from a backend that predates it simply means "no" — Download-only.
+   */
+  documentPreview?: boolean;
 };
 
 /**
@@ -225,8 +230,10 @@ export function usePreviewAttachment(leadId: string) {
   useEffect(() => release, [release]);
 
   const openPreview = useCallback(
-    async (attachment: Pick<LeadAttachment, "id" | "name" | "mimeType">) => {
-      const kind = previewKindFor(attachment.mimeType, attachment.name);
+    async (attachment: Pick<LeadAttachment, "id" | "name" | "mimeType" | "documentPreview">) => {
+      const kind = previewKindFor(attachment.mimeType, attachment.name, {
+        documentPreview: attachment.documentPreview,
+      });
       setPreviewingId(attachment.id);
 
       const base: Omit<AttachmentPreview, "url" | "text" | "sheet"> = {
@@ -248,8 +255,13 @@ export function usePreviewAttachment(leadId: string) {
           return;
         }
 
+        // Office documents come from their own endpoint as the PDF the server rendered; every other
+        // kind is the original bytes from the download endpoint. Both are blobs from here on, and a
+        // document renders through the PDF path below.
         const res = await apiClient.get(
-          `/leads/${leadId}/attachments/${attachment.id}/download`,
+          kind === "document"
+            ? `/leads/${leadId}/attachments/${attachment.id}/document-preview`
+            : `/leads/${leadId}/attachments/${attachment.id}/download`,
           { responseType: "blob" },
         );
         const blob = res.data as Blob;
@@ -270,11 +282,29 @@ export function usePreviewAttachment(leadId: string) {
         urlRef.current = url;
         setPreview({ ...base, url, text: null, sheet: null });
       } catch (err) {
-        // The spreadsheet endpoint answers an unreadable workbook with its own safe sentence
-        // ("corrupt, password-protected, or an unsupported format") — surface that rather than the
-        // generic line, since it tells the user what to do next. It is a server constant, never an
-        // exception message.
-        toast.error(getApiErrorMessage(err, "Could not open the file. Please try again."));
+        // Both preview endpoints answer a file they cannot show with their own safe sentence — the
+        // spreadsheet's "corrupt, password-protected, or an unsupported format", the document's
+        // "could not be prepared" or "try again in a moment" — and it tells the user what to do
+        // next, so it is surfaced rather than the generic line. It is always a server constant,
+        // never an exception message. The document endpoint is requested as a blob, so its error
+        // body arrives as a Blob and is read back as JSON first. Only for that kind: an image, PDF,
+        // TXT or CSV failure comes from the download endpoint and keeps the generic line it always
+        // showed.
+        const fallback = "Could not open the file. Please try again.";
+        const body = (err as { response?: { data?: unknown } } | null)?.response?.data;
+        let message = getApiErrorMessage(err, fallback);
+        if (kind === "document" && body instanceof Blob) {
+          try {
+            const parsed = JSON.parse(await body.text()) as { message?: unknown };
+            message =
+              typeof parsed.message === "string" && parsed.message.trim() !== ""
+                ? parsed.message
+                : fallback;
+          } catch {
+            message = fallback;
+          }
+        }
+        toast.error(message);
       } finally {
         setPreviewingId(null);
       }

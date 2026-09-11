@@ -8,6 +8,8 @@ use App\Modules\Crm\Models\LeadAttachment;
 use App\Modules\Crm\Requests\StoreLeadAttachmentRequest;
 use App\Modules\Crm\Resources\AttachmentPreviewResource;
 use App\Modules\Crm\Resources\LeadAttachmentResource;
+use App\Modules\Crm\Services\Attachments\DocumentPreviewException;
+use App\Modules\Crm\Services\Attachments\DocumentPreviewService;
 use App\Modules\Crm\Services\Attachments\SpreadsheetPreviewReader;
 use App\Modules\Crm\Services\Attachments\UnreadableSpreadsheetException;
 use App\Modules\Crm\Services\LeadAttachmentStore;
@@ -102,6 +104,55 @@ class LeadAttachmentController extends Controller
         }
 
         return (new AttachmentPreviewResource($preview))->response();
+    }
+
+    /**
+     * A PDF rendering of an Office attachment (DOC/DOCX/PPT/PPTX), streamed inline for the viewer.
+     *
+     * Authorized EXACTLY as download and the spreadsheet preview are — `view` on the parent lead plus
+     * the route's scopeBindings — because it discloses the same content in a different shape. The PDF
+     * comes from the private disk and is never given a URL of its own.
+     *
+     * Every refusal is one of DocumentPreviewException's own sentences with its own status: 422 for a
+     * file that cannot be previewed, 503 for a converter that is busy or not installed. Download is
+     * the fallback for all of them.
+     */
+    public function documentPreview(
+        Lead $lead,
+        LeadAttachment $attachment,
+        DocumentPreviewService $previews,
+    ): SymfonyResponse {
+        $disk = Storage::disk(LeadAttachmentStore::DISK);
+
+        if (! $disk->exists($attachment->path)) {
+            throw new NotFoundHttpException('The attached file is no longer available.');
+        }
+
+        try {
+            $pdf = $previews->pdfFor($attachment);
+        } catch (DocumentPreviewException $e) {
+            // Logged only when something actually went wrong underneath; "that is a ZIP" is not news.
+            if ($e->getPrevious() !== null) {
+                report($e);
+            }
+
+            return response()->json(['message' => $e->getMessage()], $e->status);
+        }
+
+        return $disk->response(
+            $pdf,
+            pathinfo((string) $attachment->original_name, PATHINFO_FILENAME).'.pdf',
+            [
+                'Content-Type' => 'application/pdf',
+                'X-Content-Type-Options' => 'nosniff',
+                // The content is as private as the lead; no shared cache may keep a copy.
+                'Cache-Control' => 'private, no-store',
+                // Defence in depth for anyone who opens the URL directly: no script, no plugins, no
+                // same-origin access. The viewer reads the bytes as a blob and is unaffected.
+                'Content-Security-Policy' => 'sandbox',
+            ],
+            'inline',
+        );
     }
 
     /** Delete an attachment (uploader/Admin/SA): soft-deletes the row and removes the bytes. */

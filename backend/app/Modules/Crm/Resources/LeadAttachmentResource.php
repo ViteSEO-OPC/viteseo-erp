@@ -3,6 +3,7 @@
 namespace App\Modules\Crm\Resources;
 
 use App\Modules\Crm\Models\LeadAttachment;
+use App\Modules\Crm\Services\Attachments\DocumentPreviewService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -24,6 +25,12 @@ class LeadAttachmentResource extends JsonResource
             'uploadedById' => $this->user_id !== null ? (string) $this->user_id : null,
             'uploadedBy' => $this->whenLoaded('uploader', fn (): string => $this->uploader?->name ?? 'Unknown user', 'Unknown user'),
             'createdAt' => $this->created_at?->toIso8601String(),
+            // The capability flag behind the DOC/DOCX/PPT/PPTX View button: true only when this
+            // server can convert this attachment's Office format. A server with no conversion
+            // service configured answers false and the client keeps those files Download-only.
+            // An affordance, not an authorization — the preview endpoint re-checks the bytes and
+            // the lead policy.
+            'documentPreview' => app(DocumentPreviewService::class)->isOfferedFor($this->resource),
         ];
     }
 

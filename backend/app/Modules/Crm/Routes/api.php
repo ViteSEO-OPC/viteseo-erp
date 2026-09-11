@@ -373,6 +373,12 @@ Route::middleware(['auth:sanctum', 'set-current-org', 'subscription-active', 'fe
         Route::get('/leads/{lead}/attachments/{attachment}/preview', [LeadAttachmentController::class, 'preview'])
             ->scopeBindings()
             ->can('view', 'lead');
+        // DOC/DOCX/PPT/PPTX rendered to PDF by the private conversion service and streamed inline. Same
+        // content in yet another shape, so again the SAME authorization as download — never weaker.
+        // The generated PDF is cached on the private disk and has no URL of its own.
+        Route::get('/leads/{lead}/attachments/{attachment}/document-preview', [LeadAttachmentController::class, 'documentPreview'])
+            ->scopeBindings()
+            ->can('view', 'lead');
         Route::delete('/leads/{lead}/attachments/{attachment}', [LeadAttachmentController::class, 'destroy'])
             ->scopeBindings()
             ->can('delete', 'attachment');

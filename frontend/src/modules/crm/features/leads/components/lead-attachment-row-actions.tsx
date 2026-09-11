@@ -46,7 +46,7 @@ export function LeadAttachmentRowActions({
 
   return (
     <div className="flex shrink-0 items-center gap-1">
-      {isPreviewable(file.mimeType, file.name) && (
+      {isPreviewable(file.mimeType, file.name, { documentPreview: file.documentPreview }) && (
         <button
           type="button"
           onClick={() => onPreview(file)}

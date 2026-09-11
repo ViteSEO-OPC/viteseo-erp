@@ -5,6 +5,7 @@ namespace App\Modules\Crm\Services;
 use App\Models\User;
 use App\Modules\Crm\Models\Lead;
 use App\Modules\Crm\Models\LeadAttachment;
+use App\Modules\Crm\Services\Attachments\DocumentPreviewService;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -22,6 +23,12 @@ class LeadAttachmentStore
 {
     /** The private disk (storage/app/private). Deliberately NOT `public` — see the class docblock. */
     public const DISK = 'local';
+
+    /**
+     * The preview cache is purged with the attachment it was made from — see {@see remove()}. Held
+     * here rather than by the controller so every path that deletes an attachment purges it too.
+     */
+    public function __construct(private readonly DocumentPreviewService $previews) {}
 
     /**
      * Persist an uploaded file against a lead and return its metadata row.
@@ -91,6 +98,9 @@ class LeadAttachmentStore
         });
 
         Storage::disk(self::DISK)->delete($path);
+
+        // A PDF preview is a copy of the document's contents; deleting the document deletes it too.
+        $this->previews->forget($attachment);
     }
 
     /** Per-lead directory, so a lead's files are grouped on disk and easy to audit or purge. */
