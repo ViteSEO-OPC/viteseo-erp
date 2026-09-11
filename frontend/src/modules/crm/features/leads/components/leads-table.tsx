@@ -4,7 +4,14 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { Checkbox } from "@/modules/crm/components/ui/checkbox";
-import { Button } from "@/modules/crm/components/ui/button";
+import { Button, buttonVariants } from "@/modules/crm/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/modules/crm/components/ui/dropdown-menu";
 import {
   Table,
   TableBody,
@@ -15,7 +22,7 @@ import {
 } from "@/modules/crm/components/ui/table";
 import { PriorityChip } from "@/modules/crm/components/shared/status-badge/priority-chip";
 import { StatusChip } from "@/modules/crm/components/shared/status-badge/status-chip";
-import { Download, Edit, Loader2, Trash2, UserPlus } from "lucide-react";
+import { ChevronDown, Download, Edit, Loader2, Trash2, UserPlus } from "lucide-react";
 import { TableSkeleton } from "@/modules/crm/features/dashboard/components/table-skeleton";
 import { ErrorState } from "@/modules/crm/components/shared/error-state/error-state";
 import { formatDateLong } from "@/modules/crm/lib/formatters";
@@ -156,6 +163,8 @@ type LeadsTableProps = {
   onClearSelection: () => void;
   /** Open the (reused) delete confirmation for the selected leads. */
   onBulkDelete: () => void;
+  /** Open the "Archive all leads" confirmation — every lead in scope, not just the selection. */
+  onBulkDeleteAll: () => void;
   /** Download the ticked rows as CSV. Client-side and read-only, so it is not role-gated. */
   onBulkExport: () => void;
   /** Open the status picker for the ticked rows. Rendered only for a BD (see the bar below). */
@@ -210,6 +219,7 @@ export function LeadsTable({
   onToggleSelectAll,
   onClearSelection,
   onBulkDelete,
+  onBulkDeleteAll,
   onBulkExport,
   onBulkStatus,
   bulkDeleting,
@@ -431,16 +441,39 @@ export function LeadsTable({
                       DELETE /leads/{id} — the server was never at risk, but the control should not
                       have been offered. It arrived ungated with the RC3 sync (571866f1) and was
                       simply missed when c59584d4 gated the bulk Reassign it was adding. */}
+                  {/* Both deletions live behind ONE menu rather than as two loose buttons: a
+                      destructive control that acts on the whole pipeline should not sit in the bar
+                      at the same weight as one that acts on the ticked rows, one click away from
+                      each other. Each item still opens its own confirmation — the menu never acts. */}
                   {canAssign ? (
-                    <Button
-                      type="button"
-                      variant="destructive"
-                      size="sm"
-                      onClick={onBulkDelete}
-                      disabled={bulkBusy}
-                    >
-                      Delete Selected
-                    </Button>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger
+                        className={cn(
+                          buttonVariants({ variant: "destructive", size: "sm" }),
+                          "gap-1",
+                        )}
+                        disabled={bulkBusy}
+                        aria-label="Bulk actions"
+                      >
+                        Bulk Actions
+                        <ChevronDown className="h-3.5 w-3.5" aria-hidden />
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="start" className="w-56">
+                        <DropdownMenuItem onClick={onBulkDelete}>
+                          <Trash2 className="mr-2 h-3.5 w-3.5" aria-hidden />
+                          Delete Selected ({selectedCount})
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        {/* Deliberately last and separated: it ignores the selection entirely. */}
+                        <DropdownMenuItem
+                          onClick={onBulkDeleteAll}
+                          className="text-destructive focus:text-destructive"
+                        >
+                          <Trash2 className="mr-2 h-3.5 w-3.5" aria-hidden />
+                          Delete All Leads
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   ) : null}
                   {/* Bulk ownership assignment is Admin/SA only — same `canAssign` gate as the
                       per-row Assign action and the Assigned BD column, so a BD never sees it (and

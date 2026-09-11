@@ -478,3 +478,65 @@ export function useImportJobStatus(jobId: string | null) {
     },
   });
 }
+
+/**
+ * How many leads "Archive all leads" would affect, for the confirmation dialog.
+ *
+ * Read from the SERVER rather than from the table's `meta.total`, which reflects the current
+ * filters and would understate — or overstate — an action that deliberately ignores them. The
+ * endpoint shares its scope with the action itself, so the number shown and the number archived
+ * cannot disagree.
+ *
+ * `enabled` keeps it from firing until the dialog is actually open: this is a count for a decision,
+ * not something the page needs on load.
+ */
+export function useDeletableLeadCount(enabled: boolean) {
+  const query = useQuery({
+    queryKey: queryKeys.leads.deletableCount(),
+    queryFn: () =>
+      apiClient.get("/leads/deletable-count").then((r) => r.data.data.count as number),
+    enabled,
+    // The dialog should reflect the pipeline as it is right now, not a cached figure from the last
+    // time it was opened.
+    staleTime: 0,
+  });
+
+  return { count: query.data, isLoading: query.isLoading, isError: query.isError };
+}
+
+/**
+ * Archive EVERY lead in the caller's authorized scope.
+ *
+ * One request, not a fan-out: unlike {@link useBulkDeleteLeads} — which deletes checked rows the
+ * client can enumerate — the set here is defined on the server, so the client has no list to iterate
+ * and no business deciding what is in scope. `confirm` is sent because the endpoint requires it;
+ * that check is the API's, so a call made any other way is refused too.
+ *
+ * Invalidates exactly what the existing bulk delete invalidates, for the same reason: archiving
+ * changes the list, the dashboards, My Performance and the feeds.
+ */
+export function useDeleteAllLeads() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () =>
+      apiClient
+        .post("/leads/destroy-all", { confirm: true })
+        .then((r) => r.data.data.archived as number),
+    onSuccess: (archived) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.leads.all });
+      queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.all });
+      queryClient.invalidateQueries({ queryKey: queryKeys.performance.all });
+      queryClient.invalidateQueries({ queryKey: queryKeys.activityLogs.all });
+
+      // Says "archived", not "deleted" — the leads are recoverable from Archive, and the toast is
+      // the last chance to tell the user that before they go looking for them.
+      toast.success(
+        archived === 0
+          ? "There were no leads to archive."
+          : `${archived} lead${archived === 1 ? "" : "s"} moved to Archive`,
+      );
+    },
+    onError: (err) => toast.error(getApiErrorMessage(err, "Failed to archive the leads")),
+  });
+}

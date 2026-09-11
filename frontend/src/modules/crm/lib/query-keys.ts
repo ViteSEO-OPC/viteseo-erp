@@ -39,6 +39,10 @@ export const queryKeys = {
     // prefix match, so the counts can never drift from the table they describe.
     statusSummary: (filters: Record<string, unknown>) =>
       [...queryKeys.leads.lists(), "status-summary", filters] as const,
+    // How many leads "Archive all leads" would affect. Under leads.all but NOT under lists(), so
+    // the list's own filter-keyed invalidations leave it alone — it is a scope count, not a view of
+    // the current filters. The archive mutation invalidates leads.all, which covers it.
+    deletableCount: () => [...queryKeys.leads.all, "deletable-count"] as const,
     details: () => [...queryKeys.leads.all, "detail"] as const,
     detail: (id: string) => [...queryKeys.leads.details(), id] as const,
     // Per-lead activity timeline. Nested under detail(id) so the existing
