@@ -20,11 +20,23 @@ type ConfirmDialogProps = {
   onConfirm: () => void;
   loading?: boolean;
   destructive?: boolean;
+  /**
+   * Extra content between the description and the buttons — a scope summary, an affected count, an
+   * acknowledgement the user has to tick. Optional, so every existing caller renders unchanged.
+   */
+  children?: React.ReactNode;
+  /** Withhold the confirm button until the caller says the user has done enough to mean it. */
+  confirmDisabled?: boolean;
 };
 
 /**
  * Reusable confirmation dialog built on the existing Dialog primitive + design system.
  * Used for destructive actions (e.g. Delete Lead).
+ *
+ * `children` and `confirmDisabled` exist so an unusually broad action can raise the bar WITHOUT a
+ * second confirmation component: "Archive all leads" uses them to state the scope and to require an
+ * explicit acknowledgement before Confirm becomes clickable. Both are optional and default to the
+ * previous behaviour, so every existing caller is untouched.
  */
 export function ConfirmDialog({
   open,
@@ -36,6 +48,8 @@ export function ConfirmDialog({
   onConfirm,
   loading = false,
   destructive = false,
+  children,
+  confirmDisabled = false,
 }: ConfirmDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -46,6 +60,7 @@ export function ConfirmDialog({
             <DialogDescription>{description}</DialogDescription>
           ) : null}
         </DialogHeader>
+        {children}
         <DialogFooter>
           <Button
             variant="outline"
@@ -59,7 +74,7 @@ export function ConfirmDialog({
             variant={destructive ? "destructive" : "default"}
             size="sm"
             onClick={onConfirm}
-            disabled={loading}
+            disabled={loading || confirmDisabled}
           >
             {loading ? "Working…" : confirmLabel}
           </Button>
