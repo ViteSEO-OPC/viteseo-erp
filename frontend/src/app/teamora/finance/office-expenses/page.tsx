@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/modules/hr/components/page-header";
 import type { StatusFilterOption } from "@/core/components/status-filter";
 import { useServerTable } from "@/modules/hr/hooks/use-server-table";
+import type { DateWindow } from "@/modules/hr/api/queue";
 import { DataTable, PrimaryCell, type Column } from "@/core/components/data-table";
 import { formatDate } from "@/core/lib/format";
 import { OfficeExpenseFormDialog } from "@/modules/hr/components/office-expense-form-dialog";
@@ -32,7 +33,10 @@ import {
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
+  SelectSeparator,
   SelectTrigger,
   SelectValue,
   SimpleSelect,
@@ -47,6 +51,20 @@ const PERIOD_LABELS: Record<Period, string> = {
   month: "This month",
   year: "This year",
 };
+
+/**
+ * How a specific month is spelled in the picker's value: "m:2025-12".
+ *
+ * ONE control, not two. A named period and a month are the same question — which slice of the
+ * ledger am I looking at — and splitting them across two dropdowns lets the screen hold an answer
+ * to each, leaving the reader to work out which one the table obeyed.
+ */
+const MONTH_PREFIX = "m:";
+
+/** The picked month as "YYYY-MM", or "" when the value names a period instead. */
+function monthOf(range: string): string {
+  return range.startsWith(MONTH_PREFIX) ? range.slice(MONTH_PREFIX.length) : "";
+}
 
 /** Whole-peso, with a thin space after the sign — matches the Figma numerals. */
 function peso(n: number): string {
@@ -88,6 +106,26 @@ function periodRange(period: Period, today: Date): { start: Date; end: Date } | 
   return { start, end };
 }
 
+/**
+ * The window the ledger is read through, as the API wants it. `{}` is all time.
+ *
+ * A picked month is resolved from its own "YYYY-MM" rather than from today, so it stays the
+ * month that was chosen — day 0 of the next month is the last day of this one, which is also
+ * what makes February right without a leap-year rule.
+ */
+function periodWindow(range: string, today: Date): DateWindow {
+  const month = monthOf(range);
+
+  if (month) {
+    const [y, m] = month.split("-").map(Number);
+    return { from: `${month}-01`, to: ymd(new Date(y, m, 0)) };
+  }
+
+  const bounds = periodRange(range as Period, today);
+
+  return bounds ? { from: ymd(bounds.start), to: ymd(bounds.end) } : {};
+}
+
 /** Curated: server mode cannot read the vocabulary off one page of rows. */
 const EXPENSE_STATUS_OPTIONS: StatusFilterOption[] = [
   { value: "all", label: "All" },
@@ -97,20 +135,22 @@ const EXPENSE_STATUS_OPTIONS: StatusFilterOption[] = [
 ];
 
 export default function OfficeExpensesPage() {
-  const [period, setPeriod] = useState<Period>("all");
+  // A named period ("all", "week", …) or one month ("m:2025-12") — the picker's single value.
+  const [range, setRange] = useState<string>("all");
   const [sort, setSort] = useState<Sort>("date_desc");
+
+  const dateWindow = useMemo(() => periodWindow(range, manilaToday()), [range]);
 
   // Server-paged, server-filtered, server-SORTED. The period picker and the sort control both
   // reach the query now: applied in the browser they could only ever reorder or narrow the ten
   // rows already on screen, which for a ledger that grows with every purchase is a different
   // answer than the one the controls appear to give.
-  const table = useServerTable();
-  const window = periodRange(period, manilaToday());
-  const query = {
-    ...table.params,
-    sort,
-    ...(window ? { from: ymd(window.start), to: ymd(window.end) } : {}),
-  };
+  //
+  // The window goes through the table hook rather than around it, which is what returns the
+  // ledger to page 1 when a narrower period is chosen — page 4 of "all time" is past the end of
+  // most single months, and the empty table that followed looked like a month with no spend.
+  const table = useServerTable(10, dateWindow);
+  const query = { ...table.params, sort };
   const { data, isLoading, isError, isFetching } = useOfficeExpenses(query);
   // Counted by the database over the same window the table below is showing.
   const { data: spend } = useOfficeExpenseSummary(query);
@@ -125,6 +165,18 @@ export default function OfficeExpensesPage() {
   const toggle = (key: string) => setHidden((h) => ({ ...h, [key]: !h[key] }));
 
   const total = spend?.total ?? 0;
+
+  // Only the months the ledger actually has spend in, newest first — offering an empty month
+  // would be offering a guaranteed blank screen. They come with the cards, so they describe the
+  // whole ledger rather than the window they set.
+  const months = useMemo(() => spend?.months ?? [], [spend]);
+
+  // Every card that names the period says the MONTH once one is picked: "This month" on a screen
+  // showing June is a caption disagreeing with the table under it.
+  const month = monthOf(range);
+  const periodLabel = month
+    ? (months.find((m) => m.value === month)?.label ?? month)
+    : PERIOD_LABELS[range as Period];
 
   // Top two categories by spend, from the server's own tally — the browser could only have
   // added up the page.
@@ -199,8 +251,8 @@ export default function OfficeExpensesPage() {
               <Plus />
               Add Expense
             </Button>
-            <Select value={period} onValueChange={(v) => setPeriod(v as Period)}>
-              <SelectTrigger aria-label="Filter by period" className="relative w-40 pl-9">
+            <Select value={range} onValueChange={setRange}>
+              <SelectTrigger aria-label="Filter by period" className="relative w-44 pl-9">
                 <Calendar className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                 <SelectValue />
               </SelectTrigger>
@@ -209,6 +261,23 @@ export default function OfficeExpensesPage() {
                 <SelectItem value="week">This week</SelectItem>
                 <SelectItem value="month">This month</SelectItem>
                 <SelectItem value="year">This year</SelectItem>
+
+                {/*
+                 * The months sit UNDER the named periods in the same list — one control answering
+                 * one question. Only months the ledger has spend in are offered; an empty month
+                 * is a guaranteed blank screen, so it is not worth a row.
+                 */}
+                {months.length > 0 && (
+                  <SelectGroup>
+                    <SelectSeparator />
+                    <SelectLabel>By month</SelectLabel>
+                    {months.map((m) => (
+                      <SelectItem key={m.value} value={`${MONTH_PREFIX}${m.value}`}>
+                        {m.label}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                )}
               </SelectContent>
             </Select>
           </div>
@@ -238,7 +307,7 @@ export default function OfficeExpensesPage() {
         <div className="rounded-card border border-border bg-card p-5">
           <p className="text-label font-bold uppercase tracking-wide text-muted-foreground">Entries</p>
           <p className="mt-2 text-h2 font-bold text-foreground">{data?.total ?? 0}</p>
-          <p className="mt-1 text-caption text-muted-foreground">{PERIOD_LABELS[period]}</p>
+          <p className="mt-1 text-caption text-muted-foreground">{periodLabel}</p>
         </div>
       </div>
 
@@ -267,7 +336,7 @@ export default function OfficeExpensesPage() {
         ) : (
           <DataTable
             title="Expense Breakdown"
-            titleRight={<span className="text-h3 font-bold text-foreground">{PERIOD_LABELS[period]}</span>}
+            titleRight={<span className="text-h3 font-bold text-foreground">{periodLabel}</span>}
             columns={columns}
             rows={sorted}
             rowKey={(e) => e.id}

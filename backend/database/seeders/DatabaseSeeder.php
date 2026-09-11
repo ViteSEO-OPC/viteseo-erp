@@ -13,6 +13,7 @@ use App\Modules\Hr\Database\Seeders\HeadcountMovementDemoSeeder;
 use App\Modules\Hr\Database\Seeders\HealthSafetyDemoSeeder;
 use App\Modules\Hr\Database\Seeders\HolidayDemoSeeder;
 use App\Modules\Hr\Database\Seeders\OfficeExpenseDemoSeeder;
+use App\Modules\Hr\Database\Seeders\OfficeExpenseHistoryDemoSeeder;
 use App\Modules\Hr\Database\Seeders\DepartmentSeeder;
 use App\Modules\Hr\Database\Seeders\DiversityDemoSeeder;
 use App\Modules\Hr\Database\Seeders\EmployeeDemoSeeder;
@@ -161,6 +162,9 @@ class DatabaseSeeder extends Seeder
                 // Safety concerns across months for the Health & Safety report.
                 HealthSafetyDemoSeeder::class,
                 OfficeExpenseDemoSeeder::class,
+                // A year of dated spending behind those five rows, so the ledger's month
+                // picker, spend cards and paging have twelve months to work on.
+                OfficeExpenseHistoryDemoSeeder::class,
                 FaqDemoSeeder::class,
                 HolidayDemoSeeder::class,
                 // Backfill representative audit-trail history for the Audit report.
