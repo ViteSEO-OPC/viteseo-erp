@@ -208,7 +208,12 @@ export function DiscussionNotes({ leadId }: Props) {
             // with. Being a scroll container also pins its min-content contribution at zero, which
             // is the property that keeps the `fr` grid track from being inflated now that the note
             // bodies are no longer scroll containers themselves.
-            <div className="flex max-h-96 min-w-0 flex-col gap-5 overflow-y-auto">
+            //
+            // From xl the window is `max-h-44` (11rem / 176px, about two notes): there Notes sits in
+            // one top-aligned row beside Call (~455px) and the Activity Timeline (~410px), and this cap
+            // is what keeps a busy Notes card near ~470px instead of ~675px. Below xl the cards stack,
+            // so the roomier 384px window stays.
+            <div className="flex max-h-96 min-w-0 flex-col gap-5 overflow-y-auto xl:max-h-44">
               {notes.map((note) => (
                 <NoteItem
                   key={note.id}

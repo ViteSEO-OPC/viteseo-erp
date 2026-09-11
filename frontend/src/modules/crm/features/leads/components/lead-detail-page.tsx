@@ -134,8 +134,8 @@ export function LeadDetailPage() {
                 history — as tall as the other and left a large empty block inside it. They share a
                 top edge, not a bottom one. `items-start` is block-axis only: the 71/29 split and each
                 card's full column width are unchanged. Notes keeps its own internal scrolling
-                (`max-h-96`). Stacked below xl, each card sits in its own row at its natural height,
-                as before. */}
+                (`max-h-96`, `xl:max-h-44`). Stacked below xl, each card sits in its own row at its
+                natural height, as before. */}
             <div className="grid grid-cols-1 gap-6 xl:grid-cols-[71fr_29fr] xl:items-start">
               <DiscussionNotes leadId={params.id} />
               <ActiveCallPanel leadId={params.id} />
