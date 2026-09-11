@@ -8,6 +8,7 @@ import {
   useState,
 } from "react";
 import { useRouter } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 
 import { fetchMe, loginRequest, logoutRequest } from "@/core/api/auth";
 import type { AuthUser, AuthEmployee, LoginResponse, Role } from "@/core/types/auth";
@@ -32,6 +33,8 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+  // Safe: <QueryProvider> wraps <AuthProvider> in app/layout.tsx.
+  const queryClient = useQueryClient();
   const [user, setUser] = useState<AuthUser | null>(null);
   const [roles, setRoles] = useState<Role[]>([]);
   const [employee, setEmployee] = useState<AuthEmployee | null>(null);
@@ -62,12 +65,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = useCallback(async (email: string, password: string) => {
     const res = await loginRequest(email, password);
+    // Defence in depth for the sign-in that follows no logout: an expired session left on the
+    // login screen, or a second account signing in on the same tab. Clearing here means a cache
+    // entry can never outlive the identity it was fetched for, whichever way the session ended.
+    queryClient.clear();
     localStorage.setItem("token", res.token);
     setUser(res.user);
     setRoles(res.roles);
     setEmployee(res.employee);
     return res;
-  }, []);
+  }, [queryClient]);
 
   const router = useRouter();
 
@@ -81,8 +88,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
     setRoles([]);
     setEmployee(null);
+    // Drop every cached response with the session that fetched it.
+    //
+    // This is the ONLY teardown path that needs to say so. The 401 interceptor in
+    // core/api-client.ts bounces through `window.location.href`, a full document load that
+    // takes the whole JS heap — QueryClient included — with it. Logout deliberately does not:
+    // `router.replace` is a client-side navigation, so the QueryClient created in
+    // core/query-provider.tsx survives, still holding the leads, planner, notifications and
+    // dashboard payloads of the account that just left.
+    //
+    // Signing in again in the same tab then renders those on first paint, because every one of
+    // them is a cache hit that resolves before the new account's refetch returns. Under tenancy
+    // the two sessions need not even belong to the same company, which turns a stale-data
+    // annoyance into one tenant's pipeline shown to another.
+    //
+    // `clear()` rather than `invalidateQueries()`: invalidation marks entries stale but KEEPS
+    // and re-serves them while refetching, which is exactly the first paint we must not have.
+    queryClient.clear();
     router.replace("/login");
-  }, [router]);
+  }, [router, queryClient]);
 
   const hasRole = useCallback(
     (role: Role) => roles.includes(role),
