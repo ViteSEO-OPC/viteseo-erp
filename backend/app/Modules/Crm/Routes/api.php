@@ -8,6 +8,9 @@ use App\Modules\Crm\Controllers\Auth\UpdateProfileController;
 use App\Modules\Crm\Controllers\AutomationEmailController;
 use App\Modules\Crm\Controllers\BusinessRuleController;
 use App\Modules\Crm\Controllers\CallController;
+use App\Modules\Crm\Controllers\CallSettingsController;
+use App\Modules\Crm\Controllers\TwilioVoiceWebhookController;
+use App\Modules\Crm\Http\Middleware\ValidateTwilioSignature;
 use App\Modules\Crm\Controllers\DashboardController;
 use App\Modules\Crm\Controllers\DeliveryMonitorController;
 use App\Modules\Crm\Controllers\EmailController;
@@ -401,6 +404,20 @@ Route::middleware(['auth:sanctum', 'set-current-org', 'subscription-active', 'fe
         Route::post('/planner-events/{plannerEvent}/calls', [CallController::class, 'storeForEvent'])
             ->middleware('permission:crm.calls.log')
             ->can('view', 'plannerEvent');
+        // What this deployment's calling can do, for this lead — drives which controls the Call panel
+        // renders. Read-only and gated like Call History.
+        Route::get('/leads/{lead}/calling-capability', [CallController::class, 'capability'])
+            ->middleware('permission:crm.calls.view')
+            ->can('view', 'lead');
+        // A short-lived browser credential for an open call. Authorized exactly like concluding one,
+        // because being allowed to place the call is the same right as being allowed to log it.
+        // Throttled per authenticated user (user ids are platform-wide, so this is already
+        // tenant-safe): 10 a minute is far above any honest retry pattern, and each token is a live
+        // credential on the centralized Twilio account. Manual calling and the Twilio webhooks are
+        // deliberately NOT throttled.
+        Route::post('/calls/{call}/token', [CallController::class, 'token'])
+            ->can('update', 'call')
+            ->middleware('throttle:10,1,crm-call-token:');
         Route::patch('/calls/{call}/complete', [CallController::class, 'complete'])->can('update', 'call');
         Route::patch('/calls/{call}/discard', [CallController::class, 'discard'])->can('update', 'call');
 
@@ -561,6 +578,32 @@ Route::middleware(['auth:sanctum', 'set-current-org', 'subscription-active', 'fe
             Route::delete('/settings/integrations/gmail', [GmailOAuthController::class, 'destroy']);
             Route::post('/settings/integrations/gmail/authorization', [GmailOAuthController::class, 'store']);
 
+            // Settings → Integrations → Calling: the client's OWN Twilio account, which turns on
+            // browser calling for this organization.
+            //
+            // `crm_admin` is allowed here, unlike the Nearby routes below. That is the documented
+            // distinction, not an oversight: Nearby holds ViteSEO's centrally-bought API keys and is
+            // therefore super-admin only, while these credentials belong to the client, are billed to
+            // the client, and are stored per organization in `crm_call_provider_settings`. The Nearby
+            // comment below states the rule for exactly this case — a table a client brings its own
+            // key to needs org_id and the crm_admin gate.
+            //
+            // GET returns identifiers, secret PRESENCE (last 4 characters only) and what is actually
+            // in force — never an Auth Token, never an API Secret, never ciphertext, never a length.
+            //
+            // PUT treats both secrets as write-only: omitting one keeps the stored value, so
+            // correcting a caller ID never sends a live secret through a browser again. Clearing them
+            // is the separate DELETE, because a blank field usually means "I didn't retype it".
+            //
+            // POST .../test verifies the stored credentials with read-only Twilio REST lookups and
+            // records a status code. It NEVER places a call. Throttled, because it reaches a third
+            // party on a button press.
+            Route::get('/settings/integrations/calling', [CallSettingsController::class, 'show']);
+            Route::put('/settings/integrations/calling', [CallSettingsController::class, 'update']);
+            Route::delete('/settings/integrations/calling/credentials', [CallSettingsController::class, 'destroyCredentials']);
+            Route::post('/settings/integrations/calling/test', [CallSettingsController::class, 'test'])
+                ->middleware('throttle:10,1');
+
             // Settings → Integrations → Nearby Lead Generation: which engine fills the discovered-
             // business pool. A Business Development Manager is refused here at the route, so the UI
             // hiding these controls is presentation rather than protection.
@@ -614,4 +657,38 @@ Route::middleware(['auth:sanctum', 'set-current-org', 'subscription-active', 'fe
             });
         });
     });
+});
+
+/*
+|--------------------------------------------------------------------------
+| Twilio Voice webhooks — the ONE unauthenticated CRM surface
+|--------------------------------------------------------------------------
+|
+| Mounted OUTSIDE the authenticated group above, and outside `set-current-org`,
+| `subscription-active`, `feature:crm` and `EnsureCrmAccessIsActive`. That is a
+| deliberate, narrow exception to the note at the top of this file, and it exists
+| because Twilio calls us from the internet with no user, no token and no tenant:
+| there is no credential it could present to any of those gates.
+|
+| Two independent checks replace them, and BOTH must pass:
+|
+|   1. ValidateTwilioSignature  — the official Twilio SDK's RequestValidator proves
+|                                 the request really came from Twilio. Anything
+|                                 unsigned or mis-signed is refused 403.
+|   2. CallCorrelation          — an HMAC token, minted earlier by an AUTHENTICATED
+|                                 request that passed CallPolicy, names the single
+|                                 crm_calls row this webhook may touch. No id from
+|                                 the request body is ever dereferenced.
+|
+| The org is then read from that row's existing relationships. No tenant is
+| resolved here and multi-tenancy is untouched.
+|
+| These routes are inert unless Twilio is configured: the middleware refuses with
+| 503 when credentials are absent, which is every deployment running the free
+| manual mode.
+|
+*/
+Route::prefix('v1/twilio')->middleware(ValidateTwilioSignature::class)->group(function (): void {
+    Route::post('/voice', [TwilioVoiceWebhookController::class, 'voice']);
+    Route::post('/voice/completed', [TwilioVoiceWebhookController::class, 'completed']);
 });

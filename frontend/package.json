@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "copilot:gates": "node --experimental-strip-types --import ./scripts/copilot-gates/register.mjs ./scripts/copilot-gates/gates.ts",
-    "preview:gates": "node --experimental-strip-types --import ./scripts/copilot-gates/register.mjs ./scripts/attachment-preview-gates/gates.ts"
+    "preview:gates": "node --experimental-strip-types --import ./scripts/copilot-gates/register.mjs ./scripts/attachment-preview-gates/gates.ts",
+    "calling:gates": "node --experimental-strip-types --import ./scripts/copilot-gates/register.mjs ./scripts/calling-gates/gates.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
@@ -29,6 +30,7 @@
     "@tiptap/extensions": "^3.29.1",
     "@tiptap/react": "^3.29.1",
     "@tiptap/starter-kit": "^3.29.1",
+    "@twilio/voice-sdk": "^2.18.4",
     "axios": "^1.18.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
