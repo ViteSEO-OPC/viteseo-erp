@@ -4,6 +4,10 @@
 // below (labels, tones, duration formatting) is presentation only.
 
 export type CallStatus = "in_progress" | "completed";
+
+/** Where a call's stored duration came from. `provider` is verified talk time; `manual` is not. */
+export type CallDurationSource = "manual" | "provider";
+
 export type CallOutcome =
   | "connected"
   | "no_answer"
@@ -21,8 +25,19 @@ export type Call = {
   leadId: string;
   direction: CallDirection;
   provider: string;
+  /**
+   * The E.164 number handed to a carrier for this attempt, or null for a manual call — where the CRM
+   * did not dial and so does not know. Never substitute the lead's current phone here: it can be
+   * edited after the fact, which would make the history claim a call went somewhere it never went.
+   */
+  toNumber: string | null;
   status: CallStatus;
   outcome: CallOutcome | null;
+  /**
+   * WHO measured `durationSeconds` — the CRM's own clock (`manual`) or the carrier (`provider`).
+   * See {@link isProviderVerified}; this is the field to read, not `provider`.
+   */
+  durationSource: CallDurationSource | null;
   startedAt: string | null;
   endedAt: string | null;
   durationSeconds: number | null;
@@ -74,4 +89,19 @@ export function formatCallDuration(seconds: number | null | undefined): string {
   if (hours > 0) return `${hours}h ${minutes}m`;
   if (minutes > 0) return secs > 0 ? `${minutes}m ${secs}s` : `${minutes}m`;
   return `${secs}s`;
+}
+
+/**
+ * Whether a call record's duration is a carrier's measurement or the CRM's own.
+ *
+ * READ `durationSource`, NEVER `provider`. The transport says who carried the audio; it does not say
+ * who timed it. A Twilio call whose completion webhook never arrived — a tunnel down, an outage, a BD
+ * who pressed Complete before the callback landed — is `provider: "twilio"` and yet carries the CRM's
+ * own start→end measurement. Inferring from the transport would present that as verified talk time.
+ *
+ * A `manual` duration is only how long the call RECORD was open. It is NOT talk time and must never
+ * be shown as though it were: the conversation happened on a handset the CRM cannot observe.
+ */
+export function isProviderVerified(call: Pick<Call, "durationSource">): boolean {
+  return call.durationSource === "provider";
 }

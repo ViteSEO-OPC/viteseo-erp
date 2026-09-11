@@ -65,6 +65,10 @@ export const queryKeys = {
     // active-call session. Nested under detail(id), like activities/notes, so lead-detail invalidations
     // cascade and call writes touch only this lead's data by prefix.
     calls: (id: string) => [...queryKeys.leads.detail(id), "calls"] as const,
+    // What this deployment's calling can do for one lead (browser calling on/off, and whether the
+    // lead's phone is dialable). Nested under detail(id) like the rest, so editing the lead's phone
+    // re-asks the question by prefix rather than needing its own invalidation.
+    callingCapability: (id: string) => [...queryKeys.leads.detail(id), "calling-capability"] as const,
   },
   niches: {
     // Business Niche registry (GET /niches) — the vocabulary behind the shared Business Niche
@@ -186,6 +190,11 @@ export const queryKeys = {
     // effective one in a single payload, and splitting it would let the switch and a provider's
     // credential state be cached at different ages and disagree on screen.
     nerby: () => [...queryKeys.integrations.all, "nerby"] as const,
+    // Calling — the org's own Twilio account, and whether browser calling is on. One key for the
+    // whole screen, same reasoning as `nerby`: the API answers with the stored configuration AND
+    // what is actually in force in a single payload, and splitting them would let the two be cached
+    // at different ages and disagree on screen.
+    calling: () => [...queryKeys.integrations.all, "calling"] as const,
   },
   businessRules: {
     // Settings → Business Rules (Business Rules Administration). Keyed by module so the reserved

@@ -27,8 +27,17 @@ class CallResource extends JsonResource
 
             'direction' => $this->direction->value,
             'provider' => $this->provider,
+            // The number actually handed to a carrier. NULL for a manual call, where the CRM did not
+            // dial — the client must not fall back to the lead's current phone and present it as
+            // "what was dialed", because the lead's number may have changed since.
+            'toNumber' => $this->to_number,
             'status' => $this->status->value,
             'outcome' => $this->outcome?->value,
+            // WHO measured `durationSeconds`. `provider` is a carrier's verified talk time; `manual`
+            // is the CRM's own start→end clock, which is NOT talk time. The transport alone cannot
+            // answer this — a Twilio call whose completion webhook never arrived is timed by the CRM —
+            // so the client must read this field rather than infer from `provider`.
+            'durationSource' => $this->duration_source?->value,
 
             'startedAt' => $this->started_at?->toIso8601String(),
             'endedAt' => $this->ended_at?->toIso8601String(),
