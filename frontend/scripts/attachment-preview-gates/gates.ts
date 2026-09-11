@@ -14,9 +14,11 @@
  * ── WHAT EACH GATE VERIFIES ──────────────────────────────────────────────────────────────────
  *
  * A  KIND DETECTION — every previewable format resolves to the viewer that can actually render it.
- * B  THE DOWNLOAD-ONLY SET — doc/docx/ppt/pptx/zip must stay non-previewable. This gate is the one
- *    that fails if someone widens the predicate without building the viewer behind it, which is
- *    exactly the "UI promises a preview it cannot deliver" defect this whole slice exists to avoid.
+ * B  THE DOWNLOAD-ONLY SET — doc/docx/ppt/pptx/zip must stay non-previewable WITHOUT the server's
+ *    capability flag. This gate is the one that fails if someone widens the predicate without
+ *    building the viewer behind it, which is exactly the "UI promises a preview it cannot deliver"
+ *    defect this whole slice exists to avoid. Its cases are unchanged: a server without a conversion
+ *    service must behave precisely as every server did before the converter existed.
  * C  IMAGE AND PDF REGRESSION — the two kinds that already worked in production answer identically.
  * D  CSV PARSING — quoting, doubled quotes, embedded commas and newlines, CRLF, and the trailing
  *    field cases where `a,b,` (three fields) must not be confused with `a,b\n` (two).
@@ -218,6 +220,44 @@ const utf8 = (text: string) => new TextEncoder().encode(text);
 
   const bad = checks.filter(([, ok]) => !ok).map(([label]) => `failed: ${label}`);
   report("E  text decoding and bounds", checks.length - bad.length, checks.length, bad);
+}
+
+// ── F  Office documents, only with the server's capability ──────────────────────────────────
+{
+  const capable = { documentPreview: true };
+  const cases: [string, string, { documentPreview?: boolean }, string | null][] = [
+    // [mimeType, filename, options, expected kind]
+    ["application/msword", "contract.doc", capable, "document"],
+    ["application/vnd.openxmlformats-officedocument.wordprocessingml.document", "contract.docx", capable, "document"],
+    ["application/vnd.ms-powerpoint", "deck.ppt", capable, "document"],
+    ["application/vnd.openxmlformats-officedocument.presentationml.presentation", "deck.pptx", capable, "document"],
+    // fileinfo reports OOXML as the zip container on some hosts; the extension still decides.
+    ["application/zip", "contract.docx", capable, "document"],
+    ["application/octet-stream", "contract.docx", capable, "document"],
+    ["", "DECK.PPTX", capable, "document"],
+    // ZIP stays Download-only EVEN WHEN the server can convert Office documents.
+    ["application/zip", "bundle.zip", capable, null],
+    ["application/octet-stream", "bundle.zip", capable, null],
+    // No extension, no document preview: the endpoint requires the extension as well as the bytes.
+    ["application/msword", "contract", capable, null],
+    // The flag must change NOTHING else.
+    ["application/pdf", "proposal.pdf", capable, "pdf"],
+    ["application/vnd.ms-excel", "book.xls", capable, "sheet"],
+    ["text/csv", "export.csv", capable, "csv"],
+    ["image/png", "logo.png", capable, "image"],
+    // Explicitly false, or absent, is the Download-only answer gate B already pins.
+    ["application/msword", "contract.doc", { documentPreview: false }, null],
+    ["application/vnd.openxmlformats-officedocument.presentationml.presentation", "deck.pptx", {}, null],
+  ];
+
+  const bad = cases
+    .filter(([mime, name, options, expected]) => previewKindFor(mime, name, options) !== expected)
+    .map(
+      ([mime, name, options, expected]) =>
+        `${name} (${mime || "no mime"}, ${JSON.stringify(options)}) → ${previewKindFor(mime, name, options)}, want ${expected}`,
+    );
+
+  report("F  office docs need the server capability", cases.length - bad.length, cases.length, bad);
 }
 
 console.log(failed === 0 ? "\nAll gates passed." : `\n${failed} gate(s) FAILED.`);
