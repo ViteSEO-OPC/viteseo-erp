@@ -3556,11 +3556,17 @@ class AttendanceService
      * Classify an arrival against the schedule: early (before start), on_time
      * (within grace), or late (past grace) with minutes past start.
      *
+     * PUBLIC because the Daily Time Record report judges the same arrivals, and a second
+     * implementation of "how late is late" is a second answer. The subtleties are not
+     * incidental — grace is a gate rather than a subtraction, a half day is judged against
+     * the half that was worked, and a schedule that cannot say when the day starts declines
+     * to judge at all — and the report, the board and the payslip line all have to agree.
+     *
      * @param  array<string, mixed>  $eff
      * @param  ?string  $offHalf  a HalfDayWindowService::AM|PM|BOTH value, or null for a full day
      * @return array{category:string, late_minutes:int}
      */
-    private function arrivalCategory(Carbon $timeInLocal, array $eff, Carbon $dateCarbon, ?string $offHalf = null): array
+    public function arrivalCategory(Carbon $timeInLocal, array $eff, Carbon $dateCarbon, ?string $offHalf = null): array
     {
         $start = $this->expectedStart($dateCarbon, $eff, $offHalf);
         if ($start === null) {

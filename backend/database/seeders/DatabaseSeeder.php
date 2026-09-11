@@ -3,6 +3,7 @@
 namespace Database\Seeders;
 
 use App\Modules\Hr\Database\Seeders\AttendanceDemoSeeder;
+use App\Modules\Hr\Database\Seeders\AttendanceHistoryDemoSeeder;
 use App\Modules\Hr\Database\Seeders\AttritionDemoSeeder;
 use App\Modules\Hr\Database\Seeders\AuditDemoSeeder;
 use App\Modules\Hr\Database\Seeders\BenefitProgramSeeder;
@@ -154,6 +155,10 @@ class DatabaseSeeder extends Seeder
                 // Approved leave history across months for the Absences & Leaves report.
                 LeaveReportDemoSeeder::class,
                 AttendanceDemoSeeder::class,
+                // Last month in full, behind this week's board data, so the Daily Time
+                // Record has a finished month to show and its "Late by" column has
+                // something to report. Runs after the week seeder, which owns today.
+                AttendanceHistoryDemoSeeder::class,
                 ReimbursementDemoSeeder::class,
                 PayrollDemoSeeder::class,
                 RecruitmentDemoSeeder::class,
