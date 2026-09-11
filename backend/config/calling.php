@@ -33,13 +33,26 @@ return [
     'provider' => env('CALL_PROVIDER', 'manual'),
 
     /*
-     | Per-organization Twilio accounts (Settings → Integrations → Calling). The
-     | support is kept but OFF: with `false`, stored per-organization credentials
-     | are ignored and the centralized ViteSEO account is the only account ever used
-     | — for tokens, dialing, caller ID and webhook signatures. Do not switch on
-     | without a product decision.
+     | Per-organization Twilio accounts (Settings → Integrations → Calling). OFF by
+     | default: with `false`, stored per-organization credentials are ignored and the
+     | centralized ViteSEO account is the only account ever used — for tokens,
+     | dialing, caller ID and webhook signatures. Do not switch on without a product
+     | decision.
+     |
+     | With `true`, each client organization is carried ONLY on its own account, and
+     | an organization without one gets manual calling — never the centralized
+     | account (see TwilioConfig::forOrg()).
      */
     'organization_credentials' => (bool) env('CALLING_ORGANIZATION_CREDENTIALS', false),
+
+    /*
+     | The ONE organization (ViteSEO's own) carried on the centralized account while
+     | per-organization accounts are on. Its settings screen is read-only. Unset, or
+     | not a positive integer, means NO organization uses the centralized account —
+     | so set it before switching per-organization accounts on. Ignored while they
+     | are off, when every organization uses the centralized account.
+     */
+    'central_org_id' => env('CALLING_CENTRAL_ORG_ID'),
 
     /*
      | Known transports. The key is what CALL_PROVIDER accepts AND what lands in

@@ -38,7 +38,8 @@ use Twilio\Security\RequestValidator;
  * every webhook is verified against that account's Auth Token — the same account the call was placed
  * on. The org is still read from the correlation and passed to {@see TwilioConfig::forOrg()}, so that a
  * deployment which explicitly switches on per-organization accounts verifies each org's webhooks
- * against that org's own account. With that option off — the default — the answer is always the
+ * against that org's own account — and, for an org with no account of its own, against nothing at all
+ * (a 503), never the centralized one. With that option off — the default — the answer is always the
  * centralized account, and a per-organization row can never become an alternative signer.
  *
  * The org is read the only way it safely can be: from the CORRELATION TOKEN — in the body of the voice
@@ -92,8 +93,21 @@ class ValidateTwilioSignature
         // The form body exactly as Twilio sent it — see signedParams(). Query parameters are NOT added
         // to it: they are already part of the URL Twilio signed, and repeating them would produce a
         // canonical string Twilio never signed.
-        if (! $validator->validate($signature, $this->publicUrl($request, $config->webhookBaseUrl), $this->signedParams($request))) {
+        $params = $this->signedParams($request);
+
+        if (! $validator->validate($signature, $this->publicUrl($request, $config->webhookBaseUrl), $params)) {
             return response('Invalid Twilio signature.', Response::HTTP_FORBIDDEN);
+        }
+
+        // The account Twilio says it is calling for must be the account these credentials belong to.
+        // Twilio sends its `AccountSid` on every webhook, inside the signed body, so this binds the
+        // request to the SAME credential set whose Auth Token just verified it — a signature that is
+        // valid for one account can never be accepted for a call carried on another.
+        $accountSid = $params['AccountSid'] ?? null;
+
+        if (is_string($accountSid) && $accountSid !== ''
+            && ! hash_equals((string) $config->accountSid, $accountSid)) {
+            return response('Webhook is not for this Twilio account.', Response::HTTP_FORBIDDEN);
         }
 
         return $next($request);

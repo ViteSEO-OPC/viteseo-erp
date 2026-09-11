@@ -62,9 +62,14 @@ class CallProviderSettingsTest extends TestCase
         parent::setUp();
         $this->seed(RolesAndPermissionsSeeder::class);
 
-        // This suite exercises the retained-but-DORMANT per-organization account support, so it switches
-        // it on. Zerem's own configuration leaves it off and runs one centralized ViteSEO account.
+        // This suite exercises the per-organization account support, so it switches it on. Zerem's own
+        // configuration leaves it off and runs one centralized ViteSEO account.
         Config::set('calling.organization_credentials', true);
+
+        // The deployment's public origin — where Twilio calls back. A hosting property, never a tenant
+        // setting, so it is configured here and not submitted through the settings screen. Nothing
+        // names a central organization, so the harness org is an ordinary CLIENT organization.
+        Config::set('twilio.webhook_base_url', 'https://zerem.example');
 
         // No deployment-wide credentials by default: the ordinary state of a CRM that never bought
         // telephony, and the baseline every "it still works" assertion below depends on.
@@ -121,7 +126,10 @@ class CallProviderSettingsTest extends TestCase
         $this->postJson(self::BASE.'/test')->assertOk();
     }
 
-    /** The centralized TWILIO_* account: what an org with no row of its own uses, in per-org mode too. */
+    /**
+     * The centralized TWILIO_* account, complete — so that a silent fallback to it would be observable.
+     * No client organization may ever be carried on it.
+     */
     private function configureDeploymentTwilio(): void
     {
         Config::set('twilio.account_sid', 'ACfeedface00000000000000000000beef');
@@ -130,7 +138,7 @@ class CallProviderSettingsTest extends TestCase
         Config::set('twilio.api_secret', 'deployment-api-secret');
         Config::set('twilio.twiml_app_sid', 'APfeedface00000000000000000000beef');
         Config::set('twilio.caller_id', '+639179999999');
-        Config::set('twilio.webhook_base_url', 'https://deployment.example');
+        Config::set('twilio.webhook_base_url', 'https://zerem.example');
     }
 
     // ── The free default ───────────────────────────────────────────────────────────────────────
@@ -334,8 +342,6 @@ class CallProviderSettingsTest extends TestCase
             'twiml app without the AP prefix' => ['twiml_app_sid', 'SKtest00000000000000000000000000'],
             'caller id in local form' => ['caller_id', '09171234567'],
             'caller id with spaces' => ['caller_id', '+63 917 123 4567'],
-            'plaintext webhook origin' => ['webhook_base_url', 'http://zerem.example'],
-            'webhook origin that is not a url' => ['webhook_base_url', 'zerem.example'],
             'auth token with a stray space' => ['auth_token', 'not a real token but has spaces'],
             'api secret too short to be one' => ['api_secret', 'short'],
         ];
@@ -420,16 +426,22 @@ class CallProviderSettingsTest extends TestCase
         $this->assertSame(ManualCallProvider::NAME, app(CallProviderRegistry::class)->active()->name());
     }
 
-    public function test_an_org_with_no_row_inherits_the_deployment_configuration(): void
+    public function test_an_org_with_no_row_never_inherits_the_centralized_account(): void
     {
+        // The centralized account is complete AND selected, so a fallback to it would be observable.
         $this->configureDeploymentTwilio();
-        $this->actingAsAdmin();
+        Config::set('calling.provider', TwilioCallProvider::NAME);
+        $admin = $this->actingAsAdmin();
 
         $data = $this->getJson(self::BASE)->assertOk()->json('data');
 
-        $this->assertTrue($data['browserCalling']);
-        $this->assertSame(TwilioConfig::SOURCE_DEPLOYMENT, $data['source']);
-        $this->assertFalse($data['settings']['configured'], 'Inheriting must not fabricate a stored row.');
+        $this->assertFalse($data['browserCalling'], 'A client with no account of its own must not borrow the centralized one.');
+        $this->assertSame(TwilioConfig::SOURCE_NONE, $data['source']);
+        $this->assertFalse($data['centrallyManaged']);
+        $this->assertFalse($data['settings']['configured'], 'Reading must not fabricate a stored row.');
+
+        CurrentOrg::set($admin->orgs()->firstOrFail()->id);
+        $this->assertSame(ManualCallProvider::NAME, app(CallProviderRegistry::class)->active()->name());
     }
 
     // ── Cross-organization isolation ───────────────────────────────────────────────────────────
@@ -617,6 +629,10 @@ class CallProviderSettingsTest extends TestCase
         [$alpha, $alphaAdmin] = $this->orgWithAdmin('alpha');
         [$beta, $betaAdmin] = $this->orgWithAdmin('beta');
 
+        // The centralized account is complete and selected — so if Beta could fall back to it, it would.
+        $this->configureDeploymentTwilio();
+        Config::set('calling.provider', TwilioCallProvider::NAME);
+
         $this->actAs($alphaAdmin);
         $this->configureAndVerify();
 
@@ -624,7 +640,8 @@ class CallProviderSettingsTest extends TestCase
         $call = $this->browserCallIn($beta, $betaAdmin);
         $this->assertSame(ManualCallProvider::NAME, $call->provider);
 
-        // …and no browser credential can be minted for it — least of all one signed by alpha's account.
+        // …and no browser credential can be minted for it — not one signed by alpha's account, and not
+        // one signed by the centralized account either.
         $this->actAs($call->agent()->firstOrFail());
         $this->postJson("/api/v1/crm/calls/{$call->id}/token")
             ->assertStatus(422)
@@ -641,8 +658,8 @@ class CallProviderSettingsTest extends TestCase
         $call = $this->browserCallIn($alpha, $alphaAdmin);
         $action = $this->dialAs($call, self::AUTH_TOKEN, 'CA00000000000000000000000000000021');
 
-        // The action URL is on the ORG's public origin and carries the completion correlation — the
-        // one thing that lets the callback name its call AND pick the org whose token signed it.
+        // The action URL is on the DEPLOYMENT's public origin and carries the completion correlation —
+        // the one thing that lets the callback name its call AND pick the org whose token signed it.
         $this->assertStringStartsWith('https://zerem.example/api/v1/twilio/voice/completed?', $action);
 
         $this->completeAs($action, self::AUTH_TOKEN, 'CA00000000000000000000000000000021')->assertOk();
