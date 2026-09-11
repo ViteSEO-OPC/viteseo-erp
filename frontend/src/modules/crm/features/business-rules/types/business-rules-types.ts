@@ -41,6 +41,16 @@ export type BusinessRuleVersion = {
   reasonForChange: string | null;
   createdBy: string | null;
   publishedBy: string | null;
+  /**
+   * Resolved identities — present only when the endpoint eager-loads them (Version History does).
+   *
+   * Optional rather than merely nullable: `whenLoaded` omits the key entirely on endpoints that do
+   * not load the relation, so `undefined` and `null` mean different things — not requested versus
+   * requested but unresolvable. The raw `createdBy`/`publishedBy` ids above stay as the stable
+   * reference; a version whose author has since been deleted keeps its id but resolves to no name.
+   */
+  creator?: { id: string; name: string } | null;
+  publisher?: { id: string; name: string } | null;
   publishedAt: string | null;
   createdAt: string | null;
   rules: BusinessRule[];

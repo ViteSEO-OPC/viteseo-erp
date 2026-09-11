@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 
 use App\Modules\Crm\Requests\AssignLeadRequest;
 use App\Modules\Crm\Requests\ImportLeadsRequest;
+use App\Modules\Crm\Requests\DestroyAllLeadsRequest;
 use App\Modules\Crm\Requests\IndexArchivedLeadRequest;
 use App\Modules\Crm\Requests\IndexLeadRequest;
 use App\Modules\Crm\Requests\IngestDiscoveredLeadsRequest;
@@ -38,6 +39,7 @@ use App\Modules\Crm\Services\Scoring\ScoreSignal;
 use Illuminate\Contracts\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Builder as EloquentBuilder;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -378,9 +380,90 @@ class LeadController extends Controller
 
     public function destroy(Lead $lead): JsonResponse
     {
-        $lead->delete();
+        $this->archiveLead($lead);
 
         return response()->json(null, 204);
+    }
+
+    /**
+     * How many leads "Archive all leads" would affect, for the confirmation dialog.
+     *
+     * Shares {@see deletableQuery()} with {@see destroyAll()} so the number shown and the number
+     * acted on are produced by the same scope — a count computed any other way could disagree with
+     * the action, which on a destructive confirmation is worse than showing no number at all.
+     */
+    public function deletableCount(Request $request): JsonResponse
+    {
+        return response()->json([
+            'data' => ['count' => $this->deletableQuery($request->user())->count()],
+        ]);
+    }
+
+    /**
+     * Archive EVERY lead in the caller's authorized scope — not merely the page they are looking at.
+     *
+     * Deliberately the same mechanism as archiving one lead: {@see archiveLead()} soft-deletes, which
+     * is the single archive state, so every lead lands in the existing Archive, keeps its
+     * `lead.archived` Activity from LeadObserver, and is restorable through the existing
+     * restore/restoreAll path. There is no second deletion system and nothing here force-deletes.
+     *
+     * Three fences, none of which is the frontend:
+     *   1. the route  — role:super_admin|crm_admin + permission:crm.leads.delete (a BD holds no
+     *      `crm.leads.delete` at all, so this is refused before the controller runs);
+     *   2. the query  — Lead's BelongsToOrg global scope confines it to the current tenant, and
+     *      `visibleTo` applies the ownership boundary on top;
+     *   3. per record — LeadPolicy@delete is re-asked for every lead, exactly as restoreAll does,
+     *      so scope and policy must BOTH agree before anything is archived.
+     *
+     * Ids are collected before the loop rather than chunked over the live query: soft-deleting
+     * removes a row from the default (non-trashed) query, so a cursor walking that query while it
+     * shrinks would skip roughly every other row.
+     */
+    public function destroyAll(DestroyAllLeadsRequest $request): JsonResponse
+    {
+        $user = $request->user();
+
+        /** @var \Illuminate\Support\Collection<int, int> $ids */
+        $ids = $this->deletableQuery($user)->pluck('id');
+
+        $archived = 0;
+        foreach ($ids->chunk(200) as $chunk) {
+            foreach ($this->deletableQuery($user)->whereIn('id', $chunk->all())->get() as $lead) {
+                $this->authorize('delete', $lead);
+                $this->archiveLead($lead);
+                $archived++;
+            }
+        }
+
+        return response()->json(['data' => ['archived' => $archived]]);
+    }
+
+    /**
+     * The leads "Archive all leads" may touch: live (non-archived) leads inside the caller's scope.
+     *
+     * `Lead::query()` already excludes soft-deleted rows and is org-scoped by the BelongsToOrg global
+     * scope; `visibleTo` narrows further to the ownership boundary (a pass-through for Admin/SA).
+     * Defined once and shared by the count and the action.
+     *
+     * @return EloquentBuilder<Lead>
+     */
+    private function deletableQuery(User $user): EloquentBuilder
+    {
+        return Lead::query()->visibleTo($user);
+    }
+
+    /**
+     * The single archive mechanism, mirroring {@see restoreLead()} on the other side.
+     *
+     * `$lead->delete()` sets `deleted_at` — the sole archive state, there is no archive table — and
+     * fires LeadObserver::deleted, which writes the one immutable archive Activity. Idempotent: an
+     * already-archived lead is left alone, so a repeated bulk run cannot double-log.
+     */
+    private function archiveLead(Lead $lead): void
+    {
+        if (! $lead->trashed()) {
+            $lead->delete();
+        }
     }
 
     // ── Archive Management (Admin/Super Admin) ──────────────────────────────────────────────────
@@ -548,7 +631,10 @@ class LeadController extends Controller
         Lead $lead,
         LeadAssignmentService $assignment,
     ): JsonResponse {
-        $assignedTo = (int) $request->validated('assigned_to');
+        // Null is a legitimate value here — it clears the owner. Casting unconditionally would
+        // turn that into user 0 and silently fail the foreign key.
+        $assignedTo = $request->validated('assigned_to');
+        $assignedTo = $assignedTo === null ? null : (int) $assignedTo;
 
         // The handover itself now lives in LeadAssignmentService, shared with the resignation
         // handover in UserController so a bulk move cannot become a second ownership model with no
@@ -568,7 +654,11 @@ class LeadController extends Controller
         // that event would silently not run during an outage, and the assignment would
         // reach nobody. Persisting first makes the record independent of the transport,
         // which is the whole reason it is persisted.
-        $lead->assignedTo->notify(new LeadAssignedNotification($lead, $request->user()));
+        // Only when the lead HAS a new owner. Clearing an assignment has nobody to notify, and
+        // `$lead->assignedTo` is null — the previous owner is deliberately not told either: this
+        // endpoint has never notified the outgoing BD on a reassignment, and an unassignment is a
+        // reassignment. Nothing about that changed here.
+        $lead->assignedTo?->notify(new LeadAssignedNotification($lead, $request->user()));
 
         // Realtime push — only after the write and its activity have succeeded, so a subscriber is
         // never told about an assignment that didn't land. toOthers() excludes the assigning client
@@ -578,7 +668,13 @@ class LeadController extends Controller
         // Still separate from the notification above, and still worth having: this is the
         // transient toast for a BD who is looking right now, and it also updates the lead's
         // own stream for Admins watching it. The notification is the record; this is the nudge.
-        SafeBroadcast::toOthers(new LeadAssigned($lead, $request->user()));
+        // Skipped when the owner was cleared: LeadAssigned broadcasts on `user.{assignedToId}`,
+        // which with no owner is the meaningless channel `user.` — a push addressed to nobody. The
+        // Activity above is still written, so the change remains fully audited, and the acting
+        // client refetches on success regardless.
+        if ($lead->assigned_to !== null) {
+            SafeBroadcast::toOthers(new LeadAssigned($lead, $request->user()));
+        }
 
         return response()->json([
             'data' => new LeadResource($lead),

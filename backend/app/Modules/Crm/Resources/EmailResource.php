@@ -19,6 +19,10 @@ class EmailResource extends JsonResource
             'subject' => $this->subject,
             // Included so a draft can be loaded back into the composer for editing.
             'body' => $this->body,
+            // Additive. The Tiptap document of a formatted reply, rendered read-only by the Lead Detail
+            // thread; null for every plain-text, inbound, draft and automation email, which keep
+            // rendering `body` exactly as before. JSON, never HTML.
+            'bodyDoc' => $this->body_doc,
             'status' => $this->status,
             'direction' => $this->direction,
             // RC3 Outreach Automation Pack — business purpose of the send (null for user-composed / inbound).

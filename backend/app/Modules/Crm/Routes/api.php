@@ -223,6 +223,15 @@ Route::middleware(['auth:sanctum', 'set-current-org', 'subscription-active', 'fe
             // per-record restore path (one restore workflow, one Activity per lead).
             Route::post('/leads/restore-all', [LeadController::class, 'restoreAll'])
                 ->middleware('permission:crm.leads.restore');
+            // "Archive all leads" — every lead in the caller's authorized scope, not just the page
+            // on screen. Same soft-delete mechanism as DELETE /leads/{lead}: the leads land in the
+            // Archive above and are restorable by the two routes around this one. Static paths, so
+            // declared inside this management-only group and ahead of the /leads/{lead} wildcards.
+            // The count feeds the confirmation dialog from the SAME scope the action uses.
+            Route::get('/leads/deletable-count', [LeadController::class, 'deletableCount'])
+                ->middleware('permission:crm.leads.delete');
+            Route::post('/leads/destroy-all', [LeadController::class, 'destroyAll'])
+                ->middleware('permission:crm.leads.delete');
             // Restore one archived lead. withTrashed() resolves the soft-deleted model for binding;
             // authorized by LeadPolicy@restore (leads.restore + ownership).
             Route::post('/leads/{lead}/restore', [LeadController::class, 'restore'])
@@ -353,6 +362,12 @@ Route::middleware(['auth:sanctum', 'set-current-org', 'subscription-active', 'fe
             ->middleware('permission:crm.lead.attachments.create')
             ->can('view', 'lead');
         Route::get('/leads/{lead}/attachments/{attachment}/download', [LeadAttachmentController::class, 'download'])
+            ->scopeBindings()
+            ->can('view', 'lead');
+        // Same bytes, different shape — so deliberately the SAME authorization as download above,
+        // not a weaker one. Returns a bounded JSON window of a spreadsheet; every other file type
+        // 422s and falls back to download.
+        Route::get('/leads/{lead}/attachments/{attachment}/preview', [LeadAttachmentController::class, 'preview'])
             ->scopeBindings()
             ->can('view', 'lead');
         Route::delete('/leads/{lead}/attachments/{attachment}', [LeadAttachmentController::class, 'destroy'])

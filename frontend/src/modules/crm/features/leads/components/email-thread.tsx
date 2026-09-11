@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import type { Editor } from "@tiptap/react";
 import { Send } from "lucide-react";
 import { cn } from "@/modules/crm/lib/utils";
 import { formatActivityTimestamp } from "@/modules/crm/lib/formatters";
@@ -9,6 +10,8 @@ import { useSendEmail } from "@/modules/crm/features/follow-ups/hooks/use-outrea
 import { Button } from "@/modules/crm/components/ui/button";
 import { EmptyState } from "@/modules/crm/components/shared/empty-state/empty-state";
 import { ErrorState } from "@/modules/crm/components/shared/error-state/error-state";
+import { NoteBody } from "@/modules/crm/features/leads/components/note-body";
+import { EmailRichEditor } from "@/modules/crm/features/leads/components/email-rich-editor";
 import type { EmailThreadMessage } from "@/modules/crm/features/leads/types/lead-detail-types";
 
 /** Human label for the delivery/lifecycle state stored on the email row. */
@@ -87,12 +90,21 @@ function MessageCard({ message }: { message: EmailThreadMessage }) {
         {attribution ? <span className="ml-1.5">· {attribution}</span> : null}
       </p>
 
-      <p className="mt-1 text-sm font-semibold text-card-foreground">
+      {/* `break-words` like the body below: an inbound subject is whatever the sender typed. */}
+      <p className="mt-1 break-words text-sm font-semibold text-card-foreground">
         {message.subject || "(no subject)"}
       </p>
-      <p className="mt-1 whitespace-pre-wrap break-words text-sm text-muted-foreground">
-        {message.body}
-      </p>
+      {message.bodyDoc ? (
+        // A formatted reply: its document rendered READ-ONLY through the same safe path as Internal
+        // Notes — ProseMirror builds the DOM from the JSON, so there is no HTML string and no
+        // dangerouslySetInnerHTML anywhere in the thread.
+        <NoteBody text={message.body} doc={message.bodyDoc} className="mt-1" />
+      ) : (
+        // Every plain-text, inbound and older email renders exactly as it always has.
+        <p className="mt-1 whitespace-pre-wrap break-words text-sm text-muted-foreground">
+          {message.body}
+        </p>
+      )}
     </li>
   );
 }
@@ -116,27 +128,41 @@ type Props = {
  * sends through the EXISTING Outreach pipeline — `useSendEmail` → `POST /leads/{lead}/emails` →
  * OutreachEmailService. No second email path is introduced here: this component owns presentation
  * and nothing else. The customer-facing sender identity stays entirely a backend/config concern.
+ *
+ * The reply is composed as a formatted document and sent as `body_doc` alongside `body`. The server
+ * validates the document against the email-safe subset, derives the plain text from it, and writes
+ * the HTML part itself — the browser never sends markup.
  */
 export function EmailThread({ leadId }: Props) {
   const { data, hasMore, isLoading, isError } = useLeadEmails(leadId);
   const sendEmail = useSendEmail();
 
-  const [body, setBody] = useState("");
+  // The editor owns the draft. These two are its handle and an empty/non-empty flag — the editor
+  // instance is referentially stable, so reading its text during render would never update.
+  const [editor, setEditor] = useState<Editor | null>(null);
+  const [hasBody, setHasBody] = useState(false);
   // `null` means "follow the thread" — the derived Re: subject is used until the BD edits it, so a
   // newly-arrived reply keeps the box in sync without an effect syncing state to props.
   const [subjectOverride, setSubjectOverride] = useState<string | null>(null);
   const subject = subjectOverride ?? replySubjectFor(data);
 
-  const canSend = !!body.trim() && !!subject.trim() && !sendEmail.isPending;
+  const canSend = editor !== null && hasBody && !!subject.trim() && !sendEmail.isPending;
 
   function submit() {
-    if (!canSend) return;
+    if (!canSend || !editor) return;
     sendEmail.mutate(
-      { leadId, subject: subject.trim(), body: body.trim() },
+      {
+        leadId,
+        subject: subject.trim(),
+        // Advisory only: the server re-derives `body` from the document, so the text/plain part and
+        // the HTML part come from one source. Still sent because `body` is required for every caller.
+        body: editor.getText({ blockSeparator: "\n" }).trim(),
+        bodyDoc: editor.getJSON(),
+      },
       {
         onSuccess: () => {
           // The thread refreshes via useSendEmail's invalidation of leads.emails(leadId).
-          setBody("");
+          editor.commands.clearContent(true);
           setSubjectOverride(null);
         },
       },
@@ -144,7 +170,12 @@ export function EmailThread({ leadId }: Props) {
   }
 
   return (
-    <div className="rounded-2xl border border-border bg-card p-6 shadow-card">
+    // `contain-inline-size`, for the same reason as the Files & Downloads card: the card's WIDTH never
+    // depends on what is inside it. The from → to line is `truncate`, and `break-words` still lets a
+    // long URL in a body count at full width, so either used to climb to the page's `76fr` track, whose
+    // bare `fr` cannot shrink below its content. The card always fills its column, so nothing in it
+    // relies on its intrinsic width.
+    <div className="rounded-2xl border border-border bg-card p-6 shadow-card contain-inline-size">
       <h3 className="mb-5 text-lg font-bold text-card-foreground">Email Conversation</h3>
 
       {isLoading ? (
@@ -206,13 +237,14 @@ export function EmailThread({ leadId }: Props) {
             className="h-10 w-full rounded-lg border border-border bg-card px-3.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
           />
 
-          <textarea
-            aria-label="Reply message"
-            value={body}
-            onChange={(e) => setBody(e.target.value)}
-            rows={4}
+          <EmailRichEditor
+            className="mt-2"
+            ariaLabel="Reply message"
             placeholder="Write your reply…"
-            className="mt-2 w-full rounded-lg border border-border bg-card px-3.5 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+            onEditorReady={setEditor}
+            onEmptyChange={setHasBody}
+            onSubmit={submit}
+            disabled={sendEmail.isPending}
           />
 
           <div className="mt-3 flex justify-end">

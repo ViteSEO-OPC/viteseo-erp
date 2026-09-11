@@ -32,7 +32,7 @@ class ScheduledEmailService
      * Persist a Send-Later email (status=scheduled). Does NOT send — the scheduler job dispatches it
      * when due. `scheduled_at` is validated as future at the request layer.
      */
-    public function schedule(Lead $lead, User $sender, string $subject, string $body, Carbon $scheduledAt, ?string $to = null): Email
+    public function schedule(Lead $lead, User $sender, string $subject, string $body, Carbon $scheduledAt, ?string $to = null, ?array $bodyDoc = null): Email
     {
         $email = Email::create([
             'lead_id' => $lead->id,
@@ -42,6 +42,9 @@ class ScheduledEmailService
             'to_name' => $lead->contact_name,
             'subject' => $subject,
             'body' => $body,
+            // A formatted reply keeps its document on the row; deliver() → sendExisting() renders the
+            // text/html part from it when the email is due, so formatting survives the wait.
+            'body_doc' => $bodyDoc,
             'status' => 'scheduled',
             'scheduled_at' => $scheduledAt,
         ]);

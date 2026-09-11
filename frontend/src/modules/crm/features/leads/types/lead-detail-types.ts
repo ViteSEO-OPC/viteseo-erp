@@ -1,3 +1,4 @@
+import type { JSONContent } from "@tiptap/react";
 import type { LeadRow, PriorityLevel, LeadStatus, ActivityType } from "@/modules/crm/features/dashboard/types/dashboard-types";
 import type { LeadOutcome } from "@/modules/crm/features/leads/components/lead-score-ring";
 
@@ -55,7 +56,17 @@ export type Note = {
   /** Shared avatar source (signed link from `users.avatar`); null → render initials. */
   avatarUrl: string | null;
   timestamp: string;
+  /**
+   * The note's readable text. ALWAYS present — for a rich note it is the server's projection of
+   * `doc`, so search, exports and any text-only surface keep working regardless of format.
+   */
   text: string;
+  /**
+   * The Tiptap document, when this note was composed in the rich editor. `null` for every legacy and
+   * imported note, and that nullability IS the format discriminator: null → render `text` as plain
+   * text exactly as before; present → render the document read-only.
+   */
+  doc: JSONContent | null;
   self: boolean;
 };
 
@@ -79,6 +90,9 @@ export type EmailThreadMessage = {
   direction: "inbound" | "outbound";
   subject: string;
   body: string;
+  // A formatted reply's Tiptap document, rendered read-only; null for every plain-text, inbound and
+  // older email, which render `body` exactly as before.
+  bodyDoc: JSONContent | null;
   // Delivery/lifecycle state: sent · received · failed · draft.
   status: string;
   // Unified chronological key (inbound receipt / outbound send / row creation).

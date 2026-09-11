@@ -9,7 +9,7 @@ use App\Modules\Projects\Enums\NoteScope;
 use App\Modules\Projects\Exceptions\NoteVersionConflictException;
 use App\Modules\Projects\Models\Note;
 use App\Modules\Projects\Models\Project;
-use App\Modules\Projects\Support\TiptapDocument;
+use App\Support\TiptapDocument;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 

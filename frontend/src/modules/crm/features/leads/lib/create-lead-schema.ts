@@ -44,7 +44,12 @@ const optionalAmount = z
  * while a BD creator is auto-assigned server-side and never sees the selector. Same condition as
  * `StoreLeadRequest`'s `Rule::requiredIf(... ! hasRole('crm_bd'))`, so the two cannot disagree.
  */
-export function createLeadSchema(isManager: boolean) {
+/**
+ * `assignedTo` is the only field that ever varied by role, and it no longer does — so this takes no
+ * arguments. It kept a manager-only `min(1)` until unassigned leads were allowed; leaving the
+ * parameter behind would imply a role-dependence the schema no longer has.
+ */
+export function createLeadSchema() {
   return z.object({
     // Step 1 — Business Info
     businessName: requiredTrimmedString("Business name is required"),
@@ -65,12 +70,20 @@ export function createLeadSchema(isManager: boolean) {
     acquisitionChannel: optionalText(100),
     priority: z.enum(["high", "medium", "low"]),
     amount: optionalAmount,
-    assignedTo: isManager
-      ? z.string().min(1, "Select a Business Development Manager")
-      : z.string(),
+    // Optional for EVERY creator, manager included. A lead may legitimately exist before anyone
+    // has been chosen to work it, and the old `min(1)` for managers made an Admin or Super Admin
+    // unable to create one at all until they picked an owner. The backend rule was relaxed in step
+    // with this (StoreLeadRequest), so the two agree; `UNASSIGNED` below is the explicit way to
+    // say "no owner" rather than leaving the placeholder selected by accident.
+    assignedTo: z.string(),
     notes: optionalText(5000),
   });
 }
+
+// The wizard and the bulk Assign/Reassign modal must mean the same thing by "Unassigned", so the
+// sentinel is defined once in modules/crm/lib/bd-assignment and re-exported here for the wizard's
+// existing importers rather than declared a second time.
+export { UNASSIGNED_BD, isUnassignedBd } from "@/modules/crm/lib/bd-assignment";
 
 export type CreateLeadValues = z.infer<ReturnType<typeof createLeadSchema>>;
 

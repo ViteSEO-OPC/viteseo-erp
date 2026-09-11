@@ -24,6 +24,10 @@ class NoteResource extends JsonResource
             // The author's photo, from the one shared avatar source. Null → initials.
             'avatarUrl' => ProfilePhotoService::url($this->author?->avatar),
             'body' => $this->body,
+            // The Tiptap document, or null for a legacy/imported note. That nullability is the
+            // format discriminator the client renders on: null → the plain-text renderer that has
+            // always been used; present → the read-only Tiptap renderer. No version flag needed.
+            'bodyDoc' => $this->body_doc,
             // Whether the requesting user wrote this note (drives the self/other bubble styling).
             'self' => $this->user_id !== null && $request->user()?->id === $this->user_id,
             'createdAt' => $this->created_at?->toIso8601String(),

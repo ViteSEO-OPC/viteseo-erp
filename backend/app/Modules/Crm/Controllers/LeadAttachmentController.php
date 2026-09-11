@@ -6,7 +6,10 @@ use App\Http\Controllers\Controller;
 use App\Modules\Crm\Models\Lead;
 use App\Modules\Crm\Models\LeadAttachment;
 use App\Modules\Crm\Requests\StoreLeadAttachmentRequest;
+use App\Modules\Crm\Resources\AttachmentPreviewResource;
 use App\Modules\Crm\Resources\LeadAttachmentResource;
+use App\Modules\Crm\Services\Attachments\SpreadsheetPreviewReader;
+use App\Modules\Crm\Services\Attachments\UnreadableSpreadsheetException;
 use App\Modules\Crm\Services\LeadAttachmentStore;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -62,6 +65,43 @@ class LeadAttachmentController extends Controller
         }
 
         return $disk->download($attachment->path, $attachment->original_name);
+    }
+
+    /**
+     * A bounded, JSON preview of a spreadsheet attachment.
+     *
+     * Authorized EXACTLY as download is — `view` on the parent lead, plus the route's scopeBindings
+     * tying {attachment} to {lead} — because it discloses the same bytes in a different shape. There
+     * is no second access path and no public URL: an unauthorized caller is refused here for the
+     * same reason, by the same policy, as at the download endpoint.
+     *
+     * The format is decided from the FILE CONTENT by the reader, not from `mime_type` or the
+     * filename, so a `.xlsx` that is really something else 422s instead of reaching a parser. Any
+     * non-spreadsheet attachment therefore also 422s, which is correct: Download is the fallback for
+     * everything this cannot open.
+     */
+    public function preview(
+        Lead $lead,
+        LeadAttachment $attachment,
+        SpreadsheetPreviewReader $reader,
+    ): SymfonyResponse {
+        $disk = Storage::disk(LeadAttachmentStore::DISK);
+
+        if (! $disk->exists($attachment->path)) {
+            throw new NotFoundHttpException('The attached file is no longer available.');
+        }
+
+        try {
+            $preview = $reader->read($disk->path($attachment->path));
+        } catch (UnreadableSpreadsheetException $e) {
+            // getMessage() is one of the class's own constants — safe by construction. The cause is
+            // attached as `previous` for the log and is never serialized into the response.
+            report($e);
+
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return (new AttachmentPreviewResource($preview))->response();
     }
 
     /** Delete an attachment (uploader/Admin/SA): soft-deletes the row and removes the bytes. */

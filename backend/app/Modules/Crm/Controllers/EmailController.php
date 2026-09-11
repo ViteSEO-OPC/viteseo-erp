@@ -45,10 +45,15 @@ class EmailController extends Controller
 
         $to = isset($data['to']) ? (string) $data['to'] : null;
 
+        // A formatted reply carries a validated document and its body is the server's projection of
+        // it; every other caller (Follow-ups, drafts, templates) sends plain `body` exactly as before.
+        $body = $request->bodyText();
+        $bodyDoc = $request->emailDocument();
+
         // RC3 Send-Later: a future `scheduled_at` schedules the email (no send now); otherwise send now.
         $email = isset($data['scheduled_at'])
-            ? $scheduled->schedule($lead, $sender, (string) $data['subject'], (string) $data['body'], Carbon::parse((string) $data['scheduled_at']), $to)
-            : $service->sendToLead($lead, $sender, (string) $data['subject'], (string) $data['body'], $to);
+            ? $scheduled->schedule($lead, $sender, (string) $data['subject'], $body, Carbon::parse((string) $data['scheduled_at']), $to, $bodyDoc)
+            : $service->sendToLead($lead, $sender, (string) $data['subject'], $body, $to, $bodyDoc);
 
         return (new EmailResource($email))->response()->setStatusCode(201);
     }
