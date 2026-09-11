@@ -1,6 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import type { JSONContent } from "@tiptap/react";
 import { apiClient } from "@/modules/crm/lib/axios";
 import { queryKeys } from "@/modules/crm/lib/query-keys";
 import type { EmailThreadMessage } from "@/modules/crm/features/leads/types/lead-detail-types";
@@ -14,6 +15,8 @@ type EmailApi = {
   direction: "inbound" | "outbound";
   subject: string;
   body: string;
+  /** Optional so an older payload without the field simply means "plain text". */
+  bodyDoc?: JSONContent | null;
   status: string;
   timestamp: string | null;
   sentAt: string | null;
@@ -46,6 +49,7 @@ export function useLeadEmails(id: string) {
     direction: api.direction,
     subject: api.subject,
     body: api.body,
+    bodyDoc: api.bodyDoc ?? null,
     status: api.status,
     timestamp: api.timestamp ?? api.receivedAt ?? api.sentAt ?? "",
     fromName: api.fromName,

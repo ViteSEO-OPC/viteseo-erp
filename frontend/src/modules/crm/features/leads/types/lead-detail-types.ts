@@ -90,6 +90,9 @@ export type EmailThreadMessage = {
   direction: "inbound" | "outbound";
   subject: string;
   body: string;
+  // A formatted reply's Tiptap document, rendered read-only; null for every plain-text, inbound and
+  // older email, which render `body` exactly as before.
+  bodyDoc: JSONContent | null;
   // Delivery/lifecycle state: sent · received · failed · draft.
   status: string;
   // Unified chronological key (inbound receipt / outbound send / row creation).
