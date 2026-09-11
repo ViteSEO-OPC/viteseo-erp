@@ -77,6 +77,10 @@ class BrowserCallingVerificationGateTest extends TestCase
         // ViteSEO account.
         Config::set('calling.organization_credentials', true);
 
+        // The deployment's public origin — a hosting property, never a tenant setting. Nothing names a
+        // central organization, so the harness org is an ordinary CLIENT organization.
+        Config::set('twilio.webhook_base_url', 'https://zerem.example');
+
         // Any stray outbound request would be a test lying to itself about what Twilio said.
         Http::preventStrayRequests();
         Http::fake(fn () => Http::response($this->twilioAnswer[1], $this->twilioAnswer[0]));
@@ -229,7 +233,6 @@ class BrowserCallingVerificationGateTest extends TestCase
             'api key sid' => ['api_key', 'SKfeedface00000000000000000000beef'],
             'twiml app sid' => ['twiml_app_sid', 'APfeedface00000000000000000000beef'],
             'caller id' => ['caller_id', '+639171111111'],
-            'callback url' => ['webhook_base_url', 'https://moved.example'],
             'auth token' => ['auth_token', 'a-rotated-auth-token-value-0000'],
             'api secret' => ['api_secret', 'a-rotated-api-secret-value-0000'],
         ];
@@ -372,13 +375,15 @@ class BrowserCallingVerificationGateTest extends TestCase
         $this->postJson("/api/v1/crm/calls/{$call['id']}/token")->assertStatus(422);
     }
 
-    // ── The deployment fallback is exempt, and that is deliberate ──────────────────────────────
+    // ── The central organization's account is exempt, and that is deliberate ───────────────────
 
-    public function test_the_deployment_fallback_does_not_require_a_stored_verdict(): void
+    public function test_the_centralized_account_does_not_require_a_stored_verdict(): void
     {
         // Environment credentials are installed by whoever operates the server. They are not editable
         // from any screen and there is no row to record a verdict on, so requiring a test would make
-        // the fallback permanently unusable. Presence remains the switch there, exactly as before.
+        // the centralized account permanently unusable. Presence remains the switch there. It is used
+        // only by the organization explicitly named central — here, the harness org.
+        Config::set('calling.central_org_id', $this->tenant()->id);
         Config::set('calling.provider', TwilioCallProvider::NAME);
         Config::set('twilio.account_sid', self::ACCOUNT_SID);
         Config::set('twilio.auth_token', 'deployment-auth-token');
@@ -410,8 +415,9 @@ class BrowserCallingVerificationGateTest extends TestCase
 
         $this->actingAsAdmin();
 
-        // The moment the org saves its own untested credentials, it stops inheriting the deployment's
-        // verified ones — "my configuration" is authoritative even when the answer is "not yet".
+        // A client organization is carried only on its own account: its own untested credentials are
+        // authoritative even when the answer is "not yet", and the verified centralized account is
+        // never borrowed in the meantime.
         $this->save();
 
         $this->assertManual('the org has its own, untested configuration');

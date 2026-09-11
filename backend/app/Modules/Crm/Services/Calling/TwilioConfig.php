@@ -21,15 +21,24 @@ use Illuminate\Support\Facades\Config;
  * with the API key pair; the Auth Token and API secret are never serialized, logged or returned, and
  * no request can supply credentials of its own.
  *
- * ── Per-organization accounts: retained, but OFF ──
- * `crm_call_provider_settings` (Settings → Integrations → Calling) can hold an organization's own Twilio
- * account. That support is kept, but it is dormant: stored rows are consulted ONLY when a deployment
- * explicitly sets `calling.organization_credentials` (CALLING_ORGANIZATION_CREDENTIALS=true). With it
- * off — the default, and Zerem's configuration — {@see forOrg()} always answers with the centralized
- * account, so nobody can redirect Zerem's calls to another account from a settings screen, and every
- * webhook is verified against the one centralized Auth Token. With it on, an org's own row is
- * authoritative for that org (including when it says "off"), and an org with no row uses the
- * centralized account.
+ * ── Per-organization accounts: off by default, fail-closed when on ──
+ * `crm_call_provider_settings` (Settings → Integrations → Calling) holds a client organization's OWN
+ * Twilio account. Stored rows are consulted ONLY when a deployment explicitly sets
+ * `calling.organization_credentials` (CALLING_ORGANIZATION_CREDENTIALS=true). With it off — the default,
+ * and Zerem's configuration — {@see forOrg()} always answers with the centralized account, so nobody
+ * can redirect Zerem's calls to another account from a settings screen, and every webhook is verified
+ * against the one centralized Auth Token.
+ *
+ * With it on, every organization is resolved on its own, and the resolution FAILS CLOSED:
+ *   - the ONE organization named by `calling.central_org_id` (CALLING_CENTRAL_ORG_ID — ViteSEO's own)
+ *     is carried on the centralized account, and any row it holds is ignored;
+ *   - every other organization is carried ONLY on its own row — authoritative even when it says "off"
+ *     or is incomplete — and an organization with no row has no credentials at all (manual calling).
+ *     A client is never carried on ViteSEO's account, or on anyone else's, by default;
+ *   - with no central organization named, no organization uses the centralized account.
+ *
+ * The central organization is named in configuration because nothing in the schema designates it, and
+ * "whichever organization happens to have the lowest id" is not a rule a credential decision may rest on.
  *
  * ── Three conditions, all required, before browser calling is offered ──
  * A configuration must be ENABLED, COMPLETE, and VERIFIED. For the centralized account, enabled and
@@ -107,21 +116,36 @@ final class TwilioConfig
     ) {}
 
     /**
-     * The configuration in force for an organization's calls.
+     * The configuration in force for an organization's calls — the ONE credential decision in Zerem.
+     * Tokens, dialing, caller ID and webhook signatures all ask this, and nothing else.
      *
      * With per-organization accounts off (the default — see the class docblock) this is ALWAYS the
      * centralized ViteSEO account, whatever org is asked about and whatever rows exist. The org
      * argument is kept so every call site asks the same question in either mode.
      *
-     * When per-org support is on, the org row is looked up by an EXPLICIT `org_id` with the tenant
-     * scope lifted, rather than by relying on the ambient scope. That is not a bypass — it is stricter.
-     * This method is called from an authenticated request (the caller passes `CurrentOrg::id()`) and
-     * from the Twilio webhook (no user; the org comes from the correlated call row), and reading the
-     * org from the argument means the answer can never depend on which of those the caller is.
+     * With them on, it fails closed, in this order:
+     *   1. no organization          → nothing: there is no tenant whose account could be meant;
+     *   2. the central organization → the centralized account; its own rows are ignored;
+     *   3. any other organization   → its own row, even when switched off or incomplete, and with no row,
+     *                                  nothing. Never the centralized account.
+     *
+     * The org row is looked up by an EXPLICIT `org_id` with the tenant scope lifted, rather than by
+     * relying on the ambient scope. That is not a bypass — it is stricter. This method is called from an
+     * authenticated request (the caller passes `CurrentOrg::id()`) and from the Twilio webhook (no user;
+     * the org comes from the correlated call row), and reading the org from the argument means the
+     * answer can never depend on which of those the caller is.
      */
     public static function forOrg(?int $orgId): self
     {
-        if ($orgId === null || ! self::organizationCredentialsEnabled()) {
+        if (! self::organizationCredentialsEnabled()) {
+            return self::fromDeployment();
+        }
+
+        if ($orgId === null) {
+            return self::none();
+        }
+
+        if (self::isCentralOrg($orgId)) {
             return self::fromDeployment();
         }
 
@@ -131,7 +155,7 @@ final class TwilioConfig
             ->where('provider', TwilioCallProvider::NAME)
             ->first();
 
-        return $row === null ? self::fromDeployment() : self::fromSettings($row);
+        return $row === null ? self::none() : self::fromSettings($row);
     }
 
     /**
@@ -141,6 +165,41 @@ final class TwilioConfig
     public static function organizationCredentialsEnabled(): bool
     {
         return (bool) Config::get('calling.organization_credentials', false);
+    }
+
+    /**
+     * The organization carried on the centralized ViteSEO account when per-organization accounts are on,
+     * or null when none is named — in which case NO organization uses that account.
+     *
+     * Named in configuration (CALLING_CENTRAL_ORG_ID), next to the centralized credentials it selects,
+     * because nothing in the schema designates ViteSEO's organization. Anything that is not a positive
+     * integer names nobody.
+     */
+    public static function centralOrgId(): ?int
+    {
+        $id = filter_var(Config::get('calling.central_org_id'), FILTER_VALIDATE_INT, [
+            'options' => ['min_range' => 1],
+        ]);
+
+        return $id === false ? null : $id;
+    }
+
+    /** Whether this is the organization named as the centralized account's owner. */
+    public static function isCentralOrg(?int $orgId): bool
+    {
+        $central = self::centralOrgId();
+
+        return $orgId !== null && $central !== null && $orgId === $central;
+    }
+
+    /**
+     * Whether this organization's calling is decided on the server rather than on its settings screen:
+     * every organization in centralized mode, and the central organization when per-organization
+     * accounts are on. The settings endpoints are read-only for such an organization.
+     */
+    public static function isCentrallyManaged(?int $orgId): bool
+    {
+        return ! self::organizationCredentialsEnabled() || self::isCentralOrg($orgId);
     }
 
     /**
@@ -175,7 +234,10 @@ final class TwilioConfig
     /**
      * An organization's stored configuration (per-org support). Authoritative for that org, when that
      * support is on, even when incomplete or switched off. Also what the settings screen's connection
-     * test reads for an org that has saved a row.
+     * test reads — and the ONLY thing it reads — for an org that has saved a row.
+     *
+     * Every credential comes from the one row, so the Account SID a token is issued for is always the
+     * account the API key, the Auth Token and the TwiML App were entered for — never a mix of two sources.
      */
     public static function fromSettings(CallProviderSetting $row): self
     {
@@ -183,18 +245,44 @@ final class TwilioConfig
             source: self::SOURCE_ORGANIZATION,
             enabled: (bool) $row->enabled,
             accountSid: self::clean($row->account_sid),
-            authToken: self::clean($row->auth_token),
+            // Decrypted here, server-side, and a secret that cannot be decrypted reads as ABSENT (see
+            // CallProviderSetting::secret()): the configuration is then incomplete — unusable, never a
+            // 500, and never a reason to reach for another account.
+            authToken: self::clean($row->secret('auth_token')),
             apiKey: self::clean($row->api_key),
-            apiSecret: self::clean($row->api_secret),
+            apiSecret: self::clean($row->secret('api_secret')),
             twimlAppSid: self::clean($row->twiml_app_sid),
             callerId: self::clean($row->caller_id),
-            // An org that has not been given its own public callback origin inherits the deployment's,
-            // which is the normal single-deployment case: the tunnel or domain Twilio can reach is a
-            // property of where the CRM is hosted, not of who is using it.
-            webhookBaseUrl: self::clean($row->webhook_base_url) ?? self::clean(Config::get('twilio.webhook_base_url')),
+            // ALWAYS the deployment's public origin — never a value from the row. Where Twilio calls back
+            // is a property of where Zerem is hosted, not of who is using it, and a tenant-editable value
+            // here would let an organization move its call callbacks, and the URL their signatures are
+            // checked against, to a host of its choosing. A value stored before this rule is not read.
+            webhookBaseUrl: self::clean(Config::get('twilio.webhook_base_url')),
             tokenTtl: self::tokenTtl(),
             dialTimeout: self::dialTimeout(),
             lastTestStatus: $row->last_test_status,
+        );
+    }
+
+    /**
+     * No credentials at all: the fail-closed answer for an organization with no account of its own.
+     * Deliberately built from nothing — not from the deployment's values — so no field of the
+     * centralized account can ever reach an organization that is not entitled to it.
+     */
+    private static function none(): self
+    {
+        return new self(
+            source: self::SOURCE_NONE,
+            enabled: false,
+            accountSid: null,
+            authToken: null,
+            apiKey: null,
+            apiSecret: null,
+            twimlAppSid: null,
+            callerId: null,
+            webhookBaseUrl: null,
+            tokenTtl: self::tokenTtl(),
+            dialTimeout: self::dialTimeout(),
         );
     }
 

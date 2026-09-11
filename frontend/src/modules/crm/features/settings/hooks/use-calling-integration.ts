@@ -5,6 +5,13 @@ import { notify as toast } from "@/core/lib/notify";
 import { apiClient } from "@/modules/crm/lib/axios";
 import { getApiErrorMessage } from "@/modules/crm/lib/api-error";
 import { queryKeys } from "@/modules/crm/lib/query-keys";
+import {
+  CALLING_SETTINGS_ENDPOINT,
+  fieldLabel,
+  isCentrallyManagedRefusal,
+  missingByOwner,
+  testStatusLabel,
+} from "@/modules/crm/features/settings/lib/calling-settings";
 
 /**
  * Settings → Integrations → Calling.
@@ -15,14 +22,18 @@ import { queryKeys } from "@/modules/crm/lib/query-keys";
  * what a client learns about each — not its length, not its prefix, not its ciphertext. Same
  * discipline as the Gmail and Nearby integrations.
  *
- * The IDENTIFIERS do come back in full (`accountSid`, `apiKey`, `twimlAppSid`, `callerId`,
- * `webhookBaseUrl`). They are values Twilio itself shows in its console, none of them can place a
- * call on its own, and an admin has to be able to see them to spot a paste error.
+ * The IDENTIFIERS do come back in full (`accountSid`, `apiKey`, `twimlAppSid`, `callerId`). They are
+ * values Twilio itself shows in its console, none of them can place a call on its own, and an admin has
+ * to be able to see them to spot a paste error. `webhookBaseUrl` is the DEPLOYMENT's public origin —
+ * where Twilio calls back — reported for reference; no organization can change it.
  *
  * The one shape worth understanding before reading the card: the API reports the STORED settings and
- * what is actually IN FORCE separately, because they can differ. A saved-but-switched-off account, a
- * configuration missing one field, or an org inheriting the deployment's credentials all produce a
- * "browser calling is off" that the stored row alone would not explain.
+ * what is actually IN FORCE separately, because they can differ. A saved-but-switched-off account or a
+ * configuration missing one field both produce a "browser calling is off" that the stored row alone
+ * would not explain.
+ *
+ * The organization is never named: every request goes to one fixed endpoint and the server resolves
+ * the organization from the signed-in user.
  */
 
 /** Outcome of the last explicit connection test. `null` means never tested. */
@@ -38,7 +49,10 @@ export type CallingTestStatus =
 /** Where the configuration in force came from. */
 export type CallingConfigSource = "organization" | "deployment" | "none";
 
-/** The credential fields the server requires before browser calling can run. */
+/**
+ * The fields the server requires before browser calling can run. `webhook_base_url` is on the list
+ * because the server needs it too — but it is the deployment's, so only ViteSEO can supply it.
+ */
 export type CallingField =
   | "account_sid"
   | "auth_token"
@@ -57,6 +71,7 @@ export type CallProviderSettings = {
   apiKey: string | null;
   twimlAppSid: string | null;
   callerId: string | null;
+  /** The deployment's public origin Twilio calls back on. Read-only; never an organization setting. */
   webhookBaseUrl: string | null;
 
   // -- secret PRESENCE only. The secrets themselves are never sent. --
@@ -78,17 +93,18 @@ export type CallingIntegration = {
   provider: string;
   source: CallingConfigSource;
   /**
-   * Twilio is configured centrally by ViteSEO on the server — Zerem's configuration. The card then
-   * shows status only, with no credential form, because nobody here enters Twilio credentials.
+   * This organization's calling runs on ViteSEO's centralized Twilio account, configured on the
+   * server. The card then shows status only — no credential form, no switch, no test — and the API
+   * refuses every write.
    */
   centrallyManaged: boolean;
   enabled: boolean;
   complete: boolean;
   /**
    * Whether Twilio ACCEPTED these credentials on an explicit connection test. The third condition of
-   * browser calling, alongside `enabled` and `complete` — seven well-formed strings are not evidence
-   * that an account exists, so an untested configuration never offers a BD a button that can only
-   * fail at the carrier.
+   * browser calling, alongside `enabled` and `complete` — well-formed strings are not evidence that an
+   * account exists, so an untested configuration never offers a BD a button that can only fail at the
+   * carrier.
    */
   verified: boolean;
   /** Which required fields are still empty. Field keys only — never values. */
@@ -97,25 +113,25 @@ export type CallingIntegration = {
   settings: CallProviderSettings;
 };
 
-/** What the admin sends. Both secrets are optional: omitting one keeps the stored value. */
+/**
+ * What the admin sends — exactly the fields the API accepts. Both secrets are optional: omitting one
+ * keeps the stored value. There is no callback URL and no organization: neither is the admin's to set.
+ */
 export type CallingConfigInput = Partial<{
   enabled: boolean;
   account_sid: string;
   api_key: string;
   twiml_app_sid: string;
   caller_id: string;
-  webhook_base_url: string;
   auth_token: string;
   api_secret: string;
 }>;
-
-const ENDPOINT = "/settings/integrations/calling";
 
 export function useCallingIntegration() {
   const query = useQuery({
     queryKey: queryKeys.integrations.calling(),
     queryFn: async (): Promise<CallingIntegration> => {
-      const res = await apiClient.get(ENDPOINT);
+      const res = await apiClient.get(CALLING_SETTINGS_ENDPOINT);
       return res.data.data as CallingIntegration;
     },
   });
@@ -142,6 +158,10 @@ export function useCallingIntegration() {
  *
  * It also invalidates the Call panel's capability query, because turning browser calling on or off is
  * exactly the thing that changes which controls a BD sees.
+ *
+ * A CENTRALLY-MANAGED REFUSAL (403) re-reads the configuration: the organization is managed by
+ * ViteSEO, so the card must stop offering a form and show the read-only status the server now reports.
+ * The toast carries the server's own sentence, which is a fixed message, never a secret.
  */
 function useOverviewMutation<TArgs>(
   mutationFn: (args: TArgs) => Promise<CallingIntegration>,
@@ -160,6 +180,9 @@ function useOverviewMutation<TArgs>(
       onDone?.(data, args);
     },
     onError: (err) => {
+      if (isCentrallyManagedRefusal(err)) {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.integrations.calling() });
+      }
       toast.error(getApiErrorMessage(err, fallbackError));
     },
   });
@@ -169,7 +192,7 @@ function useOverviewMutation<TArgs>(
 export function useConfigureCalling() {
   return useOverviewMutation<CallingConfigInput>(
     async (body) => {
-      const res = await apiClient.put(ENDPOINT, body);
+      const res = await apiClient.put(CALLING_SETTINGS_ENDPOINT, body);
       return res.data.data as CallingIntegration;
     },
     (data) => {
@@ -179,9 +202,14 @@ export function useConfigureCalling() {
       }
 
       if (!data.complete) {
+        const { client, server } = missingByOwner(data.missing);
         toast.warning(
           "Saved, but browser calling is not running yet",
-          `Still needed: ${data.missing.map(fieldLabel).join(", ")}.`,
+          client.length > 0
+            ? `Still needed: ${client.map(fieldLabel).join(", ")}.`
+            : server.length > 0
+              ? "ViteSEO still needs to set this server's public callback address."
+              : undefined,
         );
         return;
       }
@@ -205,7 +233,7 @@ export function useConfigureCalling() {
 export function useClearCallingCredentials() {
   return useOverviewMutation<void>(
     async () => {
-      const res = await apiClient.delete(`${ENDPOINT}/credentials`);
+      const res = await apiClient.delete(`${CALLING_SETTINGS_ENDPOINT}/credentials`);
       return res.data.data as CallingIntegration;
     },
     () => toast.success("Twilio credentials removed"),
@@ -214,7 +242,7 @@ export function useClearCallingCredentials() {
 }
 
 /**
- * Verify the stored configuration.
+ * Verify the organization's own stored configuration.
  *
  * The toast reports the server's verdict verbatim — including `not_configured`, which makes no
  * outbound request at all. Reporting a success the server did not give is the one thing this must
@@ -223,7 +251,7 @@ export function useClearCallingCredentials() {
 export function useTestCallingConnection() {
   return useOverviewMutation<void>(
     async () => {
-      const res = await apiClient.post(`${ENDPOINT}/test`);
+      const res = await apiClient.post(`${CALLING_SETTINGS_ENDPOINT}/test`);
       return res.data.data as CallingIntegration;
     },
     (data) => {
@@ -241,51 +269,4 @@ export function useTestCallingConnection() {
     },
     "Could not run the connection test",
   );
-}
-
-/**
- * Plain-language reading of a test verdict. Kept beside the type so a new server status cannot be
- * rendered as a raw code — the fallthrough says "not tested" rather than leaking an identifier.
- */
-export function testStatusLabel(status: CallingTestStatus | null): string {
-  switch (status) {
-    case "ok":
-      return "Connected";
-    case "auth_failed":
-      return "Twilio rejected the Account SID / Auth Token";
-    case "api_key_failed":
-      return "Twilio rejected the API Key SID / Secret";
-    case "twiml_app_missing":
-      return "No TwiML App with that SID exists on this account";
-    case "rate_limited":
-      return "Rate limited by Twilio — try again shortly";
-    case "unreachable":
-      return "Could not reach Twilio";
-    case "not_configured":
-      return "Fill in every field before testing";
-    default:
-      return "Not tested";
-  }
-}
-
-/** The field names as the form labels them, so a "still needed" list reads like the form. */
-export function fieldLabel(field: CallingField): string {
-  switch (field) {
-    case "account_sid":
-      return "Account SID";
-    case "auth_token":
-      return "Auth Token";
-    case "api_key":
-      return "API Key SID";
-    case "api_secret":
-      return "API Key Secret";
-    case "twiml_app_sid":
-      return "TwiML App SID";
-    case "caller_id":
-      return "Caller ID";
-    case "webhook_base_url":
-      return "Callback URL";
-    default:
-      return field;
-  }
 }

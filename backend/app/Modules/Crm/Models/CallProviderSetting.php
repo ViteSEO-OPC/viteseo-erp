@@ -6,10 +6,13 @@ namespace App\Modules\Crm\Models;
 
 use App\Models\Concerns\BelongsToOrg;
 use App\Models\User;
+use Illuminate\Contracts\Encryption\DecryptException;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Log;
+use InvalidArgumentException;
 
 /**
  * One organization's configuration for one paid call transport. Persistence only.
@@ -38,7 +41,8 @@ use Illuminate\Support\Carbon;
  * @property string|null $api_key The SK… key sid. Identifier, plain. Safe to display.
  * @property string|null $twiml_app_sid Identifier, plain. Safe to display.
  * @property string|null $caller_id The verified number shown to the callee. Plain.
- * @property string|null $webhook_base_url The public origin Twilio calls back on. Plain.
+ * @property string|null $webhook_base_url LEGACY, never read: the callback origin is the deployment's
+ *                                         (see TwilioConfig::fromSettings()), not a tenant setting.
  * @property string|null $auth_token Encrypted at rest; plaintext when read. Never serialize this.
  * @property string|null $api_secret Encrypted at rest; plaintext when read. Never serialize this.
  * @property string|null $auth_token_last4 Display hint. Plain, safe to return.
@@ -106,15 +110,47 @@ class CallProviderSetting extends Model
         return $this->belongsTo(User::class, 'updated_by');
     }
 
-    /** Whether an auth token is stored. Never exposes it. */
+    /** Whether a usable auth token is stored. Never exposes it. */
     public function hasAuthToken(): bool
     {
-        return filled($this->auth_token);
+        return $this->secret('auth_token') !== null;
     }
 
-    /** Whether an API secret is stored. Never exposes it. */
+    /** Whether a usable API secret is stored. Never exposes it. */
     public function hasApiSecret(): bool
     {
-        return filled($this->api_secret);
+        return $this->secret('api_secret') !== null;
+    }
+
+    /**
+     * A stored secret in plaintext, for the server-side paths that need it, or null when none is stored
+     * — or when the stored one cannot be decrypted.
+     *
+     * The second case is what happens after APP_KEY is rotated without keeping the old key in
+     * APP_PREVIOUS_KEYS, or if the column is damaged. Reading the attribute directly would then throw
+     * mid-request and turn a capability check, the settings screen or a webhook into a 500. Treated as
+     * absent instead, the configuration is simply incomplete: browser calling is not offered, the admin
+     * is told the secret is missing, and nothing reaches for another account. The failure is logged —
+     * the org and the field, never any part of the value.
+     */
+    public function secret(string $field): ?string
+    {
+        if ($field !== 'auth_token' && $field !== 'api_secret') {
+            throw new InvalidArgumentException("[{$field}] is not a stored calling secret.");
+        }
+
+        try {
+            $value = $this->getAttribute($field);
+        } catch (DecryptException) {
+            Log::warning('A stored calling credential could not be decrypted; treating it as absent.', [
+                'org_id' => $this->org_id,
+                'provider' => $this->provider,
+                'field' => $field,
+            ]);
+
+            return null;
+        }
+
+        return is_string($value) && $value !== '' ? $value : null;
     }
 }

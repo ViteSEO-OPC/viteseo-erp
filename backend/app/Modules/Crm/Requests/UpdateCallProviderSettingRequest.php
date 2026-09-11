@@ -52,10 +52,9 @@ class UpdateCallProviderSettingRequest extends FormRequest
             // E.164, the only form Twilio accepts as a caller ID.
             'caller_id' => ['sometimes', 'nullable', 'string', 'regex:/^\+[1-9]\d{7,14}$/'],
 
-            // Twilio dials this from the public internet, so it must be an absolute https origin.
-            // http is refused rather than merely discouraged: the callback carries call metadata and
-            // is authenticated by a signature over the URL itself.
-            'webhook_base_url' => ['sometimes', 'nullable', 'string', 'max:255', 'url', 'starts_with:https://'],
+            // There is deliberately NO `webhook_base_url` rule. Where Twilio calls back is the
+            // deployment's public origin, not a tenant setting (see TwilioConfig::fromSettings()), so a
+            // submitted value is not validated, not stored and not used — `validated()` drops it.
 
             // Secrets. Shape only — length and no whitespace, the same gate the Nearby key uses.
             'auth_token' => ['sometimes', 'nullable', 'string', 'min:20', 'max:255', 'regex:/^\S+$/'],
@@ -71,7 +70,6 @@ class UpdateCallProviderSettingRequest extends FormRequest
             'api_key.regex' => 'A Twilio API Key SID starts with SK and is 34 characters long.',
             'twiml_app_sid.regex' => 'A TwiML App SID starts with AP and is 34 characters long.',
             'caller_id.regex' => 'Use the full international form, e.g. +639171234567.',
-            'webhook_base_url.starts_with' => 'The callback URL must be https — Twilio will not post call data over http.',
             'auth_token.min' => 'That does not look like an Auth Token. Paste the full value.',
             'auth_token.regex' => 'An Auth Token cannot contain spaces — check for a stray copy/paste.',
             'api_secret.min' => 'That does not look like an API Key Secret. Paste the full value.',

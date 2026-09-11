@@ -30,7 +30,9 @@ use Illuminate\Support\Facades\Config;
  * 2. AN ORGANIZATION'S OWN ACCOUNT — only when a deployment explicitly switches on per-organization
  *    accounts (`calling.organization_credentials`). Off by default, which makes the first loop below
  *    inert: `isSelectedByOrganization()` can only be true for an org's own stored row, and
- *    TwilioConfig does not consult stored rows while that support is off.
+ *    TwilioConfig does not consult stored rows while that support is off. When it is on, a client
+ *    organization is carried ONLY on its own account: without a usable row of its own, the centralized
+ *    account in step 1 is not usable for it either (TwilioConfig fails closed), so it gets manual.
  *
  * NOTHING HERE READS A CLIENT REQUEST. Which transport a call uses is decided from server-side
  * configuration only, so a browser that asks for `provider=twilio` in a manual deployment simply gets a

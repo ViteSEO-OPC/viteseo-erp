@@ -53,7 +53,10 @@ class CallProviderSettingService
             ?? new CallProviderSetting(['provider' => $provider]);
     }
 
-    /** What is in force for the current org — including the deployment fallback when no row exists. */
+    /**
+     * What is in force for the current org, exactly as every calling path resolves it: the centralized
+     * account only where that account applies, and nothing at all for a client with no row of its own.
+     */
     public function effectiveConfig(): TwilioConfig
     {
         return TwilioConfig::forOrg(CurrentOrg::id());
@@ -92,7 +95,10 @@ class CallProviderSettingService
 
         // Identifiers: plain, and an explicitly empty string means "clear this field". They are not
         // secrets, so unlike the two below there is no ambiguity about a blank submission.
-        foreach (['account_sid', 'api_key', 'twiml_app_sid', 'caller_id', 'webhook_base_url'] as $field) {
+        //
+        // The callback origin is deliberately NOT among them: it is the deployment's, never a tenant's
+        // (see TwilioConfig::fromSettings()), so nothing an organization submits can move it.
+        foreach (['account_sid', 'api_key', 'twiml_app_sid', 'caller_id'] as $field) {
             if (! array_key_exists($field, $changes)) {
                 continue;
             }
@@ -117,8 +123,9 @@ class CallProviderSettingService
 
             // Compared against the DECRYPTED value: re-pasting the same secret is not a rotation, and
             // the ciphertext would differ anyway (a fresh IV per write), so comparing stored bytes
-            // would report a change every single time.
-            if ($secret === $row->{$field}) {
+            // would report a change every single time. A stored secret that cannot be decrypted reads
+            // as absent, so pasting it again is exactly how an admin repairs it.
+            if ($secret === $row->secret($field)) {
                 continue;
             }
 
@@ -194,19 +201,30 @@ class CallProviderSettingService
      *
      * Answers with a reason CODE, never Twilio's error body — an upstream message can echo request
      * detail, and this response is going to a browser.
+     *
+     * ONLY THE ORGANIZATION'S OWN STORED CREDENTIALS ARE EVER TESTED. An organization with no row has
+     * nothing to test and is told so without a request — it is never answered by probing some other
+     * account on its behalf, the centralized ViteSEO account least of all. (The centrally managed
+     * organization never reaches this: its settings are read-only, and the centralized account is
+     * verified by being installed — see TwilioConfig::isVerified().)
      */
     public function test(User $actor, string $provider = TwilioCallProvider::NAME): CallProviderSetting
     {
         $row = $this->for($provider);
-        $config = $row->exists ? TwilioConfig::fromSettings($row) : TwilioConfig::forOrg(CurrentOrg::id());
+
+        if (! $row->exists) {
+            return $this->recordTest($row, self::TEST_NOT_CONFIGURED, $actor, persist: false);
+        }
+
+        $config = TwilioConfig::fromSettings($row);
 
         // A test that cannot run says so, without a request. Reporting a fabricated success is the one
         // thing this must never do.
         if (! $config->isComplete()) {
-            return $this->recordTest($row, self::TEST_NOT_CONFIGURED, $actor, persist: $row->exists);
+            return $this->recordTest($row, self::TEST_NOT_CONFIGURED, $actor, persist: true);
         }
 
-        return $this->recordTest($row, $this->probe($config), $actor, persist: $row->exists);
+        return $this->recordTest($row, $this->probe($config), $actor, persist: true);
     }
 
     /**

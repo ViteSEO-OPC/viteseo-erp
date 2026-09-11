@@ -12,6 +12,7 @@ use App\Modules\Crm\Services\Calling\CallSessionService;
 use App\Modules\Crm\Services\Calling\TwilioCallProvider;
 use App\Modules\Crm\Services\Calling\TwilioCallStateMapper;
 use App\Modules\Crm\Services\Calling\TwilioConfig;
+use App\Support\CurrentOrg;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Log;
@@ -33,8 +34,12 @@ use Twilio\TwiML\VoiceResponse;
  * These routes deliberately sit outside `set-current-org`, because a webhook has no user to derive a
  * tenant from. They never need one: the correlation token resolves exactly one `crm_calls` row, and
  * that row already carries its `org_id`, its lead and its agent from when an authenticated BD created
- * it. Ownership is READ from the record rather than asserted by the caller, so no tenant resolution
- * happens here and the multi-tenancy implementation is untouched.
+ * it. Ownership is READ from the record rather than asserted by the caller.
+ *
+ * Concluding a call writes beyond that row — its planner event, its lead's timeline — through models
+ * the tenant scope filters. With no user, the ambient tenant is null (CurrentOrg fails closed), so the
+ * completion runs PINNED to the call's own `org_id`: the organization read from the correlated row,
+ * never from the request. Without it every provider completion would find no planner event and 404.
  */
 class TwilioVoiceWebhookController extends Controller
 {
@@ -148,7 +153,14 @@ class TwilioVoiceWebhookController extends Controller
 
         // Idempotent by contract: a duplicate delivery for an already-concluded call is a no-op, so a
         // Twilio retry can never double-complete a call or write a second Activity.
-        $this->calls->completeFromProvider($call, $outcome, $duration);
+        //
+        // Pinned to the CALL's organization — the one the signed correlation named — because the
+        // planner event, the lead and the Activity it writes are tenant-scoped, and a webhook has no
+        // user to derive a tenant from (see the class docblock).
+        CurrentOrg::runAs(
+            (int) $call->org_id,
+            fn () => $this->calls->completeFromProvider($call, $outcome, $duration),
+        );
 
         return $this->twiml(new VoiceResponse);
     }

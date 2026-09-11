@@ -12,6 +12,7 @@ use App\Modules\Crm\Services\Calling\CallProviderRegistry;
 use App\Modules\Crm\Services\Calling\CallProviderSettingService;
 use App\Modules\Crm\Services\Calling\TwilioCallProvider;
 use App\Modules\Crm\Services\Calling\TwilioConfig;
+use App\Support\CurrentOrg;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -24,6 +25,13 @@ use Illuminate\Http\Request;
  * client's OWN Twilio account — their credentials, their bill, their decision. The Nearby route
  * comment states the rule exactly: a table a client brings its own key to needs `org_id` and the
  * `crm_admin` gate, which is what {@see CallProviderSetting} and these routes have.
+ *
+ * CENTRALLY MANAGED ORGANIZATIONS ARE READ-ONLY. When an organization's calling runs on the
+ * centralized ViteSEO account — every organization in centralized mode, and the designated central
+ * organization when per-organization accounts are on ({@see TwilioConfig::isCentrallyManaged()}) —
+ * there is nothing here to configure. Saving, clearing and testing are refused with a 403, and no stored
+ * row is ever returned for it: a row saved there would at best be ignored, and at worst be mistaken for
+ * the account that organization's calls actually run on.
  *
  * THIN. Every decision lives in {@see CallProviderSettingService} (sole writer, and the only place
  * that can verify a credential without returning it) and every response shape lives in
@@ -50,6 +58,11 @@ class CallSettingsController extends Controller
     /** Configure the org's Twilio account. Secrets are write-only; omitting one keeps it. */
     public function update(UpdateCallProviderSettingRequest $request): JsonResponse
     {
+        $refusal = $this->refuseWhenCentrallyManaged();
+        if ($refusal !== null) {
+            return $refusal;
+        }
+
         $this->settings->configure($request->validated(), $request->user());
 
         return $this->overview();
@@ -58,6 +71,11 @@ class CallSettingsController extends Controller
     /** Remove the org's stored secrets. Idempotent; identifiers and the switch are left alone. */
     public function destroyCredentials(Request $request): JsonResponse
     {
+        $refusal = $this->refuseWhenCentrallyManaged();
+        if ($refusal !== null) {
+            return $refusal;
+        }
+
         $this->settings->clearCredentials($request->user());
 
         return $this->overview();
@@ -73,7 +91,25 @@ class CallSettingsController extends Controller
      */
     public function test(Request $request): JsonResponse
     {
+        $refusal = $this->refuseWhenCentrallyManaged();
+        if ($refusal !== null) {
+            return $refusal;
+        }
+
         return $this->overview(tested: $this->settings->test($request->user()));
+    }
+
+    /** The one answer for "this organization's calling is not configured from here": a 403. */
+    private function refuseWhenCentrallyManaged(): ?JsonResponse
+    {
+        if (! TwilioConfig::isCentrallyManaged(CurrentOrg::id())) {
+            return null;
+        }
+
+        return response()->json([
+            'message' => 'Calling for this organization is managed centrally by ViteSEO and cannot be changed here.',
+            'errors' => ['provider' => ['Calling is centrally managed for this organization.']],
+        ], 403);
     }
 
     /**
@@ -81,23 +117,29 @@ class CallSettingsController extends Controller
      *
      * The two are reported SEPARATELY and never merged, for the same reason the Nearby settings do it:
      * "what did we save" and "what will actually happen on the next call" can legitimately disagree —
-     * a saved-but-switched-off account, a configuration missing one field, an org inheriting the
-     * deployment's credentials — and a reader who has to infer the second from the first will
-     * eventually infer it wrong.
+     * a saved-but-switched-off account, a configuration missing one field — and a reader who has to
+     * infer the second from the first will eventually infer it wrong.
      */
     private function overview(?CallProviderSetting $tested = null): JsonResponse
     {
-        // Substitute the in-memory result so a verdict that was deliberately not persisted (a test run
-        // against a configuration with no saved row) still reaches the client.
-        $row = $tested ?? $this->settings->for();
+        $centrallyManaged = TwilioConfig::isCentrallyManaged(CurrentOrg::id());
+
+        // A centrally managed organization has no configuration of its own to show. An unsaved, empty
+        // row keeps the payload's shape — and guarantees that a row stored before the organization was
+        // designated central, which nothing reads, is never presented as if it were in force.
+        //
+        // Otherwise, substitute the in-memory result so a verdict that was deliberately not persisted
+        // (a test run with no saved row) still reaches the client.
+        $row = $centrallyManaged
+            ? new CallProviderSetting(['provider' => TwilioCallProvider::NAME])
+            : ($tested ?? $this->settings->for());
 
         $config = $this->settings->effectiveConfig();
 
-        // Zerem's configuration: ONE centralized ViteSEO Twilio account on the server (TwilioConfig).
-        // The screen then reports exactly what the Call panel will do — the capability resolver's own
-        // answer, which also honours CALL_PROVIDER — and the card shows status only, with no credential
-        // form, because nobody here enters Twilio credentials.
-        $centrallyManaged = ! TwilioConfig::organizationCredentialsEnabled();
+        // A centrally managed organization gets exactly what the Call panel will do — the capability
+        // resolver's own answer, which also honours CALL_PROVIDER — and the card shows status only, with
+        // no credential form, because nobody there enters Twilio credentials. A client organization gets
+        // the answer for its own account.
         $browserCalling = $centrallyManaged
             ? $this->providers->supportsBrowserCalling()
             : $config->isUsable();
@@ -110,8 +152,8 @@ class CallSettingsController extends Controller
                 'provider' => $browserCalling ? TwilioCallProvider::NAME : 'manual',
                 'centrallyManaged' => $centrallyManaged,
 
-                // WHERE that configuration came from: this org's own row, the deployment-wide
-                // environment values, or nowhere at all.
+                // WHERE that configuration came from: this org's own row, the centralized account, or
+                // nowhere at all.
                 'source' => $config->source,
                 'enabled' => $config->enabled,
                 'complete' => $config->isComplete(),

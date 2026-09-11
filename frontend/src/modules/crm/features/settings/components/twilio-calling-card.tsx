@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
 import { AlertTriangle, CheckCircle2, Lock, PhoneCall } from "lucide-react";
 import { Card } from "@/modules/crm/components/ui/card";
 import { Button } from "@/modules/crm/components/ui/button";
@@ -15,39 +14,51 @@ import { ErrorState } from "@/modules/crm/components/shared/error-state/error-st
 import { FIELD } from "@/modules/crm/features/settings/components/form-styles";
 import { cn } from "@/modules/crm/lib/utils";
 import {
-  fieldLabel,
-  testStatusLabel,
   useCallingIntegration,
   useClearCallingCredentials,
   useConfigureCalling,
   useTestCallingConnection,
   type CallingIntegration,
 } from "@/modules/crm/features/settings/hooks/use-calling-integration";
+import {
+  buildConfigurePayload,
+  callingCardMode,
+  callingState,
+  credentialFormDefaults,
+  credentialSchema,
+  fieldLabel,
+  formFieldErrors,
+  missingByOwner,
+  testOutcome,
+  testStatusLabel,
+  voiceWebhookUrl,
+  type CredentialFormValues,
+} from "@/modules/crm/features/settings/lib/calling-settings";
 
 const cardClass = "border border-border bg-card p-6 shadow-card";
 
 /**
  * Settings → Integrations → Calling.
  *
- * ── Zerem: centrally managed ──
- * Zerem places browser calls through ONE centralized ViteSEO Twilio account configured on the server
- * (see the backend's TwilioConfig). When the API says `centrallyManaged` — Zerem's configuration —
- * this card is a read-only STATUS: whether browser calling is on, and that manual calling carries on
- * when it is not. It offers no credential form, because nobody here enters Twilio credentials, and it
- * never shows a secret. Everything below describes the per-organization form, which renders only if a
- * deployment explicitly switches per-organization accounts on.
+ * ── Two kinds of organization ──
+ * CENTRALLY MANAGED — ViteSEO's own organization, and every organization in a deployment that runs one
+ * centralized account. Its calling runs on ViteSEO's Twilio account, configured on the server. The card
+ * is a read-only STATUS: managed by ViteSEO, whether browser calling is on, and that manual calling
+ * carries on when it is not. No form, no switch, no test and no secret — the server refuses every write
+ * for such an organization anyway.
+ *
+ * CLIENT — an organization that brings its OWN Twilio account. Its admin enters the credentials here.
+ * Without its own account it has manual calling; it is never carried on ViteSEO's account.
+ *
+ * Every decision below — which fields exist, what a save sends, which state the card claims — lives in
+ * `lib/calling-settings`, where `npm run calling:gates` pins it.
  *
  * ── The distinction this card exists to make legible ──
  * CONFIGURED IS NOT RUNNING. Browser calling needs three things at once — the switch on, every field
  * filled, and Twilio's own confirmation that the credentials work — so an admin can have saved a
- * complete configuration and still, correctly, not have the feature. Four states, in the order they
- * are reached, and only the last means a BD can call from the browser:
+ * complete configuration and still, correctly, not have the feature:
  *
  *   Not configured → Saved → Verified by Twilio → Browser calling on
- *
- * The third step is not ceremony. Seven well-formed strings prove only that seven fields were filled
- * in; without Twilio's verdict the CRM would offer a BD a "Call from Browser" button that could only
- * fail at the carrier. `StateExplanation` below always names which of the three is missing.
  *
  * The header chip is computed from what the SERVER says is in force, never from the form's contents,
  * so a half-filled or unverified configuration can never read as a working one.
@@ -56,6 +67,10 @@ const cardClass = "border border-border bg-card p-6 shadow-card";
  * The API sends `hasAuthToken` / `hasApiSecret` and the last four characters, and nothing else. Both
  * secret inputs are therefore write-only: they start empty, show a masked placeholder when something
  * is stored, and are never populated from a response. Leaving one blank on save keeps what is stored.
+ *
+ * ── The callback address is not the organization's ──
+ * Where Twilio calls back is the deployment's public origin. It is shown — read-only — as the Voice URL
+ * the organization's TwiML App must use, and there is no input for it.
  *
  * ── Manual calling is not affected by anything here ──
  * Turning this off, misconfiguring it, or never touching it leaves the CRM's free calling workflow
@@ -78,7 +93,7 @@ export function TwilioCallingCard() {
               <p className="mt-0.5 text-sm text-muted-foreground">
                 {integration?.centrallyManaged
                   ? "Browser calling through ViteSEO's centrally managed Twilio account."
-                  : "Optional. Connect a Twilio account to let BDs call leads from the browser."}
+                  : "Optional. Connect your organization's own Twilio account to let BDs call leads from the browser."}
               </p>
             </div>
           </div>
@@ -99,7 +114,7 @@ export function TwilioCallingCard() {
             message="Could not load the calling configuration."
             onRetry={() => void retry()}
           />
-        ) : integration.centrallyManaged ? (
+        ) : callingCardMode(integration) === "central" ? (
           <CentralStatus integration={integration} />
         ) : (
           <Body integration={integration} />
@@ -154,8 +169,8 @@ function Body({ integration }: { integration: CallingIntegration }) {
       {/* The reassurance an admin actually needs on this screen, stated before any input. */}
       <p className="rounded-lg bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
         Calling works without this. With no Twilio account your team keeps dialing from their own
-        phones and logging the outcome in the CRM — connecting one only adds the option to call from
-        the browser, with the talk time measured by the carrier.
+        phones and logging the outcome in the CRM — connecting your own account only adds the option
+        to call from the browser, with the talk time measured by the carrier.
       </p>
 
       <StateExplanation integration={integration} />
@@ -238,12 +253,19 @@ function Body({ integration }: { integration: CallingIntegration }) {
 }
 
 /**
- * Zerem's card: the centrally managed ViteSEO account, as a status. No form, no switch, no test and no
- * secret — Twilio is configured by ViteSEO on the server, and nobody here enters credentials.
+ * A centrally managed organization's card: ViteSEO's account, as a status. No form, no switch, no test
+ * and no secret — Twilio is configured by ViteSEO on the server, and nothing here can change it.
  */
 function CentralStatus({ integration }: { integration: CallingIntegration }) {
   return (
     <>
+      <div className="flex items-center gap-2">
+        <Badge variant="secondary" className="gap-1">
+          <Lock className="size-3" aria-hidden />
+          Managed by ViteSEO
+        </Badge>
+      </div>
+
       {integration.browserCalling ? (
         <div
           role="status"
@@ -270,8 +292,8 @@ function CentralStatus({ integration }: { integration: CallingIntegration }) {
       )}
 
       <p className="text-xs text-muted-foreground">
-        Twilio is configured centrally by ViteSEO on the server. Individual users and workspaces do not
-        enter their own Twilio credentials, and no Twilio secret is ever shown on this page.
+        This organization&apos;s calling is managed centrally by ViteSEO on the server. Its Twilio
+        credentials cannot be viewed or changed here, and no Twilio secret is ever shown on this page.
       </p>
     </>
   );
@@ -282,11 +304,12 @@ function CentralStatus({ integration }: { integration: CallingIntegration }) {
  *
  * Each case names what to DO, because "not running" without a reason is the state an admin cannot
  * get out of. The missing-field list comes from the server, so it can never disagree with what the
- * server would accept.
+ * server would accept — and a field only ViteSEO can supply is named as ViteSEO's, not the admin's.
  */
 function StateExplanation({ integration }: { integration: CallingIntegration }) {
-  if (integration.browserCalling) {
-    const inherited = integration.source === "deployment";
+  const state = callingState(integration);
+
+  if (state === "connected") {
     return (
       <div
         role="status"
@@ -294,27 +317,34 @@ function StateExplanation({ integration }: { integration: CallingIntegration }) 
       >
         <CheckCircle2 className="mt-0.5 size-4 shrink-0" aria-hidden />
         <p>
-          {inherited
-            ? "Browser calling is running on the credentials configured for this deployment. Save your own Twilio details below to use your own account instead."
-            : "Browser calling is running on your Twilio account. BDs see “Call from Browser” on any lead with a usable phone number."}
+          Browser calling is running on your organization&apos;s Twilio account. BDs see “Call from
+          Browser” on any lead with a usable phone number.
         </p>
       </div>
     );
   }
 
-  if (!integration.settings.configured && integration.source === "none") {
+  if (state === "not-configured" || state === "centrally-managed") {
     return null; // Nothing configured and nothing claimed — the form below is the whole message.
   }
 
-  // In the order an admin has to resolve them. "Not verified" is last because it is the only one
-  // that needs Twilio to answer, and it is the state a fresh save always lands in.
-  const reason = !integration.complete
-    ? `Still needed: ${integration.missing.map(fieldLabel).join(", ")}.`
-    : !integration.enabled
-      ? "The switch above is off."
-      : integration.settings.lastTestStatus && integration.settings.lastTestStatus !== "ok"
-        ? `${testStatusLabel(integration.settings.lastTestStatus)} — correct the details above and test again.`
-        : "Run Test connection to confirm the credentials — browser calling starts as soon as Twilio accepts them.";
+  const { client, server } = missingByOwner(integration.missing);
+
+  const reason =
+    state === "incomplete"
+      ? [
+          client.length > 0 ? `Still needed: ${client.map(fieldLabel).join(", ")}.` : null,
+          server.length > 0
+            ? "ViteSEO still needs to set this server's public callback address — contact ViteSEO."
+            : null,
+        ]
+          .filter(Boolean)
+          .join(" ")
+      : state === "switched-off"
+        ? "The switch above is off."
+        : state === "test-failed"
+          ? `${testStatusLabel(integration.settings.lastTestStatus)} — correct the details above and test again.`
+          : "Run Test connection to confirm the credentials — browser calling starts as soon as Twilio accepts them.";
 
   return (
     <div
@@ -330,49 +360,13 @@ function StateExplanation({ integration }: { integration: CallingIntegration }) 
 }
 
 /**
- * The form. Identifiers and secrets are submitted together, but only the secrets are write-only —
- * an empty secret field means "keep what is stored", which is why neither is ever pre-filled and both
- * show a masked hint instead.
+ * The form: exactly the credential fields the API accepts (see `CLIENT_CREDENTIAL_FIELDS`). Identifiers
+ * and secrets are submitted together, but only the secrets are write-only — an empty secret field
+ * means "keep what is stored", which is why neither is ever pre-filled and both show a masked hint.
  *
  * The shapes are validated here exactly as the server validates them, so a paste error is caught
- * before a round trip rather than after one.
+ * before a round trip; anything the server still rejects is shown on the field it names.
  */
-const schema = z.object({
-  account_sid: z
-    .string()
-    .trim()
-    .regex(/^AC[0-9a-fA-F]{32}$/, "An Account SID starts with AC and is 34 characters long."),
-  api_key: z
-    .string()
-    .trim()
-    .regex(/^SK[0-9a-fA-F]{32}$/, "An API Key SID starts with SK and is 34 characters long."),
-  twiml_app_sid: z
-    .string()
-    .trim()
-    .regex(/^AP[0-9a-fA-F]{32}$/, "A TwiML App SID starts with AP and is 34 characters long."),
-  caller_id: z
-    .string()
-    .trim()
-    .regex(/^\+[1-9]\d{7,14}$/, "Use the full international form, e.g. +639171234567."),
-  webhook_base_url: z
-    .string()
-    .trim()
-    .url("Enter the full https address Twilio should call back on.")
-    .startsWith("https://", "Twilio will not post call data over http."),
-  auth_token: z
-    .string()
-    .trim()
-    .regex(/^\S*$/, "An Auth Token cannot contain spaces.")
-    .refine((v) => v === "" || v.length >= 20, "Paste the full Auth Token."),
-  api_secret: z
-    .string()
-    .trim()
-    .regex(/^\S*$/, "An API Key Secret cannot contain spaces.")
-    .refine((v) => v === "" || v.length >= 20, "Paste the full API Key Secret."),
-});
-
-type FormValues = z.infer<typeof schema>;
-
 function CredentialsForm({
   integration,
   busy,
@@ -382,42 +376,27 @@ function CredentialsForm({
 }) {
   const configure = useConfigureCalling();
   const { settings } = integration;
+  const voiceUrl = voiceWebhookUrl(settings);
 
-  const form = useForm<FormValues>({
-    resolver: zodResolver(schema),
-    defaultValues: {
-      // Identifiers ARE pre-filled: they are not secrets, and an admin correcting one should not have
-      // to retype the other four.
-      account_sid: settings.accountSid ?? "",
-      api_key: settings.apiKey ?? "",
-      twiml_app_sid: settings.twimlAppSid ?? "",
-      caller_id: settings.callerId ?? "",
-      webhook_base_url: settings.webhookBaseUrl ?? "",
-      // Secrets never are.
-      auth_token: "",
-      api_secret: "",
-    },
+  const form = useForm<CredentialFormValues>({
+    resolver: zodResolver(credentialSchema),
+    defaultValues: credentialFormDefaults(settings),
   });
 
   const submit = form.handleSubmit((values) => {
-    // An untouched secret field is omitted entirely rather than sent as an empty string, which is
-    // what makes "leave blank to keep the stored value" true at the API rather than only in the UI.
-    const payload = {
-      account_sid: values.account_sid,
-      api_key: values.api_key,
-      twiml_app_sid: values.twiml_app_sid,
-      caller_id: values.caller_id,
-      webhook_base_url: values.webhook_base_url,
-      ...(values.auth_token ? { auth_token: values.auth_token } : {}),
-      ...(values.api_secret ? { api_secret: values.api_secret } : {}),
-    };
-
-    configure.mutate(payload, {
+    configure.mutate(buildConfigurePayload(values), {
       onSuccess: () => {
         // Clear the two write-only inputs so a saved secret is never left sitting in the DOM, and so
         // the placeholder goes back to being the only indication of what is stored.
         form.resetField("auth_token");
         form.resetField("api_secret");
+      },
+      onError: (err) => {
+        // The server's own sentence for each rejected field, on that field. The summary toast is
+        // raised by the mutation itself.
+        for (const [field, message] of Object.entries(formFieldErrors(err))) {
+          form.setError(field as keyof CredentialFormValues, { type: "server", message });
+        }
       },
     });
   });
@@ -462,7 +441,7 @@ function CredentialsForm({
         <Field
           id="twilio-twiml-app"
           label="TwiML App SID"
-          hint="The Voice app whose request URL points at this CRM."
+          hint="The Voice app in your Twilio account whose request URL is shown below."
           placeholder="AP…"
           error={form.formState.errors.twiml_app_sid?.message}
           {...form.register("twiml_app_sid")}
@@ -475,17 +454,9 @@ function CredentialsForm({
           error={form.formState.errors.caller_id?.message}
           {...form.register("caller_id")}
         />
-        <div className="sm:col-span-2">
-          <Field
-            id="twilio-webhook-url"
-            label="Callback URL"
-            hint="The public https address Twilio can reach this CRM on. Set the same value as your TwiML App's request URL."
-            placeholder="https://crm.example.com"
-            error={form.formState.errors.webhook_base_url?.message}
-            {...form.register("webhook_base_url")}
-          />
-        </div>
       </div>
+
+      <VoiceUrlNote url={voiceUrl} />
 
       <div className="flex flex-wrap items-center gap-3">
         <Button type="submit" size="sm" disabled={busy}>
@@ -497,6 +468,32 @@ function CredentialsForm({
         </p>
       </div>
     </form>
+  );
+}
+
+/**
+ * Where the organization's TwiML App must send Twilio's Voice requests. Read-only: it is this
+ * deployment's public address, fixed on the server, and deliberately not a field anyone here can edit.
+ */
+function VoiceUrlNote({ url }: { url: string | null }) {
+  return (
+    <div className="flex flex-col gap-1.5 rounded-lg bg-muted/40 px-3 py-2.5">
+      <p className="text-sm font-medium text-foreground">Voice request URL for your TwiML App</p>
+      {url ? (
+        <>
+          <p className="break-all rounded bg-card px-2 py-1 font-mono text-xs text-foreground">{url}</p>
+          <p className="text-xs text-muted-foreground">
+            Set this as your TwiML App&apos;s Voice Request URL (HTTP POST). It is fixed by this
+            deployment and cannot be changed here.
+          </p>
+        </>
+      ) : (
+        <p className="text-xs text-muted-foreground">
+          This server&apos;s public callback address has not been set up yet. ViteSEO sets it — it
+          cannot be changed here.
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -555,29 +552,29 @@ function SecretField({
 }
 
 function TestStatusChip({ integration }: { integration: CallingIntegration }) {
-  const status = integration.settings.lastTestStatus;
+  const outcome = testOutcome(integration.settings.lastTestStatus);
 
-  if (status === "ok") {
+  if (outcome.kind === "success") {
     return (
       <Badge variant="secondary" className="gap-1">
         <CheckCircle2 className="size-3 text-teal-700 dark:text-teal-400" aria-hidden />
-        {testStatusLabel(status)}
+        {outcome.label}
       </Badge>
     );
   }
 
-  if (status && status !== "not_configured") {
+  if (outcome.kind === "failure") {
     return (
       <Badge
         variant="outline"
         className="gap-1 border-amber-300 text-amber-800 dark:border-amber-800 dark:text-amber-300"
       >
         <AlertTriangle className="size-3" aria-hidden />
-        {testStatusLabel(status)}
+        {outcome.label}
       </Badge>
     );
   }
 
   // Never tested, or tested with nothing to test — stated plainly rather than dressed as a status.
-  return <Badge variant="outline">{testStatusLabel(status)}</Badge>;
+  return <Badge variant="outline">{outcome.label}</Badge>;
 }
