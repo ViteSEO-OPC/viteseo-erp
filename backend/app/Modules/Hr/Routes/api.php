@@ -333,6 +333,7 @@ Route::middleware(['auth:sanctum', 'set-current-org', 'subscription-active', 'fe
 
         // Recruitment (HR only).
         Route::get('requisitions', [RecruitmentController::class, 'requisitionsIndex']);
+        Route::get('requisitions/{requisition}', [RecruitmentController::class, 'showRequisition']);
         Route::post('requisitions', [RecruitmentController::class, 'storeRequisition']);
         Route::match(['put', 'patch'], 'requisitions/{requisition}', [RecruitmentController::class, 'updateRequisition']);
         Route::delete('requisitions/{requisition}', [RecruitmentController::class, 'destroyRequisition']);
@@ -445,6 +446,9 @@ Route::middleware(['auth:sanctum', 'set-current-org', 'subscription-active', 'fe
         Route::post('employees/{employee}/reopen-onboarding', [EmployeeController::class, 'reopenOnboarding']);
         // The employment lifecycle's exit and its two ways back in.
         Route::post('employees/{employee}/separate', [EmployeeController::class, 'separate']);
+        // The end of an internship. Not the same as editing Employment status: it closes the
+        // internship on the timeline, opens the salary history, and raises leave credits.
+        Route::post('employees/{employee}/convert-intern', [EmployeeController::class, 'convertIntern']);
         // `withTrashed()` on both: a separated employee IS soft-deleted, so without it route model
         // binding 404s and the reversal is unreachable — which is the gap describes.
         Route::post('employees/{employee}/reinstate', [EmployeeController::class, 'reinstate'])

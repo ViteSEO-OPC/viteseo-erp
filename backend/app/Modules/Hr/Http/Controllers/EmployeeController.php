@@ -5,6 +5,7 @@ namespace App\Modules\Hr\Http\Controllers;
 use App\Http\Controllers\Controller;
 use App\Modules\Hr\Http\Requests\RehireEmployeeRequest;
 use App\Modules\Hr\Http\Requests\ReopenRequest;
+use App\Modules\Hr\Http\Requests\ConvertInternRequest;
 use App\Modules\Hr\Http\Requests\SeparateEmployeeRequest;
 use App\Modules\Hr\Http\Requests\SetHrRoleRequest;
 use App\Modules\Hr\Http\Requests\RenameEmployeeDocumentRequest;
@@ -210,6 +211,14 @@ class EmployeeController extends Controller
      * The route resolves trashed employees (`->withTrashed()`), because the whole point is that the
      * record has been archived. Hire date, leave credits and loan authorisations all stand.
      */
+    // POST /api/v1/hr/employees/{employee}/convert-intern
+    public function convertIntern(ConvertInternRequest $request, Employee $employee): JsonResponse
+    {
+        return EmployeeResource::make(
+            $this->service->convertIntern($employee, $request->validated()),
+        )->response();
+    }
+
     public function reinstate(ReopenRequest $request, Employee $employee): JsonResponse
     {
         return EmployeeResource::make(

@@ -57,6 +57,13 @@ export function CandidateCardView({
           {[candidate.location, candidate.expected_salary].filter(Boolean).join(" · ")}
         </p>
       )}
+      {/*
+        * Its own line, not appended to the one above: a school name is long enough that
+        * joining it onto "Manila · ₱650/day" left it ellipsised away on every card.
+        */}
+      {candidate.school && (
+        <p className="mt-0.5 truncate text-caption text-muted-foreground">{candidate.school}</p>
+      )}
       {footer}
     </div>
   );

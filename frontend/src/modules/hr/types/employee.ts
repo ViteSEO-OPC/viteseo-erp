@@ -76,6 +76,8 @@ export interface Employee {
 
   job_title: string;
   employment_status: string;
+  /** Interns only — the practicum hours their school requires. */
+  ojt_required_hours: number | null;
   work_location: string | null;
   employee_role: string | null;
   onboarding_status: "pending" | "complete" | null;

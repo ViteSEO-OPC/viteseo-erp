@@ -25,10 +25,43 @@ class RecruitmentService
 
     public const EMPLOYMENT_TYPES = ['full_time', 'part_time', 'contract', 'ojt', 'temporary'];
 
+    /** How an OJT allowance is quoted. */
+    public const ALLOWANCE_PERIODS = ['per_day', 'per_month'];
+
     /** Employment type decides the candidate pipeline (OJT gets the OJT flow). */
     public static function pipelineForEmployment(?string $employmentType): string
     {
         return $employmentType === 'ojt' ? 'ojt' : 'standard';
+    }
+
+    /**
+     * The compensation a requisition quotes: an OJT pays an allowance, every other
+     * employment type quotes a salary range. Returned as the whole set rather than the
+     * one live field, so the other side is always cleared -- a requisition switched from
+     * full-time to OJT must stop quoting the salary it was opened with, and a figure left
+     * behind in the dead column would be read back by anything that looks at it later.
+     *
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     */
+    private function compensationFor(?string $employmentType, array $data): array
+    {
+        if ($employmentType !== 'ojt') {
+            return [
+                'salary_range' => $data['salary_range'] ?? null,
+                'allowance_amount' => null,
+                'allowance_period' => null,
+            ];
+        }
+
+        $amount = $data['allowance_amount'] ?? null;
+
+        return [
+            'salary_range' => null,
+            'allowance_amount' => $amount,
+            // A period on its own says nothing -- it only qualifies a figure.
+            'allowance_period' => $amount === null ? null : ($data['allowance_period'] ?? null),
+        ];
     }
 
     /**
@@ -100,12 +133,14 @@ class RecruitmentService
      */
     public function createRequisition(array $data): Requisition
     {
+        $employmentType = $data['employment_type'] ?? null;
+
         $requisition = Requisition::create([
             'title' => $data['title'],
-            'employment_type' => $data['employment_type'] ?? null,
+            'employment_type' => $employmentType,
             // Pipeline is derived from employment type (OJT → OJT stage flow).
-            'pipeline' => self::pipelineForEmployment($data['employment_type'] ?? null),
-            'salary_range' => $data['salary_range'] ?? null,
+            'pipeline' => self::pipelineForEmployment($employmentType),
+            ...$this->compensationFor($employmentType, $data),
             'department_id' => $data['department_id'],
             'hiring_manager_id' => $data['hiring_manager_id'] ?? null,
             'openings' => $data['openings'] ?? 1,
@@ -132,7 +167,7 @@ class RecruitmentService
             'title' => $data['title'],
             'employment_type' => $employmentType,
             'pipeline' => self::pipelineForEmployment($employmentType),
-            'salary_range' => $data['salary_range'] ?? null,
+            ...$this->compensationFor($employmentType, $data),
             'department_id' => $data['department_id'],
             'hiring_manager_id' => $data['hiring_manager_id'] ?? null,
             'openings' => $data['openings'],
@@ -178,6 +213,14 @@ class RecruitmentService
 
         $stage = $data['stage'] ?? null;
 
+        /*
+         * The school and the practicum hours it requires belong to an OJT application and
+         * nothing else. Guarded here rather than trusted from the form, so a payload aimed
+         * at a standard requisition cannot leave a stray school on a candidate whose board
+         * has nowhere to show it.
+         */
+        $isOjt = $requisition->pipeline === 'ojt';
+
         $resumePath = $resume
             ? $resume->store("hr/resumes/{$requisition->id}", 'local')
             : null;
@@ -193,6 +236,8 @@ class RecruitmentService
             'rating' => $data['rating'] ?? null,
             'expected_salary' => $data['expected_salary'] ?? null,
             'location' => $data['location'] ?? null,
+            'school' => $isOjt ? ($data['school'] ?? null) : null,
+            'required_hours' => $isOjt ? ($data['required_hours'] ?? null) : null,
             'feedback' => $data['feedback'] ?? null,
             'notes' => $data['notes'] ?? null,
             'resume_path' => $resumePath,
@@ -294,7 +339,18 @@ class RecruitmentService
                 'email' => $this->uniqueEmail($candidate),
                 'department_id' => $requisition->department_id,
                 'job_title' => $requisition->title,
-                'employment_status' => 'probationary',
+                /*
+                 * An OJT requisition hires an INTERN. This was hardcoded to probationary,
+                 * which meant the OJT pipeline -- its own board, its own MOA-review and
+                 * role-assignment stages -- handed over someone the rest of HR then treated
+                 * as a probationary employee: wrong leave allotment, and no way to tell an
+                 * intern from a new hire on the directory.
+                 */
+                'employment_status' => $requisition->pipeline === 'ojt' ? 'ojt' : 'probationary',
+                // Carried from the application. The school goes into the education field the
+                // record already has rather than a second column saying the same thing.
+                'university' => $candidate->school,
+                'ojt_required_hours' => $candidate->required_hours,
                 // New hire carries the "Onboarding" tag until HR marks it complete
                 // . Applies to part-timers/OJT too.
                 'onboarding_status' => 'pending',

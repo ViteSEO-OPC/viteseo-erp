@@ -17,6 +17,7 @@ class Requisition extends Model
 
     protected $fillable = [
         'title', 'pipeline', 'employment_type', 'salary_range',
+        'allowance_amount', 'allowance_period',
         'department_id', 'hiring_manager_id', 'openings', 'stage',
         'opened_at', 'target_start_date', 'location', 'job_description',
     ];
@@ -25,6 +26,7 @@ class Requisition extends Model
         'opened_at' => 'date',
         'target_start_date' => 'date',
         'openings' => 'integer',
+        'allowance_amount' => 'decimal:2',
     ];
 
     public function department(): BelongsTo

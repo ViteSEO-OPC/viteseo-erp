@@ -1,11 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { UserMinus, UserCheck, UserPlus, AlertTriangle } from "lucide-react";
+import { UserMinus, UserCheck, UserPlus, AlertTriangle, GraduationCap } from "lucide-react";
 import { AxiosError } from "axios";
 import { notify as toast } from "@/core/lib/notify";
 
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Dialog,
@@ -22,10 +23,18 @@ import {
   useSeparateEmployee,
   useReinstateEmployee,
   useRehireEmployee,
+  useConvertIntern,
 } from "@/modules/hr/hooks/use-employees";
-import type { Employee } from "@/modules/hr/types/employee";
+import {
+  EMPLOYMENT_STATUSES,
+  statusLabel,
+  type Employee,
+} from "@/modules/hr/types/employee";
 
-type Mode = "separate" | "reinstate" | "rehire" | null;
+type Mode = "separate" | "reinstate" | "rehire" | "convert" | null;
+
+/** What an intern can become. Anything but another internship. */
+const CONVERSION_STATUSES = EMPLOYMENT_STATUSES.filter((s) => s !== "ojt");
 
 /** Turn a 422 into the field message the server actually sent, rather than a generic failure. */
 function serverMessage(err: unknown, fallback: string): string {
@@ -45,16 +54,38 @@ export function EmploymentLifecycleSection({ employee }: { employee: Employee })
   const [lastDay, setLastDay] = useState(manilaToday());
   const [rehireDate, setRehireDate] = useState(manilaToday());
   const [reason, setReason] = useState("");
+  // Conversion — the end of an internship.
+  const [convertStatus, setConvertStatus] = useState("regular");
+  const [convertDate, setConvertDate] = useState(manilaToday());
+  const [convertSalary, setConvertSalary] = useState("");
+  const [convertTitle, setConvertTitle] = useState("");
+  const [salaryError, setSalaryError] = useState<string | null>(null);
 
   const separateMut = useSeparateEmployee();
   const reinstateMut = useReinstateEmployee();
   const rehireMut = useRehireEmployee();
+  const convertMut = useConvertIntern();
 
-  const pending = separateMut.isPending || reinstateMut.isPending || rehireMut.isPending;
+  const isIntern = employee.employment_status === "ojt";
+  const pending =
+    separateMut.isPending ||
+    reinstateMut.isPending ||
+    rehireMut.isPending ||
+    convertMut.isPending;
 
   function close() {
     setMode(null);
     setReason("");
+    setSalaryError(null);
+  }
+
+  function openConvert() {
+    setConvertStatus("regular");
+    setConvertDate(manilaToday());
+    setConvertSalary("");
+    setConvertTitle(employee.job_title ?? "");
+    setSalaryError(null);
+    setMode("convert");
   }
 
   async function confirm() {
@@ -84,6 +115,28 @@ export function EmploymentLifecycleSection({ employee }: { employee: Employee })
           `${employee.name} rehired`,
           "Tenure restarts. Any outstanding loan needs the employee's authorisation again.",
         );
+      } else if (mode === "convert") {
+        const salary = Number(convertSalary);
+        if (convertSalary === "" || !Number.isFinite(salary) || salary < 0) {
+          setSalaryError("Enter their starting salary");
+          return;
+        }
+        setSalaryError(null);
+
+        await convertMut.mutateAsync({
+          id: employee.id,
+          input: {
+            employment_status: convertStatus,
+            effective_date: convertDate,
+            base_salary: salary,
+            job_title: convertTitle.trim() || undefined,
+            reason: reason.trim() || undefined,
+          },
+        });
+        toast.success(
+          `${employee.name} is now ${statusLabel(convertStatus).toLowerCase()}`,
+          "Their internship is closed on the timeline and leave credits are set for the new status.",
+        );
       }
       close();
     } catch (err) {
@@ -109,7 +162,11 @@ export function EmploymentLifecycleSection({ employee }: { employee: Employee })
             </p>
           ) : (
             <p className="mt-1 text-caption text-muted-foreground">
-              Employed since <strong className="text-foreground">{employee.hire_date}</strong>
+              {isIntern ? "Interning since " : "Employed since "}
+              <strong className="text-foreground">{employee.hire_date}</strong>
+              {isIntern && employee.ojt_required_hours != null
+                ? ` · ${employee.ojt_required_hours} hours required`
+                : null}
               {employee.previous_hire_date
                 ? ` · rehired, first joined ${employee.previous_hire_date}`
                 : null}
@@ -134,10 +191,19 @@ export function EmploymentLifecycleSection({ employee }: { employee: Employee })
              * type="button" matters: this section renders inside the Job tab's <form>, and a
              * bare button would default to submit — opening the dialog AND silently saving.
              */
-            <Button type="button" variant="outline" onClick={() => setMode("separate")}>
-              <UserMinus />
-              End employment
-            </Button>
+            <>
+              {/* An intern's exit from the internship that isn't leaving: they get hired. */}
+              {isIntern && (
+                <Button type="button" onClick={openConvert}>
+                  <GraduationCap />
+                  Convert to employee
+                </Button>
+              )}
+              <Button type="button" variant="outline" onClick={() => setMode("separate")}>
+                <UserMinus />
+                End employment
+              </Button>
+            </>
           )}
         </div>
       </div>
@@ -150,14 +216,18 @@ export function EmploymentLifecycleSection({ employee }: { employee: Employee })
                 ? "End employment"
                 : mode === "reinstate"
                   ? "Reinstate employee"
-                  : "Rehire employee"}
+                  : mode === "rehire"
+                    ? "Rehire employee"
+                    : "Convert to employee"}
             </DialogTitle>
             <DialogDescription>
               {mode === "separate"
                 ? "Records their last working day and archives the record. Their final pay is run separately."
                 : mode === "reinstate"
                   ? "Use this when the separation should not have happened."
-                  : "Use this when they are being taken on again as a new employment."}
+                  : mode === "rehire"
+                    ? "Use this when they are being taken on again as a new employment."
+                    : "The end of the internship — they stay on as staff. Tenure is continuous."}
             </DialogDescription>
           </DialogHeader>
 
@@ -245,6 +315,71 @@ export function EmploymentLifecycleSection({ employee }: { employee: Employee })
               </>
             )}
 
+            {mode === "convert" && (
+              <>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="convert-status">New employment status</Label>
+                    <SimpleSelect
+                      id="convert-status"
+                      value={convertStatus}
+                      onValueChange={setConvertStatus}
+                      options={CONVERSION_STATUSES.map((s) => ({
+                        value: s,
+                        label: statusLabel(s),
+                      }))}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="convert-date">Effective date</Label>
+                    <DatePicker
+                      id="convert-date"
+                      value={convertDate}
+                      onChange={(v) => setConvertDate(v)}
+                      className="w-full"
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="convert-salary">Starting monthly salary</Label>
+                    <Input
+                      id="convert-salary"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      placeholder="32000.00"
+                      value={convertSalary}
+                      aria-invalid={!!salaryError}
+                      onChange={(e) => setConvertSalary(e.target.value)}
+                    />
+                    {salaryError && <p className="text-xs text-destructive">{salaryError}</p>}
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="convert-title">Job title</Label>
+                    <Input
+                      id="convert-title"
+                      placeholder="Junior Software Engineer"
+                      value={convertTitle}
+                      onChange={(e) => setConvertTitle(e.target.value)}
+                    />
+                  </div>
+                </div>
+                <div className="rounded-lg border border-border p-3 space-y-2">
+                  <p className="text-xs text-foreground">
+                    <strong>Tenure is continuous.</strong> Their hire date
+                    {employee.hire_date ? ` (${employee.hire_date})` : ""} stays as it is — the
+                    internship is closed on the employment timeline and the new role opens on the
+                    effective date.
+                  </p>
+                  <p className="text-xs text-foreground">
+                    Leave credits are raised to the allotment for the new status. Credits already
+                    granted by hand are never reduced.
+                  </p>
+                </div>
+              </>
+            )}
+
             <div className="space-y-1.5">
               <Label htmlFor="lifecycle-reason">Note (optional)</Label>
               <textarea
@@ -270,7 +405,9 @@ export function EmploymentLifecycleSection({ employee }: { employee: Employee })
                   ? "End employment"
                   : mode === "reinstate"
                     ? "Reinstate"
-                    : "Rehire"}
+                    : mode === "rehire"
+                      ? "Rehire"
+                      : "Convert"}
             </Button>
           </DialogFooter>
         </DialogContent>

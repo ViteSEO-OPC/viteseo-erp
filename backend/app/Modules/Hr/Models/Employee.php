@@ -28,6 +28,7 @@ class Employee extends Model
         'photo_path',
         'job_title',
         'employment_status',
+        'ojt_required_hours',
         'employment_type',
         'work_location',
         'employee_role',

@@ -23,6 +23,13 @@ class StoreRequisitionRequest extends FormRequest
             'pipeline' => ['nullable', Rule::in(RecruitmentService::PIPELINES)],
             'employment_type' => ['nullable', Rule::in(RecruitmentService::EMPLOYMENT_TYPES)],
             'salary_range' => ['nullable', 'string', 'max:100'],
+            // OJT pays an allowance instead. The period is meaningless without a
+            // figure, so it is only required once one is given.
+            'allowance_amount' => ['nullable', 'numeric', 'min:0', 'max:9999999999'],
+            'allowance_period' => [
+                'nullable', 'required_with:allowance_amount',
+                Rule::in(RecruitmentService::ALLOWANCE_PERIODS),
+            ],
             'department_id' => ['required', 'integer', 'exists:hr_departments,id'],
             'hiring_manager_id' => ['nullable', 'integer', 'exists:hr_employees,id'],
             'openings' => ['required', 'integer', 'min:1'],

@@ -12,10 +12,23 @@ export async function getRequisitions(params: QueueParams): Promise<QueuePage<Re
   return { items: res.data.data, total: res.data.meta?.total ?? res.data.data.length };
 }
 
+/**
+ * One requisition, by id. The board reads its subject through this rather than picking it
+ * out of the index page: that page is filtered, searched and paged, and can stop containing
+ * the requisition whose board is open — which is exactly what hiring the last candidate does.
+ */
+export async function getRequisition(id: number): Promise<Requisition> {
+  const res = await apiClient.get(`/hr/requisitions/${id}`);
+  return res.data.data;
+}
+
 export interface RequisitionInput {
   title: string;
   employment_type: string | null;
+  /** The server keeps whichever of these the employment type calls for and nulls the other. */
   salary_range: string | null;
+  allowance_amount: number | null;
+  allowance_period: string | null;
   department_id: number;
   hiring_manager_id: number | null;
   openings: number;
@@ -59,6 +72,9 @@ export interface CandidateInput {
   source: string;
   expected_salary: string | null;
   location: string | null;
+  /** OJT only — the server drops both unless the requisition is an OJT. */
+  school: string | null;
+  required_hours: number | null;
   notes: string | null;
   resume: File | null;
 }
@@ -72,6 +88,8 @@ export async function createCandidate(input: CandidateInput): Promise<Candidate>
   form.append("source", input.source);
   if (input.expected_salary) form.append("expected_salary", input.expected_salary);
   if (input.location) form.append("location", input.location);
+  if (input.school) form.append("school", input.school);
+  if (input.required_hours != null) form.append("required_hours", String(input.required_hours));
   if (input.notes) form.append("notes", input.notes);
   if (input.resume) form.append("resume", input.resume);
 

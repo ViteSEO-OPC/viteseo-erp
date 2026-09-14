@@ -79,6 +79,8 @@ class EmployeeService
         'current_address_house_no', 'current_address_street', 'current_address_barangay', 'current_address_city', 'current_address_province', 'current_address_zip',
         'mothers_maiden_name', 'fathers_name', 'siblings', 'number_of_siblings',
         'high_school', 'college_course', 'university',
+        // Interns only — the practicum hours their school requires.
+        'ojt_required_hours',
         'emergency_contact_name', 'emergency_contact_relationship', 'emergency_contact_phone',
         'bank_name', 'bank_account', 'height', 'weight', 'health_condition',
         'pay_frequency', 'currency', 'bank_account_type', 'bank_account_name',
@@ -213,7 +215,9 @@ class EmployeeService
             return;
         }
 
-        $today = now(config('app.timezone_local'))->toDateString();
+        // The date the move ACTUALLY takes effect. A plain edit has none and means today;
+        // a conversion carries one, and its timeline must agree with its salary history.
+        $today = $data['effective_date'] ?? now(config('app.timezone_local'))->toDateString();
         $statusMap = ['promotion' => 'promoted', 'transfer' => 'transferred', 'lateral' => 'lateral'];
 
         $current?->update([
@@ -624,6 +628,141 @@ class EmployeeService
 
             return $employee->load(['user', 'department', 'manager.user']);
         });
+    }
+
+    /**
+     * The end of an internship: the intern is taken on as staff.
+     *
+     * Deliberately its own action rather than editing Employment status in the Job
+     * section. That field writes a status and nothing else, which is exactly what a
+     * conversion must not do -- the internship has to close on the employment timeline,
+     * the first real salary has to open the salary history, and the leave credits an
+     * intern was seeded with (zero, by allotment) have to be raised to what their new
+     * status is entitled to. Left to the plain edit, a converted regular kept an intern's
+     * zero leave and no record of when they stopped being one.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    public function convertIntern(Employee $employee, array $data): Employee
+    {
+        if ($employee->employment_status !== 'ojt') {
+            throw ValidationException::withMessages([
+                'employment_status' => ['Only an intern can be converted to an employee.'],
+            ]);
+        }
+        if ($employee->separation_date !== null || $employee->trashed()) {
+            throw ValidationException::withMessages([
+                'employment_status' => ['This employee has left the company.'],
+            ]);
+        }
+
+        return DB::transaction(function () use ($employee, $data) {
+            $effectiveDate = $data['effective_date'];
+            $newStatus = $data['employment_status'];
+            $title = $data['job_title'] ?? $employee->job_title;
+            $reason = $data['reason'] ?? 'Internship converted to ' . str_replace('_', ' ', $newStatus);
+
+            $employee->update([
+                'employment_status' => $newStatus,
+                'job_title' => $title,
+                'department_id' => $data['department_id'] ?? $employee->department_id,
+                'base_salary' => $data['base_salary'],
+                // The required-hours figure belonged to the practicum. It is not a fact
+                // about the employee they have become.
+                'ojt_required_hours' => null,
+            ]);
+
+            // Close the internship on the timeline and open the role they convert into.
+            // An unmapped change type lands as 'role_change', which is the honest reading
+            // of it and needs no new word in the timeline's vocabulary.
+            $this->recordRoleChange($employee, $title, [
+                'role_change_type' => 'conversion',
+                'role_change_reason' => $reason,
+                'effective_date' => $effectiveDate,
+            ]);
+
+            /*
+             * A conversion sets the first real salary, so it carries the same hazard as any
+             * raise: dated back into a payroll run that is already settled, the run would
+             * reprice if re-run. Refused unless HR acknowledges it, then flagged as an
+             * amount owed -- exactly what a back-dated raise does in update().
+             */
+            $this->assertSalaryDateIsSafe($employee, $effectiveDate, $data);
+
+            $history = SalaryHistory::create([
+                'employee_id' => $employee->id,
+                'base_salary' => $data['base_salary'],
+                'effective_date' => $effectiveDate,
+                'reason' => $reason,
+                'change_type' => 'adjustment',
+                'changed_by' => Auth::id(),
+            ]);
+
+            app(RetroFlagService::class)->flagIfSettled(
+                $history,
+                $employee->id,
+                $effectiveDate,
+                null,
+                RetroFlag::OWED,
+                'Converted from intern at ' . number_format((float) $data['base_salary'], 2)
+                    . ' effective ' . $effectiveDate
+                    . ' — the days already paid were priced as an internship',
+            );
+
+            $this->raiseLeaveEntitlements($employee);
+
+            $employee->load('user');
+            $this->audit->log(
+                'updated',
+                'People',
+                "Converted {$employee->user?->name} from intern to "
+                    . str_replace('_', ' ', $newStatus) . " effective {$effectiveDate}",
+                $employee,
+            );
+
+            return $employee->fresh(['user', 'department', 'manager.user', 'employmentHistories']);
+        });
+    }
+
+    /**
+     * Bring this year's leave credits up to what the employee's CURRENT status is entitled
+     * to. Raise only, never lower: HR can grant credits by hand, and a status change is not
+     * a reason to take those back. `seedLeaveBalances` cannot do this job -- it is
+     * firstOrCreate, so on an employee who already has rows it does nothing at all.
+     */
+    private function raiseLeaveEntitlements(Employee $employee): void
+    {
+        $year = now(config('app.timezone_local'))->year;
+
+        if (LeaveSetting::current()->allotment_mode === LeaveSetting::MODE_SHARED) {
+            $poolDays = (float) (SharedLeaveAllotment::where('employment_status', $employee->employment_status)
+                ->value('days_per_year') ?? 0);
+
+            $balance = SharedLeaveBalance::firstOrCreate(
+                ['employee_id' => $employee->id, 'year' => $year],
+                ['entitled_days' => $poolDays, 'used_days' => 0],
+            );
+            if ((float) $balance->entitled_days < $poolDays) {
+                $balance->update(['entitled_days' => $poolDays]);
+            }
+
+            return;
+        }
+
+        $allotments = LeaveTypeAllotment::where('employment_status', $employee->employment_status)
+            ->pluck('days_per_year', 'leave_type_id');
+
+        foreach (LeaveType::all() as $type) {
+            $days = (float) ($allotments[$type->id] ?? $type->days_per_year);
+
+            $balance = LeaveBalance::firstOrCreate(
+                ['employee_id' => $employee->id, 'leave_type_id' => $type->id, 'year' => $year],
+                ['entitled_days' => $days, 'used_days' => 0],
+            );
+            if ((float) $balance->entitled_days < $days) {
+                $balance->update(['entitled_days' => $days]);
+            }
+        }
     }
 
     /**

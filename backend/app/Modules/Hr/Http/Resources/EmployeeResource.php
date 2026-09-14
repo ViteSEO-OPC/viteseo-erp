@@ -62,6 +62,8 @@ class EmployeeResource extends JsonResource
             'email' => $this->user?->email,
             'job_title' => $this->job_title,
             'employment_status' => $this->employment_status,
+            // Interns only — the practicum hours their school requires.
+            'ojt_required_hours' => $this->ojt_required_hours,
             'onboarding_status' => $this->onboarding_status,
             'is_management' => (bool) $this->is_management,
             'hire_date' => $this->hire_date?->format('Y-m-d'),
