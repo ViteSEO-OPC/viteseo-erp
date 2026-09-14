@@ -23,11 +23,15 @@
  * D  CLIENT FORM — a client organization gets exactly the credential fields the API accepts.
  * E  CENTRALLY MANAGED — ViteSEO's organization is read-only: no editable field, whatever its state.
  * F  NO CALLBACK INPUT — the callback address is never a field and never sent; it is shown read-only
- *    as the TwiML App's Voice URL, and the card's source has no input for it.
+ *    as the TwiML App's Voice URL, and the card's source has no input for it. The path and method the
+ *    card displays are also pinned against the BACKEND's constants, so the URL a client is told to use
+ *    can never drift from the one the connection test accepts.
  * G  SECRETS NEVER RENDERED — the form's secret inputs start empty whatever the settings carry.
  * H  SAVE PAYLOAD — a blank secret is omitted (the API's "keep the stored value"), filled ones are sent
  *    trimmed, and nothing outside the allow-list can ride along.
- * I  CONNECTION TEST — "Connected" only on Twilio's `ok`; a filled-in form is never "connected".
+ * I  CONNECTION TEST — "Connected" only on Twilio's `ok`; a filled-in form is never "connected"; and
+ *    every verdict sends the admin to the place that can actually fix it — the TwiML App verdicts to
+ *    the Twilio console, the credential verdicts to the form.
  * J  REFUSALS — a centrally-managed 403 is told apart from a role 403; a 422 lands on its fields.
  * K  ORGANIZATION SCOPE — one fixed endpoint, and no organization identifier in any payload.
  * L  STATE MATRIX — the card's existing states, and who must fix a missing field.
@@ -53,13 +57,17 @@ import {
   formFieldErrors,
   isCentrallyManagedRefusal,
   missingByOwner,
+  testFailureRemedy,
   testOutcome,
+  testStatusLabel,
+  VOICE_WEBHOOK_PATH,
   voiceWebhookUrl,
   type CredentialFormValues,
 } from "@/modules/crm/features/settings/lib/calling-settings";
 import type {
   CallProviderSettings,
   CallingIntegration,
+  CallingTestStatus,
 } from "@/modules/crm/features/settings/hooks/use-calling-integration";
 
 let failed = 0;
@@ -217,6 +225,23 @@ const CARD_SOURCE = readFileSync(
   "utf8",
 );
 
+/**
+ * The BACKEND's copy of the voice webhook path and method.
+ *
+ * Read as source text because the two live in different languages and must not drift: the card tells a
+ * client admin which URL to put in their TwiML App, and the connection test refuses any app that does
+ * not point at exactly that. If these two constants ever disagree, the screen would hand out one URL
+ * and the server would reject it — the most confusing possible onboarding failure, and one no
+ * single-language test could catch.
+ */
+const SETTING_SERVICE_SOURCE = readFileSync(
+  new URL(
+    "../../../backend/app/Modules/Crm/Services/Calling/CallProviderSettingService.php",
+    import.meta.url,
+  ),
+  "utf8",
+);
+
 const filledValues: CredentialFormValues = {
   account_sid: "  AC" + "a".repeat(32) + " ",
   api_key: "SK" + "a".repeat(32),
@@ -272,6 +297,11 @@ const filledValues: CredentialFormValues = {
       voiceWebhookUrl({ webhookBaseUrl: "https://zerem.example/ " }) === "https://zerem.example/api/v1/twilio/voice"],
     ["no origin configured → no Voice URL", voiceWebhookUrl({ webhookBaseUrl: null }) === null],
     ["a blank origin → no Voice URL", voiceWebhookUrl({ webhookBaseUrl: "  " }) === null],
+    // The URL the card shows and the URL the server verifies the TwiML App against are one value.
+    ["the backend verifies the same voice path the card displays",
+      SETTING_SERVICE_SOURCE.includes(`VOICE_WEBHOOK_PATH = '${VOICE_WEBHOOK_PATH}'`)],
+    ["the backend requires the POST the card tells the admin to use",
+      SETTING_SERVICE_SOURCE.includes("VOICE_WEBHOOK_METHOD = 'POST'") && CARD_SOURCE.includes("HTTP POST")],
   ];
   const bad = checks.filter(([, ok]) => !ok).map(([label]) => label);
   report("F  callback URL is never an editable field", checks.length - bad.length, checks.length, bad);
@@ -323,6 +353,23 @@ const filledValues: CredentialFormValues = {
     ["a rejected auth token is a failure", testOutcome("auth_failed").kind === "failure"],
     ["a rejected API key is a failure", testOutcome("api_key_failed").kind === "failure"],
     ["a missing TwiML App is a failure", testOutcome("twiml_app_missing").kind === "failure"],
+    // The two verdicts that say the CREDENTIALS are right and the account is pointed elsewhere.
+    ["a TwiML App pointed elsewhere is a failure", testOutcome("twiml_app_voice_url_mismatch").kind === "failure"],
+    ["the wrong Voice method is a failure", testOutcome("twiml_app_voice_method_invalid").kind === "failure"],
+    ["neither voice verdict is labelled as a code",
+      !testStatusLabel("twiml_app_voice_url_mismatch").includes("_")
+      && !testStatusLabel("twiml_app_voice_method_invalid").includes("_")],
+    ["the two voice verdicts read differently",
+      testStatusLabel("twiml_app_voice_url_mismatch") !== testStatusLabel("twiml_app_voice_method_invalid")],
+    // A verdict about the TwiML App must send the admin to Twilio, not back to a correct form.
+    ["a TwiML App verdict is fixed in Twilio",
+      ["twiml_app_missing", "twiml_app_voice_url_mismatch", "twiml_app_voice_method_invalid"]
+        .every((s) => testFailureRemedy(s as CallingTestStatus).includes("TwiML App"))],
+    ["a credential verdict is fixed in the form",
+      testFailureRemedy("auth_failed").includes("above") && testFailureRemedy("api_key_failed").includes("above")],
+    ["an unanswered check blames nothing",
+      testFailureRemedy("unreachable") === testFailureRemedy("rate_limited")
+      && !testFailureRemedy("unreachable").includes("above")],
     ["unreachable is a failure", testOutcome("unreachable").kind === "failure"],
     ["never tested is not a success", testOutcome(null).kind === "untested"],
     ["not_configured is not a failure of the account", testOutcome("not_configured").kind === "untested"],
@@ -330,6 +377,8 @@ const filledValues: CredentialFormValues = {
       callingState(overview(complete, { configured: true })) === "not-verified"],
     ["a failed test reads as test-failed",
       callingState(overview(complete, { configured: true, lastTestStatus: "auth_failed" })) === "test-failed"],
+    ["a TwiML App mismatch also reads as test-failed",
+      callingState(overview(complete, { configured: true, lastTestStatus: "twiml_app_voice_url_mismatch" })) === "test-failed"],
     ["only the server's browserCalling makes it connected",
       callingState(overview({ ...complete, verified: true, browserCalling: true }, { configured: true, lastTestStatus: "ok" })) === "connected"],
   ];

@@ -10,7 +10,7 @@ import { useSendEmail } from "@/modules/crm/features/follow-ups/hooks/use-outrea
 import { Button } from "@/modules/crm/components/ui/button";
 import { EmptyState } from "@/modules/crm/components/shared/empty-state/empty-state";
 import { ErrorState } from "@/modules/crm/components/shared/error-state/error-state";
-import { NoteBody } from "@/modules/crm/features/leads/components/note-body";
+import { EmailBody } from "@/modules/crm/components/shared/email-body/email-body";
 import { EmailRichEditor } from "@/modules/crm/features/leads/components/email-rich-editor";
 import type { EmailThreadMessage } from "@/modules/crm/features/leads/types/lead-detail-types";
 
@@ -94,17 +94,15 @@ function MessageCard({ message }: { message: EmailThreadMessage }) {
       <p className="mt-1 break-words text-sm font-semibold text-card-foreground">
         {message.subject || "(no subject)"}
       </p>
-      {message.bodyDoc ? (
-        // A formatted reply: its document rendered READ-ONLY through the same safe path as Internal
-        // Notes — ProseMirror builds the DOM from the JSON, so there is no HTML string and no
-        // dangerouslySetInnerHTML anywhere in the thread.
-        <NoteBody text={message.body} doc={message.bodyDoc} className="mt-1" />
-      ) : (
-        // Every plain-text, inbound and older email renders exactly as it always has.
-        <p className="mt-1 whitespace-pre-wrap break-words text-sm text-muted-foreground">
-          {message.body}
-        </p>
-      )}
+      {/* A formatted reply still renders through NoteBody (ProseMirror from JSON); a received HTML
+          email renders in a sandboxed frame; everything else as structured plain text. There is no
+          dangerouslySetInnerHTML anywhere in the thread. */}
+      <EmailBody
+        body={message.body}
+        bodyDoc={message.bodyDoc}
+        bodyHtml={message.bodyHtml}
+        className="mt-1"
+      />
     </li>
   );
 }

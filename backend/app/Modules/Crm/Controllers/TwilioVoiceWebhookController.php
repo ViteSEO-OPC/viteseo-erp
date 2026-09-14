@@ -30,6 +30,14 @@ use Twilio\TwiML\VoiceResponse;
  * policy-checked request — names the row and cannot be edited by the browser that carried it. A
  * request passing only one of the two is refused.
  *
+ * ── A CALL IN FLIGHT IS ALWAYS ALLOWED TO FINISH ──
+ * These endpoints do not check whether the call's organization is still in good standing, and that is
+ * deliberate. Subscription suspension is enforced once, at `EnsureSubscriptionActive`, which these
+ * routes cannot sit behind — a lapse between placing a call and its completion callback must not hang
+ * up on the person on the line or lose the record of a call that really happened, and Twilio bills the
+ * organization for that minute regardless. Placing a NEW call is already refused at the gates above.
+ * See `TwilioConfig` for the same decision stated where credentials are resolved.
+ *
  * ── Tenancy ──
  * These routes deliberately sit outside `set-current-org`, because a webhook has no user to derive a
  * tenant from. They never need one: the correlation token resolves exactly one `crm_calls` row, and

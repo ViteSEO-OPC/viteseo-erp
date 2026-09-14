@@ -5,6 +5,7 @@ namespace App\Modules\Crm\Providers;
 use App\Models\User;
 use App\Modules\Crm\Console\Commands\BackfillNichesCommand;
 use App\Modules\Crm\Console\Commands\BackfillPlannerOwnershipCommand;
+use App\Modules\Crm\Console\Commands\CallingDoctorCommand;
 use App\Modules\Crm\Console\Commands\SyncMailboxesCommand;
 use App\Modules\Crm\Console\Commands\N8nTokenCommand;
 use App\Modules\Crm\Console\Commands\PruneReadNotifications;
@@ -256,6 +257,11 @@ class CrmServiceProvider extends ServiceProvider
                 BackfillPlannerOwnershipCommand::class,
                 // Hourly cleanup of abandoned .xls import files (scheduled below).
                 PruneXlsImportsCommand::class,
+                // Read-only report of what calling is configured to do, and whether per-organization
+                // mode names a real central organization. Deliberately NOT scheduled: it is the check
+                // an operator runs before switching per-organization accounts on, and its failure is a
+                // configuration decision rather than something a cron could act on.
+                CallingDoctorCommand::class,
             ]);
         }
 

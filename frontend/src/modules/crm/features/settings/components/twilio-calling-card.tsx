@@ -29,6 +29,7 @@ import {
   fieldLabel,
   formFieldErrors,
   missingByOwner,
+  testFailureRemedy,
   testOutcome,
   testStatusLabel,
   voiceWebhookUrl,
@@ -175,6 +176,8 @@ function Body({ integration }: { integration: CallingIntegration }) {
 
       <StateExplanation integration={integration} />
 
+      <SetupChecklist />
+
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <p className="text-sm font-medium text-foreground">Enable browser calling</p>
@@ -233,9 +236,23 @@ function Body({ integration }: { integration: CallingIntegration }) {
       </div>
 
       <p className="text-xs text-muted-foreground">
-        A connection test only reads your Twilio account to check the credentials — it never places a
-        call and never rings a number. Browser calling stays off until a test succeeds, and any change
-        to a credential means testing again.
+        A connection test only reads your Twilio account to check the credentials and that your TwiML
+        App points at this server — it never places a call and never rings a number. Browser calling
+        stays off until a test succeeds, and any change to a credential means testing again.
+      </p>
+
+      {/*
+        The one thing a green "Connected" does NOT establish, said plainly rather than left to be
+        discovered on a real call. Twilio accepts an outbound caller ID both from numbers the account
+        owns and from separately verified caller IDs, so checking only the owned-numbers list would
+        reject perfectly valid setups — the check is deliberately not made, which makes stating its
+        absence part of the feature rather than an admission.
+      */}
+      <p className="text-xs text-muted-foreground">
+        It does not check the Caller ID or whether your account may call a given destination. A passing
+        test means the credentials work, not that this number is cleared to place calls — Twilio must
+        own it or you must have verified it, and international destinations may need to be enabled on
+        your account.
       </p>
 
       <ConfirmDialog
@@ -343,7 +360,7 @@ function StateExplanation({ integration }: { integration: CallingIntegration }) 
       : state === "switched-off"
         ? "The switch above is off."
         : state === "test-failed"
-          ? `${testStatusLabel(integration.settings.lastTestStatus)} — correct the details above and test again.`
+          ? `${testStatusLabel(integration.settings.lastTestStatus)}. ${testFailureRemedy(integration.settings.lastTestStatus)}`
           : "Run Test connection to confirm the credentials — browser calling starts as soon as Twilio accepts them.";
 
   return (
@@ -449,7 +466,7 @@ function CredentialsForm({
         <Field
           id="twilio-caller-id"
           label="Caller ID"
-          hint="The Twilio number the person you call will see."
+          hint="The number the person you call will see. It must be a number this Twilio account owns, or a caller ID you have verified with Twilio — the connection test cannot check this."
           placeholder="+639171234567"
           error={form.formState.errors.caller_id?.message}
           {...form.register("caller_id")}
@@ -468,6 +485,55 @@ function CredentialsForm({
         </p>
       </div>
     </form>
+  );
+}
+
+/**
+ * What an admin has to have done in Twilio BEFORE this form can be filled in, and in what order.
+ *
+ * Collapsed by default: an admin returning to correct a caller ID should not have to scroll past a
+ * tutorial, and an admin arriving with nothing should not have to guess that four of the six values
+ * do not exist yet. The ordering is the part that is not obvious — the TwiML App has to exist before
+ * its SID can be pasted, and it needs the Voice URL shown below it, which is why that note sits
+ * directly under the form rather than here.
+ *
+ * Deliberately not a link to external documentation: Twilio's console changes, and a dead link on a
+ * setup screen is worse than no link. The full walkthrough lives in ViteSEO's client setup guide.
+ */
+function SetupChecklist() {
+  return (
+    <details className="rounded-lg border border-border-subtle bg-muted/30 px-3 py-2.5">
+      <summary className="cursor-pointer text-sm font-medium text-foreground">
+        What you&apos;ll need from Twilio
+      </summary>
+      <ol className="mt-2.5 flex list-decimal flex-col gap-1.5 pl-5 text-xs text-muted-foreground">
+        <li>
+          A Twilio account (or a subaccount for this organization) — its{" "}
+          <span className="font-medium text-foreground">Account SID</span> and{" "}
+          <span className="font-medium text-foreground">Auth Token</span> are on the console dashboard.
+        </li>
+        <li>
+          An <span className="font-medium text-foreground">API Key</span> created under that account —
+          this gives you the API Key SID and its Secret. Copy the Secret immediately: Twilio shows it
+          once and never again.
+        </li>
+        <li>
+          A phone number the account owns, or a caller ID you have verified with Twilio. That number is
+          the <span className="font-medium text-foreground">Caller ID</span> people see when your team
+          calls.
+        </li>
+        <li>
+          A <span className="font-medium text-foreground">TwiML App</span> (Voice), whose Voice Request
+          URL is the address shown below this form, with the method set to HTTP POST. Create it before
+          you fill the form in — its SID is one of the six values.
+        </li>
+        <li>Paste all six values here, Save, then run Test connection. Browser calling starts when Twilio accepts them.</li>
+      </ol>
+      <p className="mt-2.5 text-xs text-muted-foreground">
+        Twilio bills this account directly. A separate Twilio account or subaccount per organization is
+        recommended, so billing, limits and key rotation stay independent.
+      </p>
+    </details>
   );
 }
 

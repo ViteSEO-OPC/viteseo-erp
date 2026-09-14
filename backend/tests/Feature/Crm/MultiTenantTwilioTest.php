@@ -25,6 +25,7 @@ use Illuminate\Http\Client\Request as OutboundRequest;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Testing\TestResponse;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -73,6 +74,9 @@ class MultiTenantTwilioTest extends TestCase
         parent::setUp();
         $this->seed(RolesAndPermissionsSeeder::class);
         Http::preventStrayRequests();
+        // The guard reports once per PROCESS, and a test run is one process: without this, whichever
+        // case ran first would be the only one that could observe its own report.
+        TwilioConfig::flushMisconfigurationReports();
 
         Config::set('calling.organization_credentials', true);
         Config::set('calling.provider', TwilioCallProvider::NAME);
@@ -457,7 +461,13 @@ class MultiTenantTwilioTest extends TestCase
 
     public function test_a_clients_connection_test_uses_only_its_own_credentials(): void
     {
-        Http::fake(['api.twilio.com/*' => Http::response(['sid' => 'ok'], 200)]);
+        // A correctly wired TwiML Application: the account probes read only the status, and the
+        // application probe now also checks that the app points at this deployment.
+        Http::fake(['api.twilio.com/*' => Http::response([
+            'sid' => 'ok',
+            'voice_url' => self::ORIGIN.CallProviderSettingService::VOICE_WEBHOOK_PATH,
+            'voice_method' => 'POST',
+        ], 200)]);
         $own = self::account('a');
         $central = self::account('c');
 
@@ -653,5 +663,152 @@ class MultiTenantTwilioTest extends TestCase
         // The environment delivers the id as a string; that names the organization.
         Config::set('calling.central_org_id', (string) $this->viteseo->id);
         $this->assertSame(TwilioConfig::SOURCE_DEPLOYMENT, TwilioConfig::forOrg($this->viteseo->id)->source);
+    }
+
+    // ── The misconfiguration guard ─────────────────────────────────────────────────────────────
+    //
+    // Per-organization mode rests on CALLING_CENTRAL_ORG_ID naming a real organization. Getting it
+    // wrong is fail-closed — but silently, and the thing it silently costs is ViteSEO's own browser
+    // calling. These pin that the condition is DETECTED and ANNOUNCED, and that nothing tries to
+    // guess its way out of it.
+
+    public function test_a_sound_configuration_reports_no_misconfiguration(): void
+    {
+        $this->assertNull(TwilioConfig::misconfiguration());
+    }
+
+    public function test_centralized_mode_is_never_a_misconfiguration(): void
+    {
+        // The default every deployment, developer machine and CI run is in: per-organization accounts
+        // off, and central_org_id selecting nothing because nothing needs selecting.
+        Config::set('calling.organization_credentials', false);
+
+        foreach ([null, '', 'viteseo', '0', 999_999] as $irrelevant) {
+            Config::set('calling.central_org_id', $irrelevant);
+
+            $this->assertNull(TwilioConfig::misconfiguration());
+        }
+    }
+
+    public function test_each_way_of_naming_no_central_organization_is_reported_as_its_own_reason(): void
+    {
+        $cases = [
+            TwilioConfig::MISCONFIG_CENTRAL_ORG_UNSET => [null, ''],
+            TwilioConfig::MISCONFIG_CENTRAL_ORG_INVALID => ['viteseo', '0', '-3'],
+            TwilioConfig::MISCONFIG_CENTRAL_ORG_MISSING => [999_999, (string) (Org::query()->max('id') + 1)],
+        ];
+
+        foreach ($cases as $reason => $values) {
+            foreach ($values as $value) {
+                Config::set('calling.central_org_id', $value);
+
+                $this->assertSame($reason, TwilioConfig::misconfiguration(), json_encode($value));
+                $this->assertArrayHasKey($reason, TwilioConfig::MISCONFIG_MESSAGES);
+            }
+        }
+    }
+
+    public function test_a_misconfiguration_is_logged_as_critical_on_the_resolution_path(): void
+    {
+        Config::set('calling.central_org_id', 999_999);
+        TwilioConfig::flushMisconfigurationReports();
+
+        Log::shouldReceive('critical')
+            ->once()
+            ->withArgs(function (string $message, array $context): bool {
+                return $message === TwilioConfig::MISCONFIG_MESSAGES[TwilioConfig::MISCONFIG_CENTRAL_ORG_MISSING]
+                    && $context['reason'] === TwilioConfig::MISCONFIG_CENTRAL_ORG_MISSING
+                    && $context['setting'] === 'CALLING_CENTRAL_ORG_ID';
+            });
+
+        // Resolving three organizations reports ONCE: forOrg() is the hot path, and a line per
+        // resolution would bury the diagnostic in its own repetition.
+        TwilioConfig::forOrg($this->viteseo->id);
+        TwilioConfig::forOrg($this->alpha->id);
+        TwilioConfig::forOrg($this->charlie->id);
+    }
+
+    public function test_a_misconfiguration_never_shuts_the_application_down_or_borrows_an_account(): void
+    {
+        Config::set('calling.central_org_id', 999_999);
+        TwilioConfig::flushMisconfigurationReports();
+
+        // ViteSEO's own organization is no longer recognised as central. That must cost it browser
+        // calling — never hand it, or anyone else, an account by guessing.
+        $this->assertSame(TwilioConfig::SOURCE_NONE, TwilioConfig::forOrg($this->viteseo->id)->source);
+        $this->assertNull(TwilioConfig::forOrg($this->viteseo->id)->accountSid);
+        $this->assertFalse(TwilioConfig::isCentrallyManaged($this->viteseo->id));
+
+        // Charlie has no account of its own and still gets nothing — the centralized account is not
+        // handed out because the central organization is missing.
+        $this->assertSame(TwilioConfig::SOURCE_NONE, TwilioConfig::forOrg($this->charlie->id)->source);
+
+        // Alpha is unaffected: it was always carried on its own account, never on the central one.
+        $this->assertSame(TwilioConfig::SOURCE_ORGANIZATION, TwilioConfig::forOrg($this->alpha->id)->source);
+        $this->assertSame(self::account('a')['account_sid'], TwilioConfig::forOrg($this->alpha->id)->accountSid);
+
+        // And the CRM is still up: a settings read answers normally rather than 500-ing.
+        $this->actAs($this->alphaAdmin);
+        $this->getJson(self::BASE)->assertOk();
+    }
+
+    public function test_the_guard_does_not_add_a_query_to_every_credential_resolution(): void
+    {
+        // forOrg() is the hot path — every capability check, every browser token, every webhook — so
+        // the guard's existence check is remembered per configuration value rather than re-asked.
+        Config::set('calling.central_org_id', $this->viteseo->id);
+        TwilioConfig::flushMisconfigurationReports();
+
+        TwilioConfig::forOrg($this->viteseo->id); // warms the verdict
+
+        DB::enableQueryLog();
+        for ($i = 0; $i < 5; $i++) {
+            TwilioConfig::forOrg($this->viteseo->id);
+        }
+        $queries = count(DB::getQueryLog());
+        DB::disableQueryLog();
+
+        // The central organization resolves from configuration alone; nothing should have been read.
+        $this->assertSame(0, $queries, "Resolving the central org five times issued {$queries} queries.");
+    }
+
+    public function test_correcting_the_setting_is_re_evaluated_rather_than_masked(): void
+    {
+        Config::set('calling.central_org_id', 999_999);
+        $this->assertSame(TwilioConfig::MISCONFIG_CENTRAL_ORG_MISSING, TwilioConfig::misconfiguration());
+
+        // A remembered verdict is keyed by the VALUE, so fixing the setting is seen immediately — a
+        // cache an operator has to restart the process to clear would be worse than no cache.
+        Config::set('calling.central_org_id', $this->viteseo->id);
+        $this->assertNull(TwilioConfig::misconfiguration());
+        $this->assertSame(TwilioConfig::SOURCE_DEPLOYMENT, TwilioConfig::forOrg($this->viteseo->id)->source);
+    }
+
+    public function test_the_doctor_command_passes_in_the_default_configuration(): void
+    {
+        // The state a deployment with no Twilio account at all is in — manual calling, which is
+        // supported, not broken. The command must not report it as a fault.
+        Config::set('calling.organization_credentials', false);
+        Config::set('calling.central_org_id', null);
+
+        $this->artisan('calling:doctor')
+            ->expectsOutputToContain('Configuration is sound.')
+            ->assertSuccessful();
+    }
+
+    public function test_the_doctor_command_fails_on_a_misconfiguration(): void
+    {
+        Config::set('calling.central_org_id', null);
+
+        $this->artisan('calling:doctor')
+            ->expectsOutputToContain(TwilioConfig::MISCONFIG_MESSAGES[TwilioConfig::MISCONFIG_CENTRAL_ORG_UNSET])
+            ->assertFailed();
+    }
+
+    public function test_the_doctor_command_reports_a_sound_per_organization_configuration(): void
+    {
+        $this->artisan('calling:doctor')
+            ->expectsOutputToContain('Configuration is sound.')
+            ->assertSuccessful();
     }
 }
