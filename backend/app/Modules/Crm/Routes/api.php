@@ -15,6 +15,7 @@ use App\Modules\Crm\Controllers\DashboardController;
 use App\Modules\Crm\Controllers\DeliveryMonitorController;
 use App\Modules\Crm\Controllers\EmailController;
 use App\Modules\Crm\Controllers\EmailTemplateController;
+use App\Modules\Crm\Controllers\EmailTemplateManagementController;
 use App\Modules\Crm\Controllers\DiscoveryConfigController;
 use App\Modules\Crm\Controllers\GmailOAuthController;
 use App\Modules\Crm\Controllers\NerbyProviderSettingController;
@@ -527,6 +528,19 @@ Route::middleware(['auth:sanctum', 'set-current-org', 'subscription-active', 'fe
                 Route::post('/', [PerformanceTargetController::class, 'store']);
                 Route::patch('/{performanceTarget}', [PerformanceTargetController::class, 'update']);
                 Route::delete('/{performanceTarget}', [PerformanceTargetController::class, 'destroy']);
+            });
+
+        // Settings → Email Templates: manage the templates the Outreach composer and the n8n automation
+        // endpoint read. Org configuration, so management roles only, like Archive and Team. The composer's
+        // read route above (GET /leads/{lead}/email-templates) and the automation send route are unchanged;
+        // EmailTemplateManagementService keeps an admin from leaving an automation purpose with no template.
+        Route::middleware('role:super_admin|crm_admin')
+            ->prefix('settings/email-templates')
+            ->group(function () {
+                Route::get('/', [EmailTemplateManagementController::class, 'index']);
+                Route::post('/', [EmailTemplateManagementController::class, 'store']);
+                Route::patch('/{emailTemplate}', [EmailTemplateManagementController::class, 'update'])->whereNumber('emailTemplate');
+                Route::delete('/{emailTemplate}', [EmailTemplateManagementController::class, 'destroy'])->whereNumber('emailTemplate');
             });
 
         // `kpi` joins the enabled modules: the KPI definition catalog (M-01…M-06) is managed through

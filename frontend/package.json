@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "email-templates:gates": "node --experimental-strip-types --import ./scripts/copilot-gates/register.mjs ./scripts/email-template-gates/gates.ts",
     "email:gates": "node --experimental-strip-types --import ./scripts/copilot-gates/register.mjs ./scripts/email-render-gates/gates.ts",
     "copilot:gates": "node --experimental-strip-types --import ./scripts/copilot-gates/register.mjs ./scripts/copilot-gates/gates.ts",
     "preview:gates": "node --experimental-strip-types --import ./scripts/copilot-gates/register.mjs ./scripts/attachment-preview-gates/gates.ts",

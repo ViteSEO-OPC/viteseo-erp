@@ -9,6 +9,7 @@ import {
   Plug,
   SlidersHorizontal,
   Gauge,
+  Mail,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/modules/crm/lib/utils";
@@ -41,6 +42,10 @@ const GROUPS: NavGroup[] = [
       // area is already minRole crm_admin in PAGE_ACCESS, and the endpoints behind it are
       // role:super_admin|crm_admin server-side — a nav-level check would add nothing.
       { label: "Integrations", href: "/zerem/settings/integrations", icon: Plug },
+      // Email Templates — the Outreach composer's and automation's reusable templates. No `permission`
+      // gate, for the same reason as Integrations: the settings area is minRole crm_admin and every
+      // endpoint behind the page is role:super_admin|crm_admin server-side.
+      { label: "Email Templates", href: "/zerem/settings/email-templates", icon: Mail },
       // Business Rules Administration — gated by the read permission (Super Admin + temporary Admin).
       {
         label: "Business Rules",
