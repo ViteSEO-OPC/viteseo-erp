@@ -10,14 +10,22 @@ use Illuminate\Database\Seeder;
  * composer's dropdown combinations so every selection resolves to a real template. These are editable
  * content defaults (configuration), not fabricated lead data. Placeholders are deterministic {{tokens}}
  * rendered by TemplateRenderer (whitelist: first_name, contact_name, business_name, industry, city,
- * sender_name). Idempotent: upserts on (purpose, tone).
+ * sender_name).
+ *
+ * Installs MISSING templates only, keyed on (purpose, tone). Templates are edited in Settings → Email
+ * Templates, so a reseed or a re-provisioned org must never overwrite an admin's subject, body or
+ * active state — and `withTrashed()` means a template an admin deleted is not brought back either.
+ *
+ * On MySQL the case-insensitive collation still folds the automation `introduction` row into the
+ * composer's `Introduction` · Warm & professional row. It used to overwrite that row's content with the
+ * automation copy; it now leaves whichever arrived first. The collision itself is a known, unfixed issue.
  */
 class EmailTemplateSeeder extends Seeder
 {
     public function run(): void
     {
         foreach ($this->templates() as $t) {
-            EmailTemplate::query()->updateOrCreate(
+            EmailTemplate::withTrashed()->firstOrCreate(
                 ['purpose' => $t['purpose'], 'tone' => $t['tone']],
                 ['subject' => $t['subject'], 'body' => $t['body'], 'is_active' => true],
             );

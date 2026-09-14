@@ -206,4 +206,10 @@ export const queryKeys = {
     versions: (module: string) => [...queryKeys.businessRules.all(module), "versions"] as const,
     audit: (module: string) => [...queryKeys.businessRules.all(module), "audit"] as const,
   },
+  emailTemplates: {
+    // Settings → Email Templates (GET /settings/email-templates): every template, active or not, with
+    // its catalog. The Outreach composer's rendered per-lead copies stay under leads.emailTemplates(id).
+    all: ["email-templates"] as const,
+    admin: () => [...queryKeys.emailTemplates.all, "admin"] as const,
+  },
 } as const;
