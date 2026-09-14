@@ -90,9 +90,10 @@ class CallingOverviewService
                 $centrallyManaged = TwilioConfig::isCentrallyManaged($orgId);
                 $row = $rows->get($orgId);
 
-                // Resolved exactly as a call would resolve it, so this screen can never disagree with
-                // what the organization's BDs actually get.
-                $config = TwilioConfig::forOrg($orgId);
+                // Resolved by the SAME procedure a call uses, so this screen can never disagree with
+                // what the organization's BDs actually get — handed the row already loaded above
+                // rather than asking for it again, which on this screen is one query per organization.
+                $config = TwilioConfig::forOrgWithRow($orgId, $row);
 
                 return [
                     'id' => $orgId,

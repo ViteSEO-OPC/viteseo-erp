@@ -281,20 +281,97 @@ class CallingOverviewTest extends TestCase
 
     public function test_it_does_not_issue_a_query_per_organization(): void
     {
-        // A support screen that N+1s over the tenant list becomes the slowest page in the product.
+        // MEASURED AS A SLOPE, NOT A CEILING.
+        //
+        // The first version of this test asserted a generous absolute total for the whole request.
+        // That was the wrong instrument: the total is dominated by authentication and authorization,
+        // it moves whenever anything in the request pipeline does, and it hid a real one-query-per-
+        // organization lookup for exactly as long as the ambient noise stayed under the ceiling.
+        //
+        // What actually matters is whether the cost GROWS with the number of organizations. Doubling
+        // the tenants and requiring the same query count says so directly, and says nothing that a
+        // change elsewhere in the pipeline could invalidate.
+        $count = function (): int {
+            DB::flushQueryLog();
+            DB::enableQueryLog();
+            $this->getJson(self::ENDPOINT)->assertOk();
+            $queries = count(DB::getQueryLog());
+            DB::disableQueryLog();
+
+            return $queries;
+        };
+
+        $this->actAs($this->superAdmin());
+
+        // Warm first. The first call through pays one-off costs that never recur — the permission
+        // cache, and the misconfiguration guard's existence check, which memoises per process — and
+        // measuring those as if they scaled would make this test lie in the opposite direction.
+        $count();
+
+        $before = $count();
+
         foreach (['delta', 'echo', 'foxtrot'] as $slug) {
             $this->onboard($slug);
         }
 
-        $this->actAs($this->superAdmin());
+        $after = $count();
 
-        DB::enableQueryLog();
-        $this->getJson(self::ENDPOINT)->assertOk();
-        $queries = count(DB::getQueryLog());
-        DB::disableQueryLog();
+        $this->assertSame(
+            $before,
+            $after,
+            "Adding three organizations changed the query count from {$before} to {$after}: "
+            .'the overview is issuing work per organization.',
+        );
+    }
 
-        // Authentication and authorization dominate; the overview itself is two reads regardless of
-        // how many organizations exist. The ceiling is deliberately generous and still catches an N+1.
-        $this->assertLessThan(20, $queries, "Overview issued {$queries} queries for 6 organizations.");
+    public function test_it_resolves_an_organization_the_same_way_a_call_would(): void
+    {
+        // The overview hands TwilioConfig a row it already loaded instead of asking for it again.
+        // That is only safe while both routes reach the SAME verdict, so pin it per organization
+        // rather than trusting the two to stay in step.
+        foreach ([$this->viteseo, $this->alpha, $this->charlie] as $org) {
+            $orgId = (int) $org->getKey();
+
+            $row = CallProviderSetting::query()->withoutGlobalScope('org')
+                ->where('org_id', $orgId)
+                ->where('provider', TwilioCallProvider::NAME)
+                ->first();
+
+            $viaLookup = TwilioConfig::forOrg($orgId);
+            $viaRow = TwilioConfig::forOrgWithRow($orgId, $row);
+
+            $this->assertSame($viaLookup->source, $viaRow->source, "org {$orgId} source");
+            $this->assertSame($viaLookup->accountSid, $viaRow->accountSid, "org {$orgId} account");
+            $this->assertSame($viaLookup->isUsable(), $viaRow->isUsable(), "org {$orgId} usable");
+            $this->assertSame($viaLookup->missing(), $viaRow->missing(), "org {$orgId} missing");
+        }
+    }
+
+    public function test_a_row_supplied_for_the_central_organization_is_still_ignored(): void
+    {
+        // The central organization's own row is ignored however the row arrives — including when a
+        // caller hands one over directly, which is the one way the shared procedure could be misused.
+        $row = new CallProviderSetting;
+        $row->forceFill([
+            'org_id' => $this->viteseo->id,
+            'provider' => TwilioCallProvider::NAME,
+            'enabled' => true,
+            'account_sid' => 'AC'.str_repeat('9', 32),
+        ]);
+
+        $config = TwilioConfig::forOrgWithRow((int) $this->viteseo->getKey(), $row);
+
+        $this->assertSame(TwilioConfig::SOURCE_DEPLOYMENT, $config->source);
+        $this->assertNotSame('AC'.str_repeat('9', 32), $config->accountSid);
+    }
+
+    public function test_a_client_with_no_row_supplied_gets_nothing(): void
+    {
+        // Fail-closed is a property of the decision, not of the lookup that fed it.
+        $config = TwilioConfig::forOrgWithRow((int) $this->charlie->getKey(), null);
+
+        $this->assertSame(TwilioConfig::SOURCE_NONE, $config->source);
+        $this->assertNull($config->accountSid);
+        $this->assertFalse($config->isUsable());
     }
 }

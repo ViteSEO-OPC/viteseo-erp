@@ -220,6 +220,47 @@ final class TwilioConfig
         // how ViteSEO's own calling would disappear. See reportMisconfiguration().
         self::reportMisconfiguration();
 
+        return self::decide($orgId, fn (): ?CallProviderSetting => CallProviderSetting::query()
+            ->withoutGlobalScope('org')
+            ->where('org_id', $orgId)
+            ->where('provider', TwilioCallProvider::NAME)
+            ->first());
+    }
+
+    /**
+     * The configuration in force for an organization whose stored row the CALLER already holds.
+     *
+     * Identical to {@see forOrg()} in every respect except where the row comes from, because it IS
+     * forOrg() — both hand the same decision procedure a way to obtain the row, and neither has a
+     * policy of its own. That matters more than the query it saves: a second copy of "central gets the
+     * deployment account, everyone else gets their own row or nothing" is a second place for the rule
+     * to drift, and this is the rule that keeps one tenant off another tenant's account.
+     *
+     * For a caller that has already loaded every organization's row in one query — the super-admin
+     * overview — where asking per organization is one query per organization. Pass NULL for an
+     * organization that genuinely has no row; that is the fail-closed answer, not a missing lookup.
+     */
+    public static function forOrgWithRow(?int $orgId, ?CallProviderSetting $row): self
+    {
+        if (! self::organizationCredentialsEnabled()) {
+            return self::fromDeployment();
+        }
+
+        self::reportMisconfiguration();
+
+        return self::decide($orgId, static fn (): ?CallProviderSetting => $row);
+    }
+
+    /**
+     * The one resolution procedure, shared by {@see forOrg()} and {@see forOrgWithRow()}.
+     *
+     * Called only after per-organization mode is known to be on. The row is taken lazily so the
+     * central organization — whose own rows are ignored — never causes a lookup at all.
+     *
+     * @param  callable(): ?CallProviderSetting  $row
+     */
+    private static function decide(?int $orgId, callable $row): self
+    {
         if ($orgId === null) {
             return self::none();
         }
@@ -228,13 +269,9 @@ final class TwilioConfig
             return self::fromDeployment();
         }
 
-        $row = CallProviderSetting::query()
-            ->withoutGlobalScope('org')
-            ->where('org_id', $orgId)
-            ->where('provider', TwilioCallProvider::NAME)
-            ->first();
+        $stored = $row();
 
-        return $row === null ? self::none() : self::fromSettings($row);
+        return $stored === null ? self::none() : self::fromSettings($stored);
     }
 
     /**
