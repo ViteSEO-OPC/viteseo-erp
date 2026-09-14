@@ -84,6 +84,26 @@ return new class extends Migration
             $table->timestamps();
 
             // One configuration per provider per org.
+            //
+            // AND DELIBERATELY NOTHING UNIQUE ON `account_sid`. Two organizations may store the same
+            // Twilio Account SID, and that is an allowed configuration, not an oversight:
+            //
+            //   * It is legitimate. A client may run several ViteSEO organizations on one Twilio
+            //     account and one bill, and Twilio subaccounts share an owning account's identity in
+            //     ways a uniqueness rule here would guess wrong about.
+            //   * Uniqueness would not be a security boundary anyway. The boundary is org-scoped
+            //     credential RESOLUTION (TwilioConfig::forOrg), which reads one organization's row and
+            //     never another's; a shared SID cannot be used to reach a row, because rows are found
+            //     by (org, provider) and never by SID. An organization that enters someone else's
+            //     Account SID without their Auth Token and API key pair holds nothing usable.
+            //   * Refusing it would leak. A 422 saying "this Account SID is already in use" tells one
+            //     tenant something true about another tenant's configuration, which is a worse trade
+            //     than the duplicate it prevents.
+            //
+            // SEPARATE ACCOUNTS OR SUBACCOUNTS PER ORGANIZATION ARE STILL THE RECOMMENDATION, and the
+            // client setup guide says so: separate billing, separate rate limits, and a key rotation
+            // that stops one organization's calls rather than several. That is guidance, not a
+            // constraint the schema enforces.
             $table->unique(['org_id', 'provider']);
         });
     }

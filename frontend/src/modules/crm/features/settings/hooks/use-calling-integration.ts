@@ -10,6 +10,7 @@ import {
   fieldLabel,
   isCentrallyManagedRefusal,
   missingByOwner,
+  testFailureRemedy,
   testStatusLabel,
 } from "@/modules/crm/features/settings/lib/calling-settings";
 
@@ -42,6 +43,13 @@ export type CallingTestStatus =
   | "auth_failed"
   | "api_key_failed"
   | "twiml_app_missing"
+  /**
+   * The credentials are real, but the TwiML App is not pointed at this deployment — the one failure
+   * every other probe passes straight through, and the one an admin fixes in the Twilio console
+   * rather than in this form.
+   */
+  | "twiml_app_voice_url_mismatch"
+  | "twiml_app_voice_method_invalid"
   | "rate_limited"
   | "unreachable"
   | "not_configured";
@@ -264,7 +272,9 @@ export function useTestCallingConnection() {
             : "Twilio accepted these credentials. Switch browser calling on to make it available.",
         );
       } else {
-        toast.warning("Connection not verified", testStatusLabel(status));
+        // The remedy matters most here: the TwiML App verdicts are fixed in the Twilio console, and a
+        // toast that only names the fault sends an admin back to a form that is already correct.
+        toast.warning("Connection not verified", `${testStatusLabel(status)}. ${testFailureRemedy(status)}`);
       }
     },
     "Could not run the connection test",

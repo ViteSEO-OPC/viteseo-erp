@@ -115,10 +115,22 @@ class BrowserCallingVerificationGateTest extends TestCase
         $this->putJson(self::BASE, $this->completePayload($overrides))->assertOk();
     }
 
-    /** Twilio accepts. Three read-only probes, all faked; no request leaves the process. */
+    /**
+     * Twilio accepts. Three read-only probes, all faked; no request leaves the process.
+     *
+     * The body also describes a TwiML Application POINTED AT THIS DEPLOYMENT, because the third probe
+     * now checks that too — an application Twilio confirms exists but that fetches its instructions
+     * from somewhere else is not a passing configuration. Built from the CONFIGURED origin rather than
+     * a literal, so a test that moves the deployment's address still describes a correct application.
+     */
     private function passTest(): void
     {
-        $this->twilioAnswer = [200, ['sid' => self::ACCOUNT_SID]];
+        $this->twilioAnswer = [200, [
+            'sid' => self::ACCOUNT_SID,
+            'voice_url' => rtrim((string) config('twilio.webhook_base_url'), '/')
+                .CallProviderSettingService::VOICE_WEBHOOK_PATH,
+            'voice_method' => CallProviderSettingService::VOICE_WEBHOOK_METHOD,
+        ]];
         $this->postJson(self::BASE.'/test')->assertOk();
     }
 

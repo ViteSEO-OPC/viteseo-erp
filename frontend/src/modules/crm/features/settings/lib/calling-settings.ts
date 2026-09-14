@@ -253,6 +253,10 @@ export function testStatusLabel(status: CallingTestStatus | null): string {
       return "Twilio rejected the API Key SID / Secret";
     case "twiml_app_missing":
       return "No TwiML App with that SID exists on this account";
+    case "twiml_app_voice_url_mismatch":
+      return "Your TwiML App's Voice Request URL does not point at this server";
+    case "twiml_app_voice_method_invalid":
+      return "Your TwiML App's Voice Request URL must be requested with HTTP POST";
     case "rate_limited":
       return "Rate limited by Twilio — try again shortly";
     case "unreachable":
@@ -261,6 +265,29 @@ export function testStatusLabel(status: CallingTestStatus | null): string {
       return "Fill in every field before testing";
     default:
       return "Not tested";
+  }
+}
+
+/**
+ * Where the fix for a failed connection test actually is.
+ *
+ * Most verdicts mean a credential in the form above is wrong. Two do not: the TwiML App verdicts say
+ * the credentials are all correct and the Twilio account is pointed somewhere else, and the change
+ * that fixes them is made in the Twilio console. Telling that admin to "correct the details above"
+ * sends them to re-read six values that are already right.
+ */
+export function testFailureRemedy(status: CallingTestStatus | null): string {
+  switch (status) {
+    case "twiml_app_missing":
+    case "twiml_app_voice_url_mismatch":
+    case "twiml_app_voice_method_invalid":
+      return "Fix it in your TwiML App in the Twilio Console, then test again.";
+    case "rate_limited":
+    case "unreachable":
+      // Nothing is known to be wrong with the configuration — the check never got an answer.
+      return "Test again in a moment.";
+    default:
+      return "Correct the details above and test again.";
   }
 }
 

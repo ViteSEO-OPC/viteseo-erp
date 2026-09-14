@@ -24,6 +24,14 @@ use Illuminate\Foundation\Http\FormRequest;
  * another round trip through a browser. Clearing them is a separate DELETE, because a blank field is
  * far more often "I didn't retype it".
  *
+ * A DUPLICATE ACCOUNT SID IS ACCEPTED. Nothing here — and no index on the table — refuses an Account
+ * SID another organization has already stored. Sharing one Twilio account across several ViteSEO
+ * organizations is a legitimate billing arrangement, the security boundary is org-scoped credential
+ * resolution rather than SID uniqueness (`TwilioConfig::forOrg()`), and a "this Account SID is
+ * already in use" rejection would tell one tenant something true about another tenant's configuration.
+ * Separate accounts or subaccounts per organization remain the RECOMMENDATION — see the client setup
+ * guide — but they are guidance, not a rule this request enforces.
+ *
  * SID SHAPES ARE CHECKED, PREFIXES LOOSELY. Twilio's identifiers have well-known 34-character `AC…` /
  * `SK…` / `AP…` forms and a paste error is by far the most common misconfiguration, so the shape is
  * validated to catch it at the form rather than at dial time. The check stays deliberately narrow —

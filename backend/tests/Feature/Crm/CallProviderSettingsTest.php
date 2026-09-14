@@ -108,6 +108,43 @@ class CallProviderSettingsTest extends TestCase
     }
 
     /**
+     * Twilio's JSON for a TwiML Application that IS pointed at this deployment.
+     *
+     * The account probes in steps 1-2 share this body harmlessly — they read only the HTTP status —
+     * so one fake can answer all three round trips.
+     *
+     * @param  array<string, mixed>  $overrides
+     * @return array<string, mixed>
+     */
+    private static function twimlApp(array $overrides = []): array
+    {
+        return array_merge([
+            'sid' => self::TWIML_APP_SID,
+            'account_sid' => self::ACCOUNT_SID,
+            'voice_url' => 'https://zerem.example'.CallProviderSettingService::VOICE_WEBHOOK_PATH,
+            'voice_method' => 'POST',
+        ], $overrides);
+    }
+
+    /**
+     * One Twilio stub whose response body can be re-aimed between assertions.
+     *
+     * `Http::fake()` APPENDS a stub rather than replacing the previous one, so calling it again inside
+     * a loop leaves the FIRST body answering every iteration — a loop that looks like it covers four
+     * cases and covers one. Binding the body by reference is what makes each iteration its own case.
+     *
+     * @param  array<string, mixed>  $body
+     */
+    private function fakeTwilio(array &$body): void
+    {
+        // A long closure, not an arrow function: `fn()` captures by VALUE, which would freeze the
+        // first body and reintroduce exactly the problem this helper exists to avoid.
+        Http::fake(function () use (&$body) {
+            return Http::response($body, 200);
+        });
+    }
+
+    /**
      * Save a complete configuration AND get Twilio to accept it — the only route to browser calling.
      *
      * Every positive-path test goes through this rather than through a save alone, because a save
@@ -122,7 +159,7 @@ class CallProviderSettingsTest extends TestCase
     /** One connection test that Twilio accepts. No real request leaves the process. */
     private function passConnectionTest(): void
     {
-        Http::fake(['api.twilio.com/*' => Http::response(['sid' => self::ACCOUNT_SID], 200)]);
+        Http::fake(['api.twilio.com/*' => Http::response(self::twimlApp(), 200)]);
         $this->postJson(self::BASE.'/test')->assertOk();
     }
 
@@ -707,7 +744,7 @@ class CallProviderSettingsTest extends TestCase
 
     public function test_a_successful_test_verifies_the_credentials_without_placing_a_call(): void
     {
-        Http::fake(['api.twilio.com/*' => Http::response(['sid' => self::ACCOUNT_SID], 200)]);
+        Http::fake(['api.twilio.com/*' => Http::response(self::twimlApp(), 200)]);
 
         $this->actingAsAdmin();
         $this->putJson(self::BASE, $this->completePayload())->assertOk();
@@ -771,6 +808,118 @@ class CallProviderSettingsTest extends TestCase
         );
     }
 
+    /**
+     * The check that exists because every other probe can pass while the account is pointed somewhere
+     * else entirely — see CallProviderSettingService::TEST_TWIML_APP_VOICE_URL_MISMATCH.
+     */
+    public function test_a_twiml_application_pointed_at_another_host_is_not_a_pass(): void
+    {
+        $this->actingAsAdmin();
+        $this->putJson(self::BASE, $this->completePayload())->assertOk();
+
+        $body = self::twimlApp();
+        $this->fakeTwilio($body);
+
+        foreach ([
+            'https://someone-elses-crm.example/api/v1/twilio/voice',
+            'https://zerem.example/api/v1/twilio/voice/',   // a trailing slash is a different route
+            'https://zerem.example/api/v1/twilio/completed', // the wrong endpoint on the right host
+            '',                                             // never pointed anywhere at all
+        ] as $voiceUrl) {
+            $body = self::twimlApp(['voice_url' => $voiceUrl]);
+
+            $this->assertSame(
+                CallProviderSettingService::TEST_TWIML_APP_VOICE_URL_MISMATCH,
+                $this->postJson(self::BASE.'/test')->json('data.settings.lastTestStatus'),
+                $voiceUrl,
+            );
+        }
+    }
+
+    public function test_the_right_voice_url_fetched_the_wrong_way_is_named_as_the_method(): void
+    {
+        // A separate verdict from the URL mismatch on purpose: the URL field is correct and the
+        // dropdown beside it is not, so "check your Voice URL" would send the admin to re-read a value
+        // that is already right.
+        $this->actingAsAdmin();
+        $this->putJson(self::BASE, $this->completePayload())->assertOk();
+
+        $body = self::twimlApp();
+        $this->fakeTwilio($body);
+
+        foreach (['GET', '', 'PUT'] as $method) {
+            $body = self::twimlApp(['voice_method' => $method]);
+
+            $this->assertSame(
+                CallProviderSettingService::TEST_TWIML_APP_VOICE_METHOD_INVALID,
+                $this->postJson(self::BASE.'/test')->json('data.settings.lastTestStatus'),
+                $method,
+            );
+        }
+    }
+
+    public function test_a_correctly_wired_twiml_application_passes(): void
+    {
+        $this->actingAsAdmin();
+        $this->putJson(self::BASE, $this->completePayload())->assertOk();
+
+        $body = self::twimlApp();
+        $this->fakeTwilio($body);
+
+        // Twilio reports the method uppercased; a lowercase one still describes a working application.
+        foreach (['POST', 'post'] as $method) {
+            $body = self::twimlApp(['voice_method' => $method]);
+
+            $data = $this->postJson(self::BASE.'/test')->assertOk()->json('data');
+
+            $this->assertSame(CallProviderSettingService::TEST_OK, $data['settings']['lastTestStatus']);
+            $this->assertTrue($data['verified']);
+            $this->assertTrue($data['browserCalling']);
+        }
+    }
+
+    public function test_the_voice_url_checked_is_the_one_the_card_tells_the_admin_to_use(): void
+    {
+        // The expected URL is built from the DEPLOYMENT's origin — the same value the settings payload
+        // reports for display and the same one webhook signatures are validated against — so the check
+        // can never demand a URL the admin was not shown, or accept one that would then fail signature
+        // validation.
+        Config::set('twilio.webhook_base_url', 'https://other-deployment.example');
+
+        $this->actingAsAdmin();
+        $this->putJson(self::BASE, $this->completePayload())->assertOk();
+
+        $body = self::twimlApp();
+        $this->fakeTwilio($body);
+
+        // twimlApp() still names https://zerem.example — the origin this deployment no longer has.
+        $this->assertSame(
+            CallProviderSettingService::TEST_TWIML_APP_VOICE_URL_MISMATCH,
+            $this->postJson(self::BASE.'/test')->json('data.settings.lastTestStatus'),
+        );
+
+        $body = self::twimlApp([
+            'voice_url' => 'https://other-deployment.example'.CallProviderSettingService::VOICE_WEBHOOK_PATH,
+        ]);
+
+        $this->assertSame(
+            CallProviderSettingService::TEST_OK,
+            $this->postJson(self::BASE.'/test')->json('data.settings.lastTestStatus'),
+        );
+    }
+
+    public function test_the_voice_wiring_check_costs_no_extra_round_trip(): void
+    {
+        Http::fake(['api.twilio.com/*' => Http::response(self::twimlApp(), 200)]);
+
+        $this->actingAsAdmin();
+        $this->putJson(self::BASE, $this->completePayload())->assertOk();
+        $this->postJson(self::BASE.'/test')->assertOk();
+
+        // Still the same three reads: the application's wiring comes from the body Twilio already sent.
+        Http::assertSentCount(3);
+    }
+
     public function test_a_test_never_leaks_twilios_response_text(): void
     {
         $this->actingAsAdmin();
@@ -790,7 +939,7 @@ class CallProviderSettingsTest extends TestCase
 
     public function test_a_configuration_change_invalidates_a_previous_verdict(): void
     {
-        Http::fake(['api.twilio.com/*' => Http::response(['sid' => self::ACCOUNT_SID], 200)]);
+        Http::fake(['api.twilio.com/*' => Http::response(self::twimlApp(), 200)]);
 
         $this->actingAsAdmin();
         $this->putJson(self::BASE, $this->completePayload())->assertOk();

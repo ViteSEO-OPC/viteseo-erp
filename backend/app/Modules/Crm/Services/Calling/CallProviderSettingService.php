@@ -42,6 +42,43 @@ class CallProviderSettingService
     public const TEST_NOT_CONFIGURED = 'not_configured';
 
     /**
+     * The TwiML Application exists, but its Voice Request URL is not this deployment's — it is blank,
+     * or it points somewhere else.
+     *
+     * This is the one failure the rest of the check could not see. Every other probe asks whether a
+     * CREDENTIAL is right; this asks whether the account is pointed at us. An onboarding can get all
+     * six values correct, pass every authentication probe, and still produce calls that die the instant
+     * a BD presses Call, because the app Twilio dials into fetches its instructions from somewhere that
+     * is not this deployment. It was also invisible from our side: Twilio does not call us to tell us
+     * it went elsewhere.
+     */
+    public const TEST_TWIML_APP_VOICE_URL_MISMATCH = 'twiml_app_voice_url_mismatch';
+
+    /**
+     * The Voice Request URL is right, but Twilio would fetch it with the wrong HTTP method.
+     *
+     * A separate verdict from the one above because it is a separate mistake with a separate fix — the
+     * URL field is correct and the dropdown beside it is not — and "check your Voice URL" sends an
+     * admin to re-read a value that is already right.
+     */
+    public const TEST_TWIML_APP_VOICE_METHOD_INVALID = 'twiml_app_voice_method_invalid';
+
+    /**
+     * The path Twilio's Voice request must reach on this deployment — the route the browser Device's
+     * `Device.connect()` ultimately lands on (`Routes/api.php`, the `v1/twilio` group). Declared here
+     * because the connection test is the only thing that can tell an admin their TwiML App points at
+     * it, and the frontend's `VOICE_WEBHOOK_PATH` states the same path for display.
+     */
+    public const VOICE_WEBHOOK_PATH = '/api/v1/twilio/voice';
+
+    /**
+     * The method that path must be fetched with. POST, because the correlation token and Twilio's own
+     * call parameters travel in the form body — with GET, `ValidateTwilioSignature` is handed a body
+     * Twilio never signed and the webhook is refused before it can dial anything.
+     */
+    public const VOICE_WEBHOOK_METHOD = 'POST';
+
+    /**
      * The org's row for a provider, or an unsaved instance carrying the defaults. Never writes.
      *
      * Scoped normally (no `withoutGlobalScope`): this is the authenticated settings path, where the
@@ -229,7 +266,8 @@ class CallProviderSettingService
 
     /**
      * Three read-only round trips, each proving one thing the first real call would otherwise discover
-     * the hard way:
+     * the hard way — and one check, on the body of the third, of whether the account is pointed at us
+     * at all:
      *
      *   1. The API key pair can read the account  → `api_key` + `api_secret` + `account_sid` are valid,
      *      which is exactly what signing a browser Access Token requires.
@@ -238,10 +276,19 @@ class CallProviderSettingService
      *      that connect but never complete.
      *   3. The TwiML Application exists           → the browser's `Device.connect()` has somewhere to
      *      land. A wrong app SID is a silent failure at dial time.
+     *   4. That application POINTS AT US          → its Voice Request URL is this deployment's
+     *      `/api/v1/twilio/voice`, fetched with POST. Costs no extra round trip — Twilio already
+     *      described the application in step 3. Steps 1-3 only prove the credentials are REAL; this
+     *      proves the account is wired to this CRM. Without it an onboarding can hold six correct
+     *      values, pass every authentication probe, and still fail the instant a BD presses Call:
+     *      Twilio dials into the app, the app fetches its instructions from somewhere else, and
+     *      nothing ever reaches us to say so.
      *
      * The CALLER ID is deliberately not probed. Twilio accepts outbound caller IDs both from numbers
      * the account owns and from separately verified caller IDs, and checking only the owned-numbers
-     * list would report a false failure for a perfectly valid verified number.
+     * list would report a false failure for a perfectly valid verified number. That is a real gap and
+     * it is stated on the settings card in as many words: a passing test does not mean the caller ID
+     * is eligible to place calls.
      */
     private function probe(TwilioConfig $config): string
     {
@@ -261,13 +308,65 @@ class CallProviderSettingService
         $app = rawurlencode((string) $config->twimlAppSid);
         $appUrl = $this->baseUrl()."/2010-04-01/Accounts/{$account}/Applications/{$app}.json";
 
-        $withApp = $this->get($appUrl, (string) $config->apiKey, (string) $config->apiSecret);
+        [$withApp, $application] = $this->fetch($appUrl, (string) $config->apiKey, (string) $config->apiSecret);
 
-        return $withApp === self::TEST_AUTH_FAILED ? self::TEST_TWIML_APP_MISSING : $withApp;
+        if ($withApp !== self::TEST_OK) {
+            return $withApp === self::TEST_AUTH_FAILED ? self::TEST_TWIML_APP_MISSING : $withApp;
+        }
+
+        return $this->classifyVoiceWiring($config, $application);
+    }
+
+    /**
+     * Whether the TwiML Application Twilio just described is pointed at THIS deployment's voice webhook.
+     *
+     * The expected URL is built from the same configuration the webhook signature is validated against
+     * ({@see TwilioConfig::callbackUrl()}), so this can never pass for a URL that would then fail
+     * signature validation, and can never demand one the deployment is not actually reachable at.
+     *
+     * The comparison is EXACT after trimming. Not lenient on a trailing slash, and not
+     * case-insensitive: a trailing slash is a different Laravel route and does not work for a POST, so
+     * accepting it here would hand back a green tick for a configuration that still cannot place a
+     * call. The exact string is displayed on the settings card for copy-paste, which is what makes
+     * strictness fair rather than pedantic.
+     *
+     * An application whose voice URL Twilio reports as absent reads as a mismatch, which it is: the app
+     * is not pointed at us.
+     *
+     * @param  array<string, mixed>  $application  Twilio's JSON for the application
+     */
+    private function classifyVoiceWiring(TwilioConfig $config, array $application): string
+    {
+        $expected = $config->callbackUrl(self::VOICE_WEBHOOK_PATH);
+        $actual = trim((string) ($application['voice_url'] ?? ''));
+
+        if ($expected !== $actual) {
+            return self::TEST_TWIML_APP_VOICE_URL_MISMATCH;
+        }
+
+        // Twilio stores and returns the method uppercased, but an upper-casing comparison costs
+        // nothing and cannot accept a method that would not work.
+        $method = strtoupper(trim((string) ($application['voice_method'] ?? '')));
+
+        return $method === self::VOICE_WEBHOOK_METHOD
+            ? self::TEST_OK
+            : self::TEST_TWIML_APP_VOICE_METHOD_INVALID;
     }
 
     /** One authenticated round trip mapped to a code. Nothing propagates, and nothing is logged raw. */
     private function get(string $url, string $username, string $password): string
+    {
+        return $this->fetch($url, $username, $password)[0];
+    }
+
+    /**
+     * One authenticated round trip mapped to a code, WITH the decoded body for the caller that needs to
+     * read it. The body is only ever non-empty on a success, so no failure path can be made to depend
+     * on what an error response happened to contain.
+     *
+     * @return array{0: string, 1: array<string, mixed>}
+     */
+    private function fetch(string $url, string $username, string $password): array
     {
         try {
             $response = Http::withBasicAuth($username, $password)
@@ -275,16 +374,18 @@ class CallProviderSettingService
                 ->acceptJson()
                 ->get($url);
         } catch (ConnectionException) {
-            return self::TEST_UNREACHABLE;
+            return [self::TEST_UNREACHABLE, []];
         } catch (Throwable $e) {
             // Deliberately not logging the message: the request carried a credential, and an
             // exception message can quote the request.
             Log::warning('Calling provider connection test failed', ['class' => $e::class]);
 
-            return self::TEST_UNREACHABLE;
+            return [self::TEST_UNREACHABLE, []];
         }
 
-        return $this->classify($response);
+        $status = $this->classify($response);
+
+        return [$status, $status === self::TEST_OK ? (array) $response->json() : []];
     }
 
     private function classify(Response $response): string
