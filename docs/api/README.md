@@ -20,6 +20,9 @@ Every module mounts under this prefix:
 | CRM (Zerem module) | `/api/v1/crm` | [crm.md](./crm.md) |
 | PMS (Projects module) | `/api/v1/projects` | [pms.md](./pms.md) |
 
+A ready-to-import **Postman collection** for the HRIS API lives alongside these docs — see
+[postman.md](./postman.md).
+
 ## Authentication
 
 Auth is **Laravel Sanctum personal access tokens** (Bearer).

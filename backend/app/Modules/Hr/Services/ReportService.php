@@ -20,6 +20,8 @@ use App\Modules\Hr\Services\RecruitmentService;
 use App\Modules\Hr\Services\TaxService;
 use App\Support\CurrentOrg;
 use Barryvdh\DomPDF\Facade\Pdf;
+use OpenSpout\Writer\XLSX\Options as XlsxOptions;
+use OpenSpout\Writer\XLSX\Writer as XlsxWriter;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -98,6 +100,9 @@ class ReportService
         return $report;
     }
 
+    /** @var list<string> */
+    private const AUDIT_COLUMNS = ['Timestamp', 'User', 'Module', 'Action', 'Details'];
+
     public function logExport(string $key, ?User $user): void
     {
         ReportExport::create(['report_key' => $key, 'generated_by' => $user?->id]);
@@ -137,7 +142,7 @@ class ReportService
         if ($key === 'audit') {
             $date = now(config('app.timezone_local'))->format('Y-m-d');
 
-            return CsvWriter::stream($this->auditCsvRows($filters), "audit-trail-{$date}.csv");
+            return $this->auditWorkbook($filters, "audit-trail-{$date}.xlsx");
         }
 
         // An export carries EVERY row in range, not the first page. A file named after the
@@ -149,11 +154,15 @@ class ReportService
         $date = $report['selected_month']['value']
             ?? now(config('app.timezone_local'))->format('Y-m-d');
 
+        // A table report downloads as the designed workbook — the same rows and columns the CSV
+        // carried, wearing the letterhead and the summary band the payroll export established.
+        // Chart reports still render as a PDF, which is the shape a chart wants.
         if ($this->exportFormat($key) === 'csv') {
-            return response($this->buildCsv($report), 200, [
-                'Content-Type' => 'text/csv; charset=UTF-8',
-                'Content-Disposition' => "attachment; filename=\"{$slug}-{$date}.csv\"",
-            ]);
+            return $this->workbook(
+                ReportSheetBuilder::build($report, $this->sheetTitle($report, $key)),
+                Str::limit($report['title'], 28, ''),
+                "{$slug}-{$date}.xlsx",
+            );
         }
 
         return Pdf::loadView('hr::report', [
@@ -165,35 +174,71 @@ class ReportService
     }
 
     /**
-     * CSV from whatever tabular data the report carries — audit entries first, then a
-     * generic table, falling back to the summary metrics. Prefixed with a UTF-8 BOM so
-     * Excel renders ₱ and accents correctly.
+     * The report as a one-sheet workbook, written to a temp file and sent.
      *
-     * @param  array<string, mixed>  $report
+     * A temp file rather than a string: OpenSpout writes as it goes, so peak memory stays at one
+     * row instead of the whole finished file. `deleteFileAfterSend` because nothing else will.
+     *
+     * @param  array<string, mixed>  $sheet  as ReportSheetBuilder::build() returns it
      */
-    private function buildCsv(array $report): string
+    private function workbook(array $sheet, string $sheetName, string $filename): HttpResponse
     {
-        $rows = [];
-        if (! empty($report['entries'])) {
-            $rows[] = ['Timestamp', 'User', 'Module', 'Action', 'Details'];
-            foreach ($report['entries'] as $e) {
-                $rows[] = [$e['timestamp'], $e['user'], $e['module'], $e['action'], $e['details']];
-            }
-        } elseif (! empty($report['table'])) {
-            $rows[] = $report['table']['columns'];
-            foreach ($report['table']['rows'] as $r) {
-                $rows[] = $r;
-            }
-        } else {
-            $rows[] = ['Metric', 'Value'];
-            foreach ($report['summary'] as $s) {
-                $rows[] = [$s['label'], $s['value']];
-            }
-        }
+        $path = tempnam(sys_get_temp_dir(), 'report-');
 
-        // Audit `details`, usernames and generic table rows are all user-controlled
-        // free text, so they go out through the shared neutralising writer.
-        return CsvWriter::render($rows);
+        $writer = new XlsxWriter(new XlsxOptions());
+        $writer->openToFile($path);
+        ExportSheetWriter::write($writer, self::tabName($sheetName), $sheet, $this->companyProfile->letterhead());
+        $writer->close();
+
+        return response()->download($path, $filename, [
+            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        ])->deleteFileAfterSend(true);
+    }
+
+    /**
+     * The audit trail, which is the one report with no ceiling — it grows for as long as the
+     * platform is used. Its rows stay a generator all the way into the writer, so the export
+     * holds one entry at a time rather than a few hundred thousand. That is also why it carries
+     * no summary band and no total: both would mean counting the rows before writing any.
+     *
+     * @param  array<string, mixed>  $filters
+     */
+    private function auditWorkbook(array $filters, string $filename): HttpResponse
+    {
+        // The body only. Reading the header off the generator first and then handing the rest
+        // to a foreach cannot work: a generator that has already advanced refuses to rewind.
+        $columns = array_map(
+            fn (string $label) => ['label' => $label, 'type' => 'text', 'width' => match ($label) {
+                'Timestamp' => 20.0, 'Details' => 60.0, default => 18.0,
+            }],
+            self::AUDIT_COLUMNS,
+        );
+
+        return $this->workbook([
+            'title' => 'Audit Trail • ' . now(config('app.timezone_local'))->format('M j, Y'),
+            'kpis' => [],
+            'columns' => $columns,
+            'rows' => $this->auditCsvRows($filters, withHeader: false),
+            'totals' => null,
+        ], 'Audit Trail', $filename);
+    }
+
+    /**
+     * A sheet name Excel will actually accept: 31 characters, and none of the five it reserves
+     * for its own range syntax. A workbook that refuses to open is not a styling problem.
+     */
+    private static function tabName(string $name): string
+    {
+        return Str::limit(trim(str_replace([':', '\\', '/', '?', '*', '[', ']'], ' ', $name)), 31, '') ?: 'Report';
+    }
+
+    /** "Leave Liability • September 2026" — what the file is, under the company that ran it. */
+    private function sheetTitle(array $report, string $key): string
+    {
+        $period = $report['selected_month']['label']
+            ?? now(config('app.timezone_local'))->format('M j, Y');
+
+        return $this->reportTitle($key) . ' • ' . $period;
     }
 
     private function reportTitle(string $key): string
@@ -1540,9 +1585,11 @@ class ReportService
      * @param  array<string, mixed>  $filters
      * @return \Generator<int, array<int, string>>
      */
-    private function auditCsvRows(array $filters): \Generator
+    private function auditCsvRows(array $filters, bool $withHeader = true): \Generator
     {
-        yield ['Timestamp', 'User', 'Module', 'Action', 'Details'];
+        if ($withHeader) {
+            yield self::AUDIT_COLUMNS;
+        }
 
         $logs = $this->auditQuery($filters)->lazyByIdDesc(self::AUDIT_STREAM_CHUNK);
 
