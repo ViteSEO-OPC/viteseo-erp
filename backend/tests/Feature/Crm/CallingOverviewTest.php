@@ -314,6 +314,13 @@ class CallingOverviewTest extends TestCase
             $this->onboard($slug);
         }
 
+        // Warm AGAIN. Onboarding assigns roles, which flushes the permission cache, so the first
+        // request afterwards reloads it — on a tree with cookie-session authentication that first
+        // request measured 23 queries against a steady 2, and the very next one was back to 2.
+        // That is a one-off reload caused by the onboarding, not work that grows with the tenant
+        // count; a genuine per-organization lookup is still visible on every request after it.
+        $count();
+
         $after = $count();
 
         $this->assertSame(
