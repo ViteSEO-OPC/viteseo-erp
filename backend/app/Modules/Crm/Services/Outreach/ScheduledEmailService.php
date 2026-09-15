@@ -112,26 +112,67 @@ class ScheduledEmailService
         return $email;
     }
 
-    /** Send a still-scheduled email immediately, bypassing the timer. */
+    /**
+     * Send a still-scheduled email immediately, bypassing the timer.
+     *
+     * ATOMIC CLAIM (CEO audit crm-05). The policy and assertPending() judge the row as it was when the
+     * request began, so on their own they cannot stop the automatic sender — or a second Send Now — from
+     * taking the same email in the meantime: both would reach the provider and the prospect would receive
+     * it twice. The row is therefore moved scheduled → sending with a conditional UPDATE; only the request
+     * that wins it sends, and a request that loses it gets the same 422 as any other email that is no
+     * longer scheduled.
+     */
     public function sendNow(Email $email, User $sender): Email
     {
         $this->assertPending($email);
 
-        return $this->deliver($email);
+        if (! $this->claimForSending($email, [self::PENDING])) {
+            throw $this->notPending();
+        }
+
+        return $this->sendClaimed($email);
     }
 
     /**
-     * Execute a due (or Send-Now) scheduled email through the single outbound pipeline. Idempotent:
-     * only a `scheduled`/`queued` row is ever sent, so overlapping scheduler runs / retries cannot
-     * double-send. On provider failure the row becomes `failed` (terminal for Phase 1).
+     * Execute a due (or Send-Now) scheduled email through the single outbound pipeline. Idempotent: the
+     * row is moved to `sending` with a conditional UPDATE from `scheduled`/`queued`, so exactly one caller
+     * can send it — overlapping scheduler runs, retries and a racing Send Now return without sending or
+     * recording anything. On provider failure the row becomes `failed` (terminal for Phase 1).
      */
     public function deliver(Email $email): Email
     {
-        if (! in_array($email->status, [self::PENDING, 'queued'], true)) {
-            return $email; // already sent / cancelled / failed — nothing to do
+        if (! $this->claimForSending($email, [self::PENDING, 'queued'])) {
+            return $email->fresh() ?? $email; // already sending / sent / cancelled / failed — nothing to do
         }
 
-        $email->update(['status' => 'sending', 'queued_at' => $email->queued_at ?? now()]);
+        return $this->sendClaimed($email);
+    }
+
+    /**
+     * Atomically move the row to `sending` from one of `$from` (CEO audit crm-05). Returns false when
+     * another sender already moved it, in which case the caller must not send.
+     *
+     * @param  list<string>  $from
+     */
+    private function claimForSending(Email $email, array $from): bool
+    {
+        $won = Email::query()
+            ->whereKey($email->id)
+            ->whereIn('status', $from)
+            ->update(['status' => 'sending', 'queued_at' => $email->queued_at ?? now()]);
+
+        if ($won === 0) {
+            return false;
+        }
+
+        $email->refresh();
+
+        return true;
+    }
+
+    /** The send itself — reached only by the caller that won {@see claimForSending()}. */
+    private function sendClaimed(Email $email): Email
+    {
         $this->record($email, 'sending');
 
         $sender = $email->sender;
@@ -161,10 +202,15 @@ class ScheduledEmailService
     private function assertPending(Email $email): void
     {
         if ($email->status !== self::PENDING) {
-            throw ValidationException::withMessages([
-                'email' => 'Only a scheduled email can be changed; once sent it is immutable history.',
-            ]);
+            throw $this->notPending();
         }
+    }
+
+    private function notPending(): ValidationException
+    {
+        return ValidationException::withMessages([
+            'email' => 'Only a scheduled email can be changed; once sent it is immutable history.',
+        ]);
     }
 
     /**

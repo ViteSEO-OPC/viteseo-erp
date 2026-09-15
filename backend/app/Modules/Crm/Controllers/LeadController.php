@@ -26,6 +26,7 @@ use App\Modules\Crm\Notifications\LeadAssignedNotification;
 use App\Models\User;
 use App\Modules\Crm\Services\LeadCreator;
 use App\Modules\Crm\Jobs\ConvertXlsImportJob;
+use App\Modules\Crm\Services\Import\LeadImportInProgressException;
 use App\Modules\Crm\Services\Import\XlsConverter;
 use App\Modules\Crm\Services\Import\XlsImportJobStore;
 use App\Modules\Crm\Services\LeadAssignmentService;
@@ -641,7 +642,16 @@ class LeadController extends Controller
         // Activity trail and no Planner transfer. notify() and the broadcast stay HERE, after the
         // commit — see the note below on why their order is load-bearing, and so neither can fire
         // for a handover that rolled back.
-        $assignment->assign($lead, $assignedTo, $request->user());
+        if (! $assignment->assign($lead, $assignedTo, $request->user())) {
+            // Nothing changed hands: the lead already belonged to that owner — a repeat submit, a bulk
+            // selection that includes leads the BD already holds, or a competing handover that
+            // committed the same owner first. Still a successful 200, but no `lead.assigned` Activity
+            // was written, so there is no handover to announce: no notification, no realtime push
+            // (CEO audit crm-14c).
+            return response()->json([
+                'data' => new LeadResource($lead),
+            ]);
+        }
 
         // The durable record of the handover, for the new owner's Notification Center.
         // notify() is the only entry point: persisting fires NotificationSent, and
@@ -715,7 +725,12 @@ class LeadController extends Controller
 
         // ── Everything else: unchanged synchronous path ────────────────────────────────────────
         // `.xlsx`, CSV, TXT and small `.xls` all land here exactly as before.
-        $result = $service->import($file, $user->id, $request->isDryRun(), $assignedTo);
+        try {
+            $result = $service->import($file, $user->id, $request->isDryRun(), $assignedTo);
+        } catch (LeadImportInProgressException $e) {
+            // Another import is committing for this organization (a preview never gets here).
+            return response()->json(['message' => $e->getMessage()], $e->status);
+        }
 
         return response()->json(['data' => $result]);
     }
@@ -795,6 +810,10 @@ class LeadController extends Controller
                 assignedTo: $assignedTo,
                 preConvertedPath: (string) $record['path'],
             );
+        } catch (LeadImportInProgressException $e) {
+            // Another import is committing for this organization. The job was already claimed above, so it
+            // cannot be replayed and the user re-uploads — a documented edge case of the job store.
+            return response()->json(['message' => $e->getMessage()], $e->status);
         } finally {
             // Converted file removed on success AND on failure — it is single-use either way.
             $jobs->forget($jobId);

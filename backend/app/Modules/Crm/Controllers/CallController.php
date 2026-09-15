@@ -165,6 +165,14 @@ class CallController extends Controller
     /** Start a call against an EXISTING planned call event (the Planner-driven flow). */
     public function storeForEvent(Request $request, PlannerEvent $plannerEvent): JsonResponse
     {
+        // The call is opened against the event's LEAD, so the caller must be able to see that lead — owning
+        // the event is not enough (CEO audit crm-04). Without this, an event linked to someone else's lead
+        // opened a call its agent could then neither see nor conclude (CallPolicy judges the lead). An
+        // event with no loadable lead is still refused by CallSessionService, unchanged.
+        if ($plannerEvent->lead !== null) {
+            $this->authorize('view', $plannerEvent->lead);
+        }
+
         // ALWAYS MANUAL, deliberately. Starting a call from the Planner board opens the CRM record so
         // the BD can dial and disposition it; the board has no browser-call control and this endpoint
         // places no call, so claiming a carrier transport here would attach `provider = twilio` — and

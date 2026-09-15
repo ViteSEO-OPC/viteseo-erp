@@ -50,25 +50,45 @@ class LeadAssignmentService
      * separate "unassign" method, because a second method is a second place for ownership to change.
      *
      * @param  int|null  $assignedTo  the new owner, or null to clear the assignment
-     * @return bool false when the lead already belonged to that BD — a real occurrence in bulk
-     *              handovers, and not something to log a handover Activity for.
+     * @return bool false when the lead already belonged to that BD (judged on the locked, committed
+     *              row) — a real occurrence in bulk handovers and repeat submits, and not something
+     *              to log a handover Activity for.
      */
     public function assign(Lead $lead, ?int $assignedTo, User $actor): bool
     {
-        // Captured BEFORE the write — from that point on `$lead->assigned_to` is the NEW owner, and
-        // the Planner transfer needs to know whose work is being handed over.
-        $previousOwnerId = $lead->assigned_to;
+        // LOCKED RE-READ (CEO audit crm-14c). `$lead` was read before this call — by route-model
+        // binding, or by the resignation handover's portfolio query — so its `assigned_to` can be
+        // stale by the time the handover writes. Trusting it let two overlapping handovers both run:
+        // the second overwrote the owner the first had just committed, logged a second
+        // `lead.assigned`, and moved open Planner work FROM an owner who no longer held it, stranding
+        // that work with the BD who had just lost the lead. Re-reading the row under `lockForUpdate`
+        // makes a competing handover wait for this one to commit, and every decision below is then
+        // made against the committed owner.
+        return DB::transaction(function () use ($lead, $assignedTo, $actor): bool {
+            /** @var Lead|null $locked */
+            $locked = Lead::query()->whereKey($lead->getKey())->lockForUpdate()->first();
 
-        if ($previousOwnerId === $assignedTo) {
-            return false;
-        }
+            if ($locked === null) {
+                // Archived between the caller's read and the lock: there is nothing to hand over.
+                return false;
+            }
 
-        DB::transaction(function () use ($lead, $assignedTo, $previousOwnerId, $actor): void {
-            $lead->assigned_to = $assignedTo;
+            // Captured BEFORE the write — from that point on `assigned_to` is the NEW owner, and the
+            // Planner transfer needs to know whose work is being handed over.
+            $previousOwnerId = $locked->assigned_to;
+
+            if ($previousOwnerId === $assignedTo) {
+                // Callers render `$lead`, so they still get the committed owner when nothing moved.
+                $this->syncCallerInstance($lead, $locked);
+
+                return false;
+            }
+
+            $locked->assigned_to = $assignedTo;
             // saveQuietly() skips the generic "updated" Activity — a dedicated lead.assigned
             // event is recorded below (clean attribution for the Management Dashboard).
-            $lead->saveQuietly();
-            $lead->load('assignedTo');
+            $locked->saveQuietly();
+            $this->syncCallerInstance($lead, $locked);
 
             // `assignedTo` is null when the assignment was cleared, so the name is resolved rather
             // than dereferenced. The event stays `lead.assigned`: clearing an owner IS an ownership
@@ -94,8 +114,22 @@ class LeadAssignmentService
             // ...and, on a FIRST acquisition only, materializes the cold-call follow-up the lead's
             // `cold_calling = scheduled` state implies but could not create while unowned.
             $this->followUps->materializeOnOwnershipAcquired($lead, $previousOwnerId);
-        });
 
-        return true;
+            return true;
+        });
+    }
+
+    /**
+     * Point the caller's instance at the committed owner. The write goes through the locked row, so
+     * without this the caller would keep rendering (and notifying) the owner it read before the lock.
+     */
+    private function syncCallerInstance(Lead $lead, Lead $locked): void
+    {
+        $lead->forceFill([
+            'assigned_to' => $locked->assigned_to,
+            'updated_at' => $locked->updated_at,
+        ]);
+        $lead->syncOriginalAttributes(['assigned_to', 'updated_at']);
+        $lead->load('assignedTo');
     }
 }

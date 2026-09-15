@@ -100,4 +100,36 @@ class LeadPolicy
     {
         return $user->can('crm.leads.edit') && ($lead->isProspect() || $lead->isVisibleTo($user));
     }
+
+    /**
+     * Link Planner work (an event, or a deal reference on one) to this lead — CEO audit crm-04.
+     *
+     * Deliberately NOT {@see view()}, and not a second visibility system: it starts from the canonical
+     * ownership boundary (Lead::isVisibleTo) and widens it in exactly two places.
+     *
+     *  - An UNCLAIMED prospect (no owner yet) may be linked by anyone who may create Planner events,
+     *    because Nearby "Plan visit" schedules a visit before the business is qualified (the frozen
+     *    Nearby → Planner flow). A prospect that already has an owner belongs to that owner — stricter
+     *    than the website-evidence carve-out above, which only reads.
+     *  - The n8n automation account (the only holder of `crm.outreach.automation.send`; it owns no
+     *    leads) may link a lead only for that lead's current owner, which is how its follow-up and email
+     *    task workflows call this endpoint.
+     *
+     * There is no permission check here: the Planner routes already require `crm.calendar.create` /
+     * `crm.calendar.edit`, and what this ability enforces is whose lead it is.
+     */
+    public function link(User $user, Lead $lead, ?int $eventOwnerId = null): bool
+    {
+        if ($lead->isVisibleTo($user)) {
+            return true;
+        }
+
+        if ($lead->isProspect() && $lead->assigned_to === null) {
+            return true;
+        }
+
+        return $lead->assigned_to !== null
+            && $eventOwnerId === $lead->assigned_to
+            && $user->can('crm.outreach.automation.send');
+    }
 }

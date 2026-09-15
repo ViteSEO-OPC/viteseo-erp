@@ -30,7 +30,9 @@ class UpdateLeadRequest extends FormRequest
             'cold_calling' => ['sometimes', 'required', Rule::enum(LeadColdCalling::class)],
             'status' => ['sometimes', 'required', Rule::in(['interested', 'awaiting-reply', 'declined', 'call-back-req', 'new'])],
             'last_activity' => ['nullable', 'date'],
-            'score' => ['nullable', 'integer', 'min:0', 'max:100'],
+            // NOTE: `score` is deliberately NOT accepted. LeadScorer is the only writer of `leads.score`
+            // (R-4). The controller applies `$request->validated()`, so a field with no rule never
+            // reaches the model: a client-sent score is dropped, not rejected, like `assigned_to` below.
             // Estimated Deal Value (prospect-stage). NOT revenue — never merged with deals.amount.
             'amount' => ['nullable', 'numeric', 'min:0'],
             // Lead Acquisition Channel — business "Source"; SEPARATE from the `source` provenance
