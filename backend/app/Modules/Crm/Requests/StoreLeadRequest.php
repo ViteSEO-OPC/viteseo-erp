@@ -33,7 +33,8 @@ class StoreLeadRequest extends FormRequest
             'cold_calling' => ['sometimes', Rule::enum(LeadColdCalling::class)],
             'status' => ['sometimes', Rule::in(['interested', 'awaiting-reply', 'declined', 'call-back-req', 'new'])],
             'last_activity' => ['nullable', 'date'],
-            'score' => ['nullable', 'integer', 'min:0', 'max:100'],
+            // NOTE: `score` is deliberately NOT accepted. LeadScorer is its only writer (R-4); the
+            // observer scores every new non-prospect lead on create.
             // Estimated Deal Value (prospect-stage). NOT revenue — never merged with deals.amount.
             'amount' => ['nullable', 'numeric', 'min:0'],
             // Lead Acquisition Channel — the business "Source" (Referral, Facebook, Website, Cold
