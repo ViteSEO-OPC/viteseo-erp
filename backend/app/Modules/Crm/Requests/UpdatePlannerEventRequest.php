@@ -3,8 +3,11 @@
 namespace App\Modules\Crm\Requests;
 
 use App\Modules\Crm\Enums\ConsultationOutcome;
+use App\Modules\Crm\Rules\LinkableDeal;
+use App\Modules\Crm\Rules\LinkableLead;
 use App\Modules\Crm\Rules\MustBeBusinessDeveloper;
 use App\Support\OrgUserRule;
+use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -42,8 +45,11 @@ class UpdatePlannerEventRequest extends FormRequest
             // Consultation's lead requirement is enforced in withValidator() against the RESULTING state,
             // not with requiredIf here: a Board drag patches `status` alone, and an implicit required rule
             // would reject that perfectly valid partial update.
-            'lead_id' => ['sometimes', 'nullable', 'integer', 'exists:crm_leads,id'],
-            'deal_id' => ['sometimes', 'nullable', 'integer', 'exists:crm_deals,id'],
+            //
+            // A CHANGED lead_id/deal_id must point at a lead the caller may link work to (CEO audit crm-04);
+            // an unchanged one is not re-judged — see whenRelinked().
+            'lead_id' => ['sometimes', 'nullable', 'integer', ...$this->whenRelinked('lead_id', new LinkableLead($this->user(), $this->resultingOwnerId()))],
+            'deal_id' => ['sometimes', 'nullable', 'integer', ...$this->whenRelinked('deal_id', new LinkableDeal($this->user(), $this->resultingOwnerId()))],
             'company_id' => ['sometimes', 'nullable', 'integer'],
             'campaign_id' => ['sometimes', 'nullable', 'integer'],
 
@@ -52,6 +58,26 @@ class UpdatePlannerEventRequest extends FormRequest
             // Reassignment (Admin/SA typically). Must reference a Business Developer.
             'assigned_to' => ['sometimes', 'nullable', 'integer', OrgUserRule::exists(), new MustBeBusinessDeveloper],
         ];
+    }
+
+    /**
+     * Only a CHANGED link is re-authorized. The Planner form re-sends `lead_id` on every save, and a completed
+     * event keeps its lead after that lead is reassigned (PlannerOwnershipTransfer never moves completed
+     * work), so re-judging an unchanged link would start refusing ordinary edits of an event the caller owns.
+     *
+     * @return list<ValidationRule>
+     */
+    private function whenRelinked(string $field, ValidationRule $rule): array
+    {
+        $current = $this->route('plannerEvent')?->{$field};
+
+        return (string) $this->input($field) === (string) $current ? [] : [$rule];
+    }
+
+    /** The BD the event will belong to after this patch. */
+    private function resultingOwnerId(): mixed
+    {
+        return $this->has('assigned_to') ? $this->input('assigned_to') : $this->route('plannerEvent')?->assigned_to;
     }
 
     /**
