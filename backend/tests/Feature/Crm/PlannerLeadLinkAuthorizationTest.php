@@ -57,6 +57,10 @@ class PlannerLeadLinkAuthorizationTest extends TestCase
     private function teammatesLead(User $teammate): Lead
     {
         return Lead::factory()->assignedTo($teammate)->create([
+            // Pinned, not random: an OWNED lead created with cold_calling = 'scheduled' makes LeadObserver create a
+            // follow-up PlannerEvent (Cold Calling → Planner). That unrelated side effect would contaminate the exact
+            // zero-event assertions below; the authorization under test does not read this field.
+            'cold_calling' => 'not-called',
             'business_name' => 'Teammate Private Bakery',
             'contact_name' => 'Hidden Contact Person',
             'industry' => 'Hidden Industry Niche',
@@ -67,6 +71,7 @@ class PlannerLeadLinkAuthorizationTest extends TestCase
     private function prospect(?User $owner = null): Lead
     {
         return Lead::factory()->create([
+            'cold_calling' => 'not-called', // pinned — see teammatesLead()
             'source' => 'nearby',
             'qualified_at' => null,
             'qualified_by' => null,
@@ -169,6 +174,7 @@ class PlannerLeadLinkAuthorizationTest extends TestCase
         $assignedProspect = $this->prospect($other);
         $claimed = Lead::factory()->create([
             'source' => 'nearby', 'qualified_at' => now(), 'qualified_by' => $other->id, 'assigned_to' => $other->id,
+            'cold_calling' => 'not-called', // pinned — see teammatesLead()
         ]);
         Sanctum::actingAs($bd);
 
@@ -368,7 +374,7 @@ class PlannerLeadLinkAuthorizationTest extends TestCase
     {
         $owner = $this->userWithRole('crm_bd');
         $someoneElse = $this->userWithRole('crm_bd');
-        $ownedLead = Lead::factory()->assignedTo($owner)->create();
+        $ownedLead = Lead::factory()->assignedTo($owner)->create(['cold_calling' => 'not-called']); // pinned — see teammatesLead()
         $ownerlessLead = Lead::factory()->create(['assigned_to' => null, 'source' => null]);
         $account = $this->automationAccount();
         Sanctum::actingAs($account);
