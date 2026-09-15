@@ -26,6 +26,7 @@ use App\Modules\Crm\Notifications\LeadAssignedNotification;
 use App\Models\User;
 use App\Modules\Crm\Services\LeadCreator;
 use App\Modules\Crm\Jobs\ConvertXlsImportJob;
+use App\Modules\Crm\Services\Import\LeadImportInProgressException;
 use App\Modules\Crm\Services\Import\XlsConverter;
 use App\Modules\Crm\Services\Import\XlsImportJobStore;
 use App\Modules\Crm\Services\LeadAssignmentService;
@@ -715,7 +716,12 @@ class LeadController extends Controller
 
         // ── Everything else: unchanged synchronous path ────────────────────────────────────────
         // `.xlsx`, CSV, TXT and small `.xls` all land here exactly as before.
-        $result = $service->import($file, $user->id, $request->isDryRun(), $assignedTo);
+        try {
+            $result = $service->import($file, $user->id, $request->isDryRun(), $assignedTo);
+        } catch (LeadImportInProgressException $e) {
+            // Another import is committing for this organization (a preview never gets here).
+            return response()->json(['message' => $e->getMessage()], $e->status);
+        }
 
         return response()->json(['data' => $result]);
     }
@@ -795,6 +801,10 @@ class LeadController extends Controller
                 assignedTo: $assignedTo,
                 preConvertedPath: (string) $record['path'],
             );
+        } catch (LeadImportInProgressException $e) {
+            // Another import is committing for this organization. The job was already claimed above, so it
+            // cannot be replayed and the user re-uploads — a documented edge case of the job store.
+            return response()->json(['message' => $e->getMessage()], $e->status);
         } finally {
             // Converted file removed on success AND on failure — it is single-use either way.
             $jobs->forget($jobId);

@@ -5,9 +5,12 @@ namespace App\Modules\Crm\Services;
 use App\Models\User;
 use App\Modules\Crm\Models\Lead;
 use App\Modules\Crm\Requests\StoreLeadRequest;
+use App\Modules\Crm\Services\Import\LeadImportInProgressException;
 use App\Modules\Crm\Services\Import\XlsConverter;
+use App\Support\CurrentOrg;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
@@ -49,6 +52,17 @@ class LeadImportService
      * the name of a new feature (PO decision, 2026-08-14).
      */
     private const NOTE_MAX_LENGTH = 5000;
+
+    /**
+     * Lock key prefix for a lead-import COMMIT, per organization (CEO audit crm-06). A commit reads the
+     * dedup index, classifies the rows and only then writes, so two commits in one organization must not
+     * overlap: the second would read the index before the first had written and create every lead again.
+     * Leads are organization-scoped, so the organization is both the dedup domain and the lock granularity.
+     */
+    public const COMMIT_LOCK_PREFIX = 'crm:lead-import:commit:org:';
+
+    /** A safety net only: a normal commit releases the lock the moment its transaction ends. */
+    private const COMMIT_LOCK_SECONDS = 600;
 
     public function __construct(
         private readonly XlsConverter $xls = new XlsConverter,
@@ -245,17 +259,6 @@ class LeadImportService
         // The `string` check is kept; only the length ceiling moves to persist().
         $rules['note'] = ['nullable', 'string'];
 
-        /** @var list<array<string, string>> $newRows */
-        $newRows = [];
-        /** @var array<string, Lead> $toRestore  dedup key => soft-deleted lead to restore */
-        $toRestore = [];
-        /** @var list<array{row: int, email: string}> $duplicates */
-        $duplicates = [];
-        /** @var list<array{row: int, business: string}> $restored */
-        $restored = [];
-        /** @var list<array{row: int, messages: list<string>}> $errors */
-        $errors = [];
-
         // Parse + translate every non-blank row first.
         $parsed = [];
         /** @var array<string, array{field: string, value: string, rows: list<int>}> $unknownAgg */
@@ -276,6 +279,58 @@ class LeadImportService
             $data = $this->translateValues($data, $rowNumber, $unknownAgg);
             $parsed[] = ['rowNumber' => $rowNumber, 'data' => $data];
         }
+
+        // Dedup read → classification → commit is one unit. For a commit it runs under the organization's
+        // import lock, so no other commit can read the dedup index before this one has written. A preview
+        // writes nothing and never takes the lock.
+        [$newRows, $toRestore, $duplicates, $restored, $errors, $importedCount] = $dryRun
+            ? $this->classifyAndCommit($parsed, $rules, $userId, $assignedTo, commit: false)
+            : $this->underCommitLock(fn (): array => $this->classifyAndCommit($parsed, $rules, $userId, $assignedTo, commit: true));
+
+        return [
+            'dryRun' => $dryRun,
+            'fileName' => $file->getClientOriginalName(),
+            'summary' => [
+                'total' => count($parsed),
+                // "valid" = rows that will land as an active lead this import (new + restored), so the
+                // client's "Import N" affordance stays meaningful even for a restore-only file.
+                'valid' => count($newRows) + count($toRestore),
+                'restored' => count($toRestore),
+                'duplicates' => count($duplicates),
+                'errors' => count($errors),
+            ],
+            'mapping' => $this->mappingPreview($header, $map),
+            // Enterprise Smart Header Recognition: named header cells that matched no CRM field, so
+            // the importer can see exactly which spreadsheet columns were ignored (never a failure).
+            'unknownColumns' => $this->unknownColumns($header, $map),
+            'duplicates' => $duplicates,
+            'restored' => $restored,
+            'errors' => $errors,
+            'unknownValues' => $this->formatUnknowns($unknownAgg),
+            'importedCount' => $importedCount,
+        ];
+    }
+
+    /**
+     * Classify the parsed rows against the CRM-wide dedup index and, for a commit, write them. The import
+     * rules are unchanged; they are only gathered here so a commit can run them under {@see underCommitLock()}.
+     *
+     * @param  list<array{rowNumber: int, data: array<string, string>}>  $parsed
+     * @param  array<string, mixed>  $rules
+     * @return array{0: list<array<string, string>>, 1: array<string, Lead>, 2: list<array{row: int, email: string}>, 3: list<array{row: int, business: string}>, 4: list<array{row: int, messages: list<string>}>, 5: int}
+     */
+    private function classifyAndCommit(array $parsed, array $rules, int $userId, ?int $assignedTo, bool $commit): array
+    {
+        /** @var list<array<string, string>> $newRows */
+        $newRows = [];
+        /** @var array<string, Lead> $toRestore  dedup key => soft-deleted lead to restore */
+        $toRestore = [];
+        /** @var list<array{row: int, email: string}> $duplicates */
+        $duplicates = [];
+        /** @var list<array{row: int, business: string}> $restored */
+        $restored = [];
+        /** @var list<array{row: int, messages: list<string>}> $errors */
+        $errors = [];
 
         // CRM-wide, ownership-independent deduplication index (Tier 1 email, Tier 2 business+phone,
         // Tier 3 business+address). Includes soft-deleted leads so a matching archived lead is
@@ -319,7 +374,7 @@ class LeadImportService
         }
 
         $importedCount = 0;
-        if (! $dryRun) {
+        if ($commit) {
             DB::transaction(function () use ($newRows, $userId, $assignedTo, $toRestore, &$importedCount): void {
                 if ($newRows !== []) {
                     $importedCount = $this->persist($newRows, $userId, $assignedTo);
@@ -334,28 +389,37 @@ class LeadImportService
             });
         }
 
-        return [
-            'dryRun' => $dryRun,
-            'fileName' => $file->getClientOriginalName(),
-            'summary' => [
-                'total' => count($parsed),
-                // "valid" = rows that will land as an active lead this import (new + restored), so the
-                // client's "Import N" affordance stays meaningful even for a restore-only file.
-                'valid' => count($newRows) + count($toRestore),
-                'restored' => count($toRestore),
-                'duplicates' => count($duplicates),
-                'errors' => count($errors),
-            ],
-            'mapping' => $this->mappingPreview($header, $map),
-            // Enterprise Smart Header Recognition: named header cells that matched no CRM field, so
-            // the importer can see exactly which spreadsheet columns were ignored (never a failure).
-            'unknownColumns' => $this->unknownColumns($header, $map),
-            'duplicates' => $duplicates,
-            'restored' => $restored,
-            'errors' => $errors,
-            'unknownValues' => $this->formatUnknowns($unknownAgg),
-            'importedCount' => $importedCount,
-        ];
+        return [$newRows, $toRestore, $duplicates, $restored, $errors, $importedCount];
+    }
+
+    /**
+     * Run a commit under the organization's lead-import lock (CEO audit crm-06).
+     *
+     * Taken BEFORE the dedup read and before any transaction opens — the lock row must be visible to other
+     * requests immediately — and released only after the transaction has committed or rolled back. It never
+     * waits: a commit that finds the lock taken is refused, and the same commit succeeds once the other
+     * import has finished.
+     *
+     * @template T
+     *
+     * @param  callable(): T  $commit
+     * @return T
+     *
+     * @throws LeadImportInProgressException
+     */
+    private function underCommitLock(callable $commit): mixed
+    {
+        $lock = Cache::lock(self::COMMIT_LOCK_PREFIX.(CurrentOrg::id() ?? 'none'), self::COMMIT_LOCK_SECONDS);
+
+        if (! $lock->get()) {
+            throw new LeadImportInProgressException;
+        }
+
+        try {
+            return $commit();
+        } finally {
+            $lock->release();
+        }
     }
 
     /**
