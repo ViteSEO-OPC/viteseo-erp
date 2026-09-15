@@ -19,6 +19,11 @@ trait ValidatesTemplatePlaceholders
         ));
 
         foreach (['subject', 'body'] as $field) {
+            // A body sent with content is dropped, not stored: the content's own text is validated instead.
+            if ($field === 'body' && $this->input('content') !== null) {
+                continue;
+            }
+
             $value = $this->input($field);
 
             // A field already failing its own rules (missing, too long) reports that first.

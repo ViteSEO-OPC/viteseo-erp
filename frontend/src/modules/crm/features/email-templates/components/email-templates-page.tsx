@@ -1,7 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Plus } from "lucide-react";
+import dynamic from "next/dynamic";
+import { Loader2, Palette, Plus } from "lucide-react";
 import { Card } from "@/modules/crm/components/ui/card";
 import { Button } from "@/modules/crm/components/ui/button";
 import { Skeleton } from "@/modules/crm/components/ui/skeleton";
@@ -27,15 +28,41 @@ import {
   useEmailTemplatesAdmin,
   useUpdateEmailTemplate,
 } from "@/modules/crm/features/email-templates/hooks/use-email-templates-admin";
+import { useEmailDesigns } from "@/modules/crm/features/email-templates/hooks/use-email-designs";
 import { KIND_LABELS } from "@/modules/crm/features/email-templates/lib/email-template-text";
+import { contentFromPlainText, defaultContent } from "@/modules/crm/features/email-templates/lib/email-design";
 import type {
   EmailTemplate,
   TemplateKind,
 } from "@/modules/crm/features/email-templates/types/email-template-types";
+import type { TemplateEditorSeed } from "@/modules/crm/features/email-templates/types/email-design-types";
 
 type KindFilter = "all" | TemplateKind;
 type StatusFilter = "all" | "active" | "inactive";
 type EditorState = { template: EmailTemplate | null; tab: EditorTab };
+type DesignerState = { template: EmailTemplate | null; seed: TemplateEditorSeed };
+
+/**
+ * The visual template editor — Tiptap, dnd-kit and the preview frame — is loaded only when an admin opens it,
+ * so none of it weighs on the template list.
+ */
+const EmailTemplateContentEditor = dynamic(
+  () =>
+    import("@/modules/crm/features/email-templates/components/designer/email-template-content-editor").then(
+      (mod) => mod.EmailTemplateContentEditor,
+    ),
+  {
+    ssr: false,
+    loading: () => (
+      <div role="status" className="fixed inset-0 z-50 flex items-center justify-center bg-black/10">
+        <span className="inline-flex items-center gap-2 rounded-lg bg-card px-4 py-2 text-sm text-foreground shadow-lg">
+          <Loader2 className="size-4 animate-spin" aria-hidden />
+          Opening the designer…
+        </span>
+      </div>
+    ),
+  },
+);
 
 const STATUS_LABELS: Record<StatusFilter, string> = {
   all: "All statuses",
@@ -56,11 +83,15 @@ export function EmailTemplatesPage() {
   const { templates, catalog, isLoading, isError, retry } = useEmailTemplatesAdmin();
   const update = useUpdateEmailTemplate();
   const remove = useDeleteEmailTemplate();
+  // A converted template is shown in the default design; whether that design has a signature area decides
+  // whether a signature at the end of the plain-text body moves into the template's own sign-off.
+  const { defaultDesign } = useEmailDesigns();
 
   const [kind, setKind] = useState<KindFilter>("all");
   const [status, setStatus] = useState<StatusFilter>("all");
   const [search, setSearch] = useState("");
   const [editor, setEditor] = useState<EditorState | null>(null);
+  const [designer, setDesigner] = useState<DesignerState | null>(null);
   const [pendingDelete, setPendingDelete] = useState<EmailTemplate | null>(null);
   const [pendingDeactivate, setPendingDeactivate] = useState<EmailTemplate | null>(null);
 
@@ -94,6 +125,25 @@ export function EmailTemplatesPage() {
     update.mutate({ id: template.id, is_active: active });
   }
 
+  /** A designed template opens in the visual editor; a plain-text one keeps the Phase 1 editor, unchanged. */
+  function openTemplate(template: EmailTemplate, tab: EditorTab) {
+    if (template.content) {
+      setDesigner({
+        template,
+        seed: {
+          purpose: template.purpose,
+          tone: template.tone,
+          subject: template.subject,
+          isActive: template.isActive,
+          content: template.content,
+          emailDesignId: template.emailDesignId,
+        },
+      });
+      return;
+    }
+    setEditor({ template, tab });
+  }
+
   const togglingId = update.isPending ? (update.variables?.id ?? null) : null;
 
   return (
@@ -114,10 +164,32 @@ export function EmailTemplatesPage() {
             each lead when the email is written.
           </p>
         </div>
-        <Button className="shrink-0" onClick={() => setEditor({ template: null, tab: "edit" })} disabled={!catalog}>
-          <Plus aria-hidden />
-          New template
-        </Button>
+        <div className="flex shrink-0 flex-wrap gap-2">
+          <Button
+            variant="outline"
+            onClick={() =>
+              setDesigner({
+                template: null,
+                seed: {
+                  purpose: "",
+                  tone: catalog?.tones[0] ?? "",
+                  subject: "",
+                  isActive: true,
+                  content: defaultContent(),
+                  emailDesignId: null,
+                },
+              })
+            }
+            disabled={!catalog}
+          >
+            <Palette aria-hidden />
+            New designed template
+          </Button>
+          <Button onClick={() => setEditor({ template: null, tab: "edit" })} disabled={!catalog}>
+            <Plus aria-hidden />
+            New template
+          </Button>
+        </div>
       </header>
 
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -185,8 +257,8 @@ export function EmailTemplatesPage() {
             templates={visible}
             automationIds={automationIds}
             togglingId={togglingId}
-            onEdit={(template) => setEditor({ template, tab: "edit" })}
-            onPreview={(template) => setEditor({ template, tab: "preview" })}
+            onEdit={(template) => openTemplate(template, "edit")}
+            onPreview={(template) => openTemplate(template, "preview")}
             onDelete={setPendingDelete}
             onSetActive={setActive}
           />
@@ -200,6 +272,31 @@ export function EmailTemplatesPage() {
           initialTab={editor.tab}
           catalog={catalog}
           onClose={() => setEditor(null)}
+          onSwitchToDesigner={(values) => {
+            const current = editor.template;
+            setEditor(null);
+            setDesigner({
+              template: current,
+              seed: {
+                purpose: values.purpose,
+                tone: values.tone,
+                subject: values.subject,
+                isActive: values.is_active,
+                content: contentFromPlainText(values.body, { signatureArea: defaultDesign?.layout.signature.enabled ?? true }),
+                emailDesignId: null,
+              },
+            });
+          }}
+        />
+      ) : null}
+
+      {designer && catalog ? (
+        <EmailTemplateContentEditor
+          key={designer.template?.id ?? "new"}
+          template={designer.template}
+          seed={designer.seed}
+          catalog={catalog}
+          onClose={() => setDesigner(null)}
         />
       ) : null}
 

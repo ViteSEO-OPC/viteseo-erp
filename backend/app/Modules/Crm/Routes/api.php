@@ -14,6 +14,9 @@ use App\Modules\Crm\Http\Middleware\ValidateTwilioSignature;
 use App\Modules\Crm\Controllers\DashboardController;
 use App\Modules\Crm\Controllers\DeliveryMonitorController;
 use App\Modules\Crm\Controllers\EmailController;
+use App\Modules\Crm\Controllers\EmailAssetController;
+use App\Modules\Crm\Controllers\EmailBrandingController;
+use App\Modules\Crm\Controllers\EmailDesignManagementController;
 use App\Modules\Crm\Controllers\EmailTemplateController;
 use App\Modules\Crm\Controllers\EmailTemplateManagementController;
 use App\Modules\Crm\Controllers\DiscoveryConfigController;
@@ -52,6 +55,13 @@ Route::prefix('v1/crm')->group(function (): void {
     // NOTE: there is deliberately no public inbound webhook. Inbound email is pulled by the
     // scheduled `outreach:sync` poll, so the CRM exposes no unauthenticated endpoint for it and
     // needs no Pub/Sub push subscription, OIDC verification, or public HTTPS callback.
+
+    // The ONE unauthenticated CRM route: an email asset's PNG, for email clients, which fetch images
+    // anonymously and long after sending. Read-only, PNG only, by a random UUID that is the asset's whole
+    // identity; the URL never expires. See EmailAssetController for the response headers.
+    Route::get('/email-assets/{uuid}.png', [EmailAssetController::class, 'show'])
+        ->where('uuid', '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}')
+        ->middleware('throttle:600,1');
 
     // EnsureCrmAccessIsActive covers EVERY route below: CRM suspension is enforced per-request
     // (403 + `crm_access_suspended`), never by revoking the shared Sanctum token, which also signs the
@@ -534,13 +544,44 @@ Route::middleware(['auth:sanctum', 'set-current-org', 'subscription-active', 'fe
         // endpoint read. Org configuration, so management roles only, like Archive and Team. The composer's
         // read route above (GET /leads/{lead}/email-templates) and the automation send route are unchanged;
         // EmailTemplateManagementService keeps an admin from leaving an automation purpose with no template.
+        // `preview` renders unsaved template content in a design through the same EmailDesignRenderer the send
+        // path uses and writes no template; it is throttled because the designer calls it as the admin edits.
         Route::middleware('role:super_admin|crm_admin')
             ->prefix('settings/email-templates')
             ->group(function () {
                 Route::get('/', [EmailTemplateManagementController::class, 'index']);
+                Route::post('/preview', [EmailTemplateManagementController::class, 'preview'])->middleware('throttle:60,1');
                 Route::post('/', [EmailTemplateManagementController::class, 'store']);
                 Route::patch('/{emailTemplate}', [EmailTemplateManagementController::class, 'update'])->whereNumber('emailTemplate');
                 Route::delete('/{emailTemplate}', [EmailTemplateManagementController::class, 'destroy'])->whereNumber('emailTemplate');
+            });
+
+        // Settings → Email Designs: the reusable looks designed templates are shown in. Same management roles
+        // as Email Templates. EmailDesignService creates each org's default design on first use, refuses to
+        // delete the default or a design in use, and regenerates the plain-text bodies of the templates a
+        // layout change reaches. `preview` renders an unsaved layout with sample content and writes nothing.
+        Route::middleware('role:super_admin|crm_admin')
+            ->prefix('settings/email-designs')
+            ->group(function () {
+                Route::get('/', [EmailDesignManagementController::class, 'index']);
+                Route::get('/apply-to-all-summary', [EmailDesignManagementController::class, 'applyToAllSummary']);
+                Route::post('/preview', [EmailDesignManagementController::class, 'preview'])->middleware('throttle:60,1');
+                Route::post('/', [EmailDesignManagementController::class, 'store']);
+                Route::patch('/{emailDesign}', [EmailDesignManagementController::class, 'update'])->whereNumber('emailDesign');
+                Route::delete('/{emailDesign}', [EmailDesignManagementController::class, 'destroy'])->whereNumber('emailDesign');
+            });
+
+        // Settings → Email Designs → Organization logo: the organization's email branding. Same management roles.
+        // An upload is checked (`inspect`, which stores nothing — for an SVG it returns the sanitized version to
+        // crop), then stored as a new immutable email asset the branding points at; every design's logo block
+        // shows it. Throttled: an upload decodes and writes files.
+        Route::middleware('role:super_admin|crm_admin')
+            ->prefix('settings/email-branding')
+            ->group(function () {
+                Route::get('/', [EmailBrandingController::class, 'show']);
+                Route::post('/logo/inspect', [EmailBrandingController::class, 'inspectLogo'])->middleware('throttle:30,1');
+                Route::post('/logo', [EmailBrandingController::class, 'uploadLogo'])->middleware('throttle:20,1');
+                Route::delete('/logo', [EmailBrandingController::class, 'removeLogo']);
             });
 
         // `kpi` joins the enabled modules: the KPI definition catalog (M-01…M-06) is managed through

@@ -3,10 +3,14 @@
 namespace App\Modules\Crm\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\Crm\Models\EmailDesign;
 use App\Modules\Crm\Models\EmailTemplate;
+use App\Modules\Crm\Requests\PreviewEmailTemplateRequest;
 use App\Modules\Crm\Requests\StoreEmailTemplateRequest;
 use App\Modules\Crm\Requests\UpdateEmailTemplateRequest;
 use App\Modules\Crm\Resources\EmailTemplateResource;
+use App\Modules\Crm\Services\Outreach\EmailDesignService;
+use App\Modules\Crm\Services\Outreach\EmailTemplateDesignService;
 use App\Modules\Crm\Services\Outreach\EmailTemplateManagementService;
 use App\Modules\Crm\Support\EmailTemplateCatalog;
 use Illuminate\Http\JsonResponse;
@@ -50,6 +54,21 @@ class EmailTemplateManagementController extends Controller
         $updated = $this->templates->update($emailTemplate, $request->validated());
 
         return response()->json(['data' => new EmailTemplateResource($updated)]);
+    }
+
+    /**
+     * Render a template's unsaved content in a design — the one named, or the organization's default — with
+     * the catalog's sample values, through the same renderer, validation and Gmail size guard as saving.
+     * Writes no template.
+     */
+    public function preview(PreviewEmailTemplateRequest $request, EmailTemplateDesignService $rendering, EmailDesignService $designs): JsonResponse
+    {
+        $designId = $request->validated('email_design_id');
+        $design = $designId === null ? $designs->defaultDesign() : EmailDesign::query()->findOrFail($designId);
+
+        return response()->json([
+            'data' => $rendering->preview($design->layout, $rendering->decode($request->validated('content')), (string) $request->validated('subject', '')),
+        ]);
     }
 
     public function destroy(EmailTemplate $emailTemplate): JsonResponse

@@ -2,6 +2,7 @@
 
 namespace App\Modules\Crm\Services\Outreach;
 
+use App\Modules\Crm\Models\EmailDesign;
 use App\Modules\Crm\Models\EmailTemplate;
 use App\Modules\Crm\Support\EmailTemplateCatalog;
 use Illuminate\Database\Eloquent\Collection;
@@ -18,15 +19,33 @@ use Illuminate\Validation\ValidationException;
  * case-insensitive collation lets the composer's `Introduction` rows answer for the automation key
  * `introduction`. That collision is known and deliberately not fixed here; the guard simply respects it.
  *
- * Nothing in this class renders or sends. TemplateRenderer, the composer endpoint and the automation
- * resolver are untouched: they read whatever active rows this service leaves behind.
+ * Nothing in this class sends. TemplateRenderer, the composer endpoint and the automation resolver are
+ * untouched: they read whatever active rows this service leaves behind.
+ *
+ * ── Designed templates ──
+ * A template with `content` is shown in an email design (EmailDesignService): the one it names, or the
+ * organization's default. Its `body` stores the plain-text form of design and content together, derived by
+ * EmailTemplateDesignService with the placeholders intact — so the composer and the automation route read a
+ * designed template exactly like any other. That body is never edited directly: it follows the content and
+ * the design. A plain-text template never gains a design unless content is sent for it.
  */
 class EmailTemplateManagementService
 {
-    /** Every template in the current org, active or not. Soft-deleted rows stay out. */
+    public const BODY_IS_DERIVED = 'This template is built with the visual designer, so its plain-text body is generated from its content and design. Edit the content, or set it to null to make this a plain-text template again.';
+
+    public const UNKNOWN_DESIGN = 'Choose one of your email designs.';
+
+    public const DESIGN_ONLY_FOR_DESIGNED = 'Only a template built with the visual designer uses an email design.';
+
+    public function __construct(
+        private readonly EmailTemplateDesignService $rendering,
+        private readonly EmailDesignService $designs,
+    ) {}
+
+    /** Every template in the current org, active or not, with its design. Soft-deleted rows stay out. */
     public function all(): Collection
     {
-        return EmailTemplate::query()->orderBy('purpose')->orderBy('tone')->get();
+        return EmailTemplate::query()->with('design')->orderBy('purpose')->orderBy('tone')->get();
     }
 
     /**
@@ -44,24 +63,34 @@ class EmailTemplateManagementService
             ->all();
     }
 
-    /** @param array{purpose: string, tone: string, subject: string, body: string, is_active?: bool} $data */
+    /** @param array{purpose: string, tone: string, subject: string, body?: string, content?: string|null, email_design_id?: int|string|null, is_active?: bool} $data */
     public function create(array $data, ?int $actorId): EmailTemplate
     {
         $this->assertPairIsFree($data['purpose'], $data['tone']);
+
+        $content = $this->contentFrom($data);
+        $design = $content === null ? null : $this->designFor($data['email_design_id'] ?? null, null);
 
         return EmailTemplate::create([
             'purpose' => $data['purpose'],
             'tone' => $data['tone'],
             'subject' => $data['subject'],
-            'body' => $data['body'],
+            'body' => $design === null ? $data['body'] : $this->rendering->plainTextBody($design->layout, $content),
+            'content' => $content,
+            'email_design_id' => $design?->id,
             'is_active' => $data['is_active'] ?? true,
             'created_by' => $actorId,
         ]);
     }
 
-    /** @param array{purpose?: string, tone?: string, subject?: string, body?: string, is_active?: bool} $data */
+    /** @param array{purpose?: string, tone?: string, subject?: string, body?: string, content?: string|null, email_design_id?: int|string|null, is_active?: bool} $data */
     public function update(EmailTemplate $template, array $data): EmailTemplate
     {
+        // A designed template's body follows its content and design; a body edited on its own would disagree.
+        if (array_key_exists('body', $data) && ! array_key_exists('content', $data) && $template->isDesigned()) {
+            throw ValidationException::withMessages(['body' => self::BODY_IS_DERIVED]);
+        }
+
         $purpose = $data['purpose'] ?? $template->purpose;
         $tone = $data['tone'] ?? $template->tone;
 
@@ -77,7 +106,28 @@ class EmailTemplateManagementService
             $this->assertAutomationKeepsATemplate($template, 'is_active');
         }
 
-        $template->update(array_intersect_key($data, array_flip(['purpose', 'tone', 'subject', 'body', 'is_active'])));
+        $attributes = array_intersect_key($data, array_flip(['purpose', 'tone', 'subject', 'body', 'is_active']));
+
+        if (array_key_exists('content', $data)) {
+            $content = $this->contentFrom($data);
+
+            if ($content === null) {
+                // Plain text again: it keeps its derived body unless a new one was sent, and leaves its design.
+                $attributes['content'] = null;
+                $attributes['email_design_id'] = null;
+            } else {
+                $design = $this->designFor($data['email_design_id'] ?? null, $template);
+                $attributes['content'] = $content;
+                $attributes['email_design_id'] = $design->id;
+                $attributes['body'] = $this->rendering->plainTextBody($design->layout, $content);
+            }
+        } elseif (($data['email_design_id'] ?? null) !== null && $template->isDesigned()) {
+            $design = $this->designFor($data['email_design_id'], $template);
+            $attributes['email_design_id'] = $design->id;
+            $attributes['body'] = $this->rendering->plainTextBody($design->layout, $template->content);
+        }
+
+        $template->update($attributes);
 
         return $template->fresh();
     }
@@ -88,6 +138,27 @@ class EmailTemplateManagementService
         $this->assertAutomationKeepsATemplate($template, 'template');
 
         $template->delete();
+    }
+
+    /**
+     * The decoded content from validated input: the request has already checked the JSON string.
+     *
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>|null
+     */
+    private function contentFrom(array $data): ?array
+    {
+        return is_string($data['content'] ?? null) ? $this->rendering->decode($data['content']) : null;
+    }
+
+    /** The design named — validated as the current organization's — or the template's own, or the default. */
+    private function designFor(int|string|null $id, ?EmailTemplate $template): EmailDesign
+    {
+        if ($id !== null) {
+            return EmailDesign::query()->findOrFail($id);
+        }
+
+        return $template?->design ?? $this->designs->defaultDesign();
     }
 
     private function assertPurposeMayChange(EmailTemplate $template, string $purpose): void

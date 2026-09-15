@@ -4,7 +4,7 @@ import { useMemo, useRef, useState } from "react";
 import { Controller, useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Lock } from "lucide-react";
+import { Lock, Palette } from "lucide-react";
 import { Button } from "@/modules/crm/components/ui/button";
 import { Switch } from "@/modules/crm/components/ui/switch";
 import { Textarea } from "@/modules/crm/components/ui/textarea";
@@ -90,6 +90,11 @@ type Props = {
   initialTab: EditorTab;
   catalog: EmailTemplateCatalog;
   onClose: () => void;
+  /**
+   * Opens the visual designer with the current values, the body becoming its first text block. Nothing is
+   * saved until the designer saves, so closing the designer leaves the template as it was.
+   */
+  onSwitchToDesigner?: (values: FormValues) => void;
 };
 
 /**
@@ -99,7 +104,7 @@ type Props = {
  * its kind — a composer template cannot become an automation one — and a template the automation
  * endpoint resolves has its purpose locked; the server enforces both, this only makes them visible.
  */
-export function EmailTemplateEditor({ template, initialTab, catalog, onClose }: Props) {
+export function EmailTemplateEditor({ template, initialTab, catalog, onClose, onSwitchToDesigner }: Props) {
   const create = useCreateEmailTemplate();
   const update = useUpdateEmailTemplate();
   const pending = create.isPending || update.isPending;
@@ -367,6 +372,18 @@ export function EmailTemplateEditor({ template, initialTab, catalog, onClose }: 
           </div>
 
           <SheetFooter className="flex-row justify-end gap-2 border-t border-border px-6 py-4">
+            {onSwitchToDesigner ? (
+              <Button
+                type="button"
+                variant="ghost"
+                className="mr-auto"
+                onClick={() => onSwitchToDesigner(form.getValues())}
+                disabled={pending}
+              >
+                <Palette aria-hidden />
+                Switch to visual designer
+              </Button>
+            ) : null}
             <Button type="button" variant="outline" onClick={onClose} disabled={pending}>
               Cancel
             </Button>
