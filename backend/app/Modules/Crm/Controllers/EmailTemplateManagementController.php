@@ -3,12 +3,16 @@
 namespace App\Modules\Crm\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\Crm\Models\EmailDesign;
 use App\Modules\Crm\Models\EmailTemplate;
+use App\Modules\Crm\Requests\PreviewEmailTemplateRequest;
 use App\Modules\Crm\Requests\StoreEmailTemplateRequest;
 use App\Modules\Crm\Requests\UpdateEmailTemplateRequest;
 use App\Modules\Crm\Resources\EmailTemplateResource;
+use App\Modules\Crm\Services\Outreach\EmailDesignService;
+use App\Modules\Crm\Services\Outreach\EmailTemplateDesignService;
 use App\Modules\Crm\Services\Outreach\EmailTemplateManagementService;
-use App\Modules\Crm\Support\EmailTemplateCatalog;
+use App\Modules\Crm\Services\Outreach\EmailTemplateOptionService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 
@@ -26,11 +30,12 @@ class EmailTemplateManagementController extends Controller
 {
     public function __construct(private readonly EmailTemplateManagementService $templates) {}
 
-    public function index(): AnonymousResourceCollection
+    public function index(EmailTemplateOptionService $options): AnonymousResourceCollection
     {
         return EmailTemplateResource::collection($this->templates->all())->additional([
             'meta' => [
-                ...EmailTemplateCatalog::options(),
+                // The built-in vocabulary with this organization's custom purposes and tones added.
+                ...$options->options(),
                 // Which rows the automation endpoint can resolve — including, on MySQL, composer rows it
                 // reaches through the case-insensitive purpose collision.
                 'automationTemplateIds' => $this->templates->automationTemplateIds(),
@@ -50,6 +55,21 @@ class EmailTemplateManagementController extends Controller
         $updated = $this->templates->update($emailTemplate, $request->validated());
 
         return response()->json(['data' => new EmailTemplateResource($updated)]);
+    }
+
+    /**
+     * Render a template's unsaved content in a design — the one named, or the organization's default — with
+     * the catalog's sample values, through the same renderer, validation and Gmail size guard as saving.
+     * Writes no template.
+     */
+    public function preview(PreviewEmailTemplateRequest $request, EmailTemplateDesignService $rendering, EmailDesignService $designs): JsonResponse
+    {
+        $designId = $request->validated('email_design_id');
+        $design = $designId === null ? $designs->defaultDesign() : EmailDesign::query()->findOrFail($designId);
+
+        return response()->json([
+            'data' => $rendering->preview($design->layout, $rendering->decode($request->validated('content')), (string) $request->validated('subject', '')),
+        ]);
     }
 
     public function destroy(EmailTemplate $emailTemplate): JsonResponse

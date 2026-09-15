@@ -4,7 +4,7 @@ import { useMemo, useRef, useState } from "react";
 import { Controller, useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Lock } from "lucide-react";
+import { Lock, Palette } from "lucide-react";
 import { Button } from "@/modules/crm/components/ui/button";
 import { Switch } from "@/modules/crm/components/ui/switch";
 import { Textarea } from "@/modules/crm/components/ui/textarea";
@@ -29,6 +29,13 @@ import { FormField } from "@/modules/crm/components/forms/form-field/form-field"
 import { FIELD } from "@/modules/crm/features/settings/components/form-styles";
 import { cn } from "@/modules/crm/lib/utils";
 import { EmailTemplatePreview } from "@/modules/crm/features/email-templates/components/email-template-preview";
+import { AddCustomOptionDialog } from "@/modules/crm/features/email-templates/components/add-custom-option-dialog";
+import {
+  CustomPurposeItems,
+  CustomToneItems,
+  systemTones,
+} from "@/modules/crm/features/email-templates/components/template-option-items";
+import { ADD_CUSTOM_OPTION } from "@/modules/crm/features/email-templates/lib/template-options";
 import {
   apiFieldErrors,
   useCreateEmailTemplate,
@@ -44,6 +51,7 @@ import {
 import type {
   EmailTemplate,
   EmailTemplateCatalog,
+  TemplateOptionType,
   TemplateKind,
   TemplateToken,
 } from "@/modules/crm/features/email-templates/types/email-template-types";
@@ -90,6 +98,11 @@ type Props = {
   initialTab: EditorTab;
   catalog: EmailTemplateCatalog;
   onClose: () => void;
+  /**
+   * Opens the visual designer with the current values, the body becoming its first text block. Nothing is
+   * saved until the designer saves, so closing the designer leaves the template as it was.
+   */
+  onSwitchToDesigner?: (values: FormValues) => void;
 };
 
 /**
@@ -99,16 +112,18 @@ type Props = {
  * its kind — a composer template cannot become an automation one — and a template the automation
  * endpoint resolves has its purpose locked; the server enforces both, this only makes them visible.
  */
-export function EmailTemplateEditor({ template, initialTab, catalog, onClose }: Props) {
+export function EmailTemplateEditor({ template, initialTab, catalog, onClose, onSwitchToDesigner }: Props) {
   const create = useCreateEmailTemplate();
   const update = useUpdateEmailTemplate();
   const pending = create.isPending || update.isPending;
+  // Which "+ Add custom …" dialog is open, if any.
+  const [addingOption, setAddingOption] = useState<TemplateOptionType | null>(null);
   const [tab, setTab] = useState<EditorTab>(initialTab);
 
   const automationBound = template !== null && catalog.automationTemplateIds.includes(template.id);
   const purposeGroups = (["composer", "automation"] as const)
     .filter((kind) => template === null || template.kind === kind)
-    .map((kind) => ({ kind, items: catalog.purposes.filter((purpose) => purpose.kind === kind) }))
+    .map((kind) => ({ kind, items: catalog.purposes.filter((purpose) => purpose.kind === kind && !purpose.custom) }))
     .filter((group) => group.items.length > 0);
 
   const schema = useMemo(() => buildSchema(catalog.tokens), [catalog.tokens]);
@@ -234,7 +249,13 @@ export function EmailTemplateEditor({ template, initialTab, catalog, onClose }: 
                       render={({ field }) => (
                         <Select
                           value={field.value}
-                          onValueChange={(value) => field.onChange(typeof value === "string" ? value : "")}
+                          onValueChange={(value) => {
+                            if (value === ADD_CUSTOM_OPTION) {
+                              setAddingOption("purpose");
+                              return;
+                            }
+                            field.onChange(typeof value === "string" ? value : "");
+                          }}
                           disabled={automationBound || pending}
                         >
                           <SelectTrigger className="w-full" aria-label="Purpose">
@@ -251,6 +272,7 @@ export function EmailTemplateEditor({ template, initialTab, catalog, onClose }: 
                                 ))}
                               </SelectGroup>
                             ))}
+                            {template === null || template.kind === "composer" ? <CustomPurposeItems catalog={catalog} /> : null}
                           </SelectContent>
                         </Select>
                       )}
@@ -264,18 +286,25 @@ export function EmailTemplateEditor({ template, initialTab, catalog, onClose }: 
                       render={({ field }) => (
                         <Select
                           value={field.value}
-                          onValueChange={(value) => field.onChange(typeof value === "string" ? value : "")}
+                          onValueChange={(value) => {
+                            if (value === ADD_CUSTOM_OPTION) {
+                              setAddingOption("tone");
+                              return;
+                            }
+                            field.onChange(typeof value === "string" ? value : "");
+                          }}
                           disabled={pending}
                         >
                           <SelectTrigger className="w-full" aria-label="Tone">
                             <SelectValue placeholder="Choose a tone">{field.value || undefined}</SelectValue>
                           </SelectTrigger>
                           <SelectContent>
-                            {catalog.tones.map((tone) => (
+                            {systemTones(catalog).map((tone) => (
                               <SelectItem key={tone} value={tone}>
                                 {tone}
                               </SelectItem>
                             ))}
+                            <CustomToneItems catalog={catalog} />
                           </SelectContent>
                         </Select>
                       )}
@@ -367,6 +396,18 @@ export function EmailTemplateEditor({ template, initialTab, catalog, onClose }: 
           </div>
 
           <SheetFooter className="flex-row justify-end gap-2 border-t border-border px-6 py-4">
+            {onSwitchToDesigner ? (
+              <Button
+                type="button"
+                variant="ghost"
+                className="mr-auto"
+                onClick={() => onSwitchToDesigner(form.getValues())}
+                disabled={pending}
+              >
+                <Palette aria-hidden />
+                Switch to visual designer
+              </Button>
+            ) : null}
             <Button type="button" variant="outline" onClick={onClose} disabled={pending}>
               Cancel
             </Button>
@@ -375,6 +416,14 @@ export function EmailTemplateEditor({ template, initialTab, catalog, onClose }: 
             </Button>
           </SheetFooter>
         </form>
+        {addingOption ? (
+          <AddCustomOptionDialog
+            type={addingOption}
+            existing={addingOption === "purpose" ? catalog.purposes.map((purpose) => purpose.value) : catalog.tones}
+            onClose={() => setAddingOption(null)}
+            onCreated={(value) => form.setValue(addingOption, value, { shouldDirty: true, shouldValidate: true })}
+          />
+        ) : null}
       </SheetContent>
     </Sheet>
   );

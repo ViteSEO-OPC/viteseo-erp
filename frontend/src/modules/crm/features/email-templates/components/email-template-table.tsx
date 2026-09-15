@@ -1,6 +1,6 @@
 "use client";
 
-import { Lock } from "lucide-react";
+import { Lock, Palette } from "lucide-react";
 import { Badge } from "@/modules/crm/components/ui/badge";
 import { Switch } from "@/modules/crm/components/ui/switch";
 import {
@@ -65,8 +65,16 @@ export function EmailTemplateTable({
                 >
                   {template.subject}
                 </button>
-                <p className="mt-0.5 text-xs text-muted-foreground">
-                  {template.purpose} · {template.tone}
+                <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                  <span>
+                    {template.purpose} · {template.tone}
+                  </span>
+                  {template.isDesigned ? (
+                    <Badge variant="outline" title="Built with the visual designer, shown in this email design">
+                      <Palette aria-hidden />
+                      {template.emailDesignName ?? "Designed"}
+                    </Badge>
+                  ) : null}
                 </p>
                 <div className="mt-1.5 flex items-center gap-2 text-xs text-muted-foreground">
                   <button type="button" className={ROW_ACTION} onClick={() => onEdit(template)}>

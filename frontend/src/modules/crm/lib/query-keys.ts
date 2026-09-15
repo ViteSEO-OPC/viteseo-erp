@@ -211,5 +211,25 @@ export const queryKeys = {
     // its catalog. The Outreach composer's rendered per-lead copies stay under leads.emailTemplates(id).
     all: ["email-templates"] as const,
     admin: () => [...queryKeys.emailTemplates.all, "admin"] as const,
+    // Built-in + custom purposes and tones with usage (GET /settings/email-template-options).
+    options: () => [...queryKeys.emailTemplates.all, "options"] as const,
+    // The designers' server previews (POST /settings/email-templates/preview and /settings/email-designs/
+    // preview), keyed by endpoint and what was sent. They write nothing; saving a template or a design
+    // invalidates `all`, which includes these.
+    preview: (endpoint: string, body: string) => [...queryKeys.emailTemplates.all, "preview", endpoint, body] as const,
+  },
+  emailDesigns: {
+    // Settings → Email Designs (GET /settings/email-designs): the reusable looks designed templates use,
+    // each with how many templates use it.
+    all: ["email-designs"] as const,
+    list: () => [...queryKeys.emailDesigns.all, "list"] as const,
+    // What "Apply to all templates" would change for a design (null: one not saved yet). Always refetched.
+    applySummary: (designId: string | null) => [...queryKeys.emailDesigns.all, "apply-summary", designId ?? "new"] as const,
+  },
+  emailBranding: {
+    // Settings → Email Designs → Organization logo (GET /settings/email-branding). A logo change also
+    // invalidates emailTemplates.all, whose preview cache would otherwise keep showing the old logo.
+    all: ["email-branding"] as const,
+    detail: () => [...queryKeys.emailBranding.all, "detail"] as const,
   },
 } as const;
