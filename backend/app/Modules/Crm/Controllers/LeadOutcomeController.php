@@ -8,9 +8,11 @@ use App\Modules\Crm\Events\DealWon;
 use App\Modules\Crm\Requests\MarkLeadLostRequest;
 use App\Modules\Crm\Requests\MarkLeadWonRequest;
 use App\Modules\Crm\Resources\LeadResource;
+use App\Modules\Crm\Models\Deal;
 use App\Modules\Crm\Models\Lead;
 use App\Modules\Crm\Models\PlannerEvent;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\DB;
 
 /**
  * BD Lead Detail sales-outcome actions: "Mark as Won" and "Mark as Lost".
@@ -38,28 +40,59 @@ class LeadOutcomeController extends Controller
      */
     public function won(MarkLeadWonRequest $request, Lead $lead): JsonResponse
     {
-        // Duplicate-Deal guard: a lead already tied to a Deal is already "won".
-        if ($lead->deals()->exists()) {
-            return response()->json(['message' => 'This lead is already marked as won.'], 409);
+        // ATOMIC WON (CEO audit crm-14a). Checking `deals()->exists()` and then inserting as two
+        // separate statements is a time-of-check/time-of-use gap: a double submit, a second tab or a
+        // direct API call could pass the same check before either Deal existed, and both requests
+        // then created a Deal — two `lead.won` Activities, two DealWon webhooks, doubled Revenue.
+        //
+        // Re-reading the lead row INSIDE a transaction with `lockForUpdate` closes that window, the
+        // same way LeadQualificationController guards its claim: a competing Won blocks on the row
+        // lock until the first commits, then sees its Deal and takes the existing 409. The Deal and
+        // its Activity commit together, so a failed Activity insert cannot leave a Deal behind.
+        $result = DB::transaction(function () use ($request, $lead): Deal|JsonResponse {
+            /** @var Lead|null $locked */
+            $locked = Lead::query()->whereKey($lead->getKey())->lockForUpdate()->first();
+
+            if ($locked === null) {
+                // Archived between route binding and the lock.
+                return response()->json(['message' => 'Lead not found.'], 404);
+            }
+
+            // Duplicate-Deal guard: a lead already tied to a Deal is already "won".
+            if ($locked->deals()->exists()) {
+                return response()->json(['message' => 'This lead is already marked as won.'], 409);
+            }
+
+            // Realized amount defaults to the lead's prospect-stage estimate (leads.amount) when omitted.
+            $amount = $request->validated('amount');
+            $amount = $amount !== null ? (float) $amount : (float) ($locked->amount ?? 0);
+
+            // Deal creation touches no lead column → LeadObserver does not fire → Lead Score unchanged.
+            $deal = $locked->deals()->create([
+                'amount' => $amount,
+                'converted_at' => now(),
+            ]);
+
+            $locked->activities()->create([
+                'causer_id' => $request->user()->id,
+                'event' => 'lead.won',
+                'description' => sprintf('%s marked %s as won', $request->user()->name, $locked->business_name),
+                'properties' => ['deal_id' => $deal->id, 'amount' => $amount],
+            ]);
+
+            return $deal;
+        });
+
+        if ($result instanceof JsonResponse) {
+            return $result;
         }
 
-        // Realized amount defaults to the lead's prospect-stage estimate (leads.amount) when omitted.
-        $amount = $request->validated('amount');
-        $amount = $amount !== null ? (float) $amount : (float) ($lead->amount ?? 0);
+        $deal = $result;
 
-        // Deal creation touches no lead column → LeadObserver does not fire → Lead Score unchanged.
-        $deal = $lead->deals()->create([
-            'amount' => $amount,
-            'converted_at' => now(),
-        ]);
-
-        $lead->activities()->create([
-            'causer_id' => $request->user()->id,
-            'event' => 'lead.won',
-            'description' => sprintf('%s marked %s as won', $request->user()->name, $lead->business_name),
-            'properties' => ['deal_id' => $deal->id, 'amount' => $amount],
-        ]);
-
+        // Everything below stays OUTSIDE the transaction, in its original order: the Planner closure
+        // needs the committed Deal (see below), and the DealWon webhook must never be announced for a
+        // Deal that could still roll back, nor run while the lead row is locked.
+        //
         // Stop chasing a customer we have already signed. Same Planner completion path as Mark Lost
         // (the status write fires PlannerEventObserver → `planner-event.completed`), but a NARROWER
         // set: {@see PlannerEvent::WON_CLOSES_TYPES} omits `meeting`, because a won deal is exactly

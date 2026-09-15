@@ -642,7 +642,16 @@ class LeadController extends Controller
         // Activity trail and no Planner transfer. notify() and the broadcast stay HERE, after the
         // commit — see the note below on why their order is load-bearing, and so neither can fire
         // for a handover that rolled back.
-        $assignment->assign($lead, $assignedTo, $request->user());
+        if (! $assignment->assign($lead, $assignedTo, $request->user())) {
+            // Nothing changed hands: the lead already belonged to that owner — a repeat submit, a bulk
+            // selection that includes leads the BD already holds, or a competing handover that
+            // committed the same owner first. Still a successful 200, but no `lead.assigned` Activity
+            // was written, so there is no handover to announce: no notification, no realtime push
+            // (CEO audit crm-14c).
+            return response()->json([
+                'data' => new LeadResource($lead),
+            ]);
+        }
 
         // The durable record of the handover, for the new owner's Notification Center.
         // notify() is the only entry point: persisting fires NotificationSent, and
