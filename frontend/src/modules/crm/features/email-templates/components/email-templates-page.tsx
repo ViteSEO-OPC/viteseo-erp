@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import dynamic from "next/dynamic";
-import { Loader2, Palette, Plus } from "lucide-react";
+import { Loader2, Palette, Plus, Tags } from "lucide-react";
 import { Card } from "@/modules/crm/components/ui/card";
 import { Button } from "@/modules/crm/components/ui/button";
 import { Skeleton } from "@/modules/crm/components/ui/skeleton";
@@ -18,6 +18,7 @@ import { ConfirmDialog } from "@/modules/crm/components/shared/confirm-dialog/co
 import { EmptyState } from "@/modules/crm/components/shared/empty-state/empty-state";
 import { ErrorState } from "@/modules/crm/components/shared/error-state/error-state";
 import { cn } from "@/modules/crm/lib/utils";
+import { CustomOptionsDialog } from "@/modules/crm/features/email-templates/components/custom-options-dialog";
 import { EmailTemplateTable } from "@/modules/crm/features/email-templates/components/email-template-table";
 import {
   EmailTemplateEditor,
@@ -94,6 +95,7 @@ export function EmailTemplatesPage() {
   const [designer, setDesigner] = useState<DesignerState | null>(null);
   const [pendingDelete, setPendingDelete] = useState<EmailTemplate | null>(null);
   const [pendingDeactivate, setPendingDeactivate] = useState<EmailTemplate | null>(null);
+  const [managingOptions, setManagingOptions] = useState(false);
 
   const automationIds = useMemo(() => new Set(catalog?.automationTemplateIds ?? []), [catalog]);
 
@@ -184,6 +186,10 @@ export function EmailTemplatesPage() {
           >
             <Palette aria-hidden />
             New designed template
+          </Button>
+          <Button variant="outline" onClick={() => setManagingOptions(true)} disabled={!catalog}>
+            <Tags aria-hidden />
+            Custom purposes &amp; tones
           </Button>
           <Button onClick={() => setEditor({ template: null, tab: "edit" })} disabled={!catalog}>
             <Plus aria-hidden />
@@ -299,6 +305,8 @@ export function EmailTemplatesPage() {
           onClose={() => setDesigner(null)}
         />
       ) : null}
+
+      {managingOptions ? <CustomOptionsDialog onClose={() => setManagingOptions(false)} /> : null}
 
       <ConfirmDialog
         open={pendingDelete !== null}

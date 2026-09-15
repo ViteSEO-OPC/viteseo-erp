@@ -5,6 +5,7 @@ namespace App\Modules\Crm\Requests;
 use App\Modules\Crm\Models\EmailTemplate;
 use App\Modules\Crm\Requests\Concerns\ValidatesTemplateContent;
 use App\Modules\Crm\Requests\Concerns\ValidatesTemplatePlaceholders;
+use App\Modules\Crm\Services\Outreach\EmailTemplateOptionService;
 use App\Modules\Crm\Support\EmailTemplateCatalog;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -29,8 +30,8 @@ class UpdateEmailTemplateRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'purpose' => ['sometimes', 'required', 'string', Rule::in(EmailTemplateCatalog::purposes())],
-            'tone' => ['sometimes', 'required', 'string', Rule::in(EmailTemplateCatalog::TONES)],
+            'purpose' => ['sometimes', 'required', 'string', Rule::in(app(EmailTemplateOptionService::class)->purposes())],
+            'tone' => ['sometimes', 'required', 'string', Rule::in(app(EmailTemplateOptionService::class)->tones())],
             'subject' => ['sometimes', 'required', 'string', 'max:255'],
             'body' => $this->input('content') !== null ? ['exclude'] : ['sometimes', 'required', 'string', 'max:'.EmailTemplateCatalog::BODY_MAX],
             'content' => ['sometimes', 'nullable', 'string'],

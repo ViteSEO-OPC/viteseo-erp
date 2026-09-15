@@ -27,7 +27,25 @@ export type EmailTemplate = {
   updatedAt: string | null;
 };
 
-export type TemplatePurposeOption = { value: string; kind: TemplateKind };
+export type TemplatePurposeOption = {
+  value: string;
+  kind: TemplateKind;
+  /** One of this organization's custom purposes (always a composer purpose) rather than a built-in one. */
+  custom?: boolean;
+  optionId?: string | null;
+};
+
+/** A catalog list a custom value can be added to. */
+export type TemplateOptionType = "purpose" | "tone";
+
+/** POST /settings/email-template-options → `data`. */
+export type CustomTemplateOption = { id: string; type: TemplateOptionType; value: string; createdAt: string | null };
+
+/** GET /settings/email-template-options → `data`: built-in and custom values, custom ones with their usage. */
+export type TemplateOptionsCatalog = {
+  purposes: (TemplatePurposeOption & { templatesCount: number | null })[];
+  tones: { value: string; custom: boolean; optionId: string | null; templatesCount: number | null }[];
+};
 
 /** A placeholder the renderer substitutes, with the CRM sample value the preview uses. */
 export type TemplateToken = { key: string; label: string; sample: string };
@@ -35,7 +53,10 @@ export type TemplateToken = { key: string; label: string; sample: string };
 /** The controlled vocabulary, sent alongside the templates so the page never hardcodes it. */
 export type EmailTemplateCatalog = {
   purposes: TemplatePurposeOption[];
+  /** Built-in tones, then this organization's custom tones. */
   tones: string[];
+  /** The organization's custom tones (also in `tones`), so the dropdowns can show them apart. */
+  customTones?: { value: string; optionId: string }[];
   tokens: TemplateToken[];
   /** Templates the automation endpoint can resolve — they carry extra protection. */
   automationTemplateIds: string[];

@@ -19,6 +19,7 @@ use App\Modules\Crm\Controllers\EmailBrandingController;
 use App\Modules\Crm\Controllers\EmailDesignManagementController;
 use App\Modules\Crm\Controllers\EmailTemplateController;
 use App\Modules\Crm\Controllers\EmailTemplateManagementController;
+use App\Modules\Crm\Controllers\EmailTemplateOptionController;
 use App\Modules\Crm\Controllers\DiscoveryConfigController;
 use App\Modules\Crm\Controllers\GmailOAuthController;
 use App\Modules\Crm\Controllers\NerbyProviderSettingController;
@@ -554,6 +555,19 @@ Route::middleware(['auth:sanctum', 'set-current-org', 'subscription-active', 'fe
                 Route::post('/', [EmailTemplateManagementController::class, 'store']);
                 Route::patch('/{emailTemplate}', [EmailTemplateManagementController::class, 'update'])->whereNumber('emailTemplate');
                 Route::delete('/{emailTemplate}', [EmailTemplateManagementController::class, 'destroy'])->whereNumber('emailTemplate');
+            });
+
+        // Settings → Email Templates → custom purposes and tones: this organization's own additions to the catalog,
+        // reusable by any of its templates. Same management roles. EmailTemplateOptionService refuses a value that
+        // would equal a built-in purpose, tone or automation key however spelled — which is what lets the composer's
+        // purpose allowlist include custom purposes without ever reaching an automation template — and refuses to
+        // delete a value a template still uses.
+        Route::middleware('role:super_admin|crm_admin')
+            ->prefix('settings/email-template-options')
+            ->group(function () {
+                Route::get('/', [EmailTemplateOptionController::class, 'index']);
+                Route::post('/', [EmailTemplateOptionController::class, 'store'])->middleware('throttle:60,1');
+                Route::delete('/{emailTemplateOption}', [EmailTemplateOptionController::class, 'destroy'])->whereNumber('emailTemplateOption');
             });
 
         // Settings → Email Designs: the reusable looks designed templates are shown in. Same management roles

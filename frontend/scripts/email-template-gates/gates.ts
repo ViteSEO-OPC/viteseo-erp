@@ -43,6 +43,9 @@
  *    server first and only its sanitized version is shown and drawn; the SVG rendition is cropped by viewBox and
  *    drawn to a PNG canvas; no branding file builds HTML; the logo block still has no URL field; "Apply to all"
  *    shows the server's counts and sends the confirmed count.
+ * P  CUSTOM PURPOSES AND TONES — the add rules equal EmailTemplateOptionService (PHP): limits, messages, cleaning,
+ *    normalization, invalid characters, duplicates however spelled; the composer keeps its fixed purposes and adds
+ *    custom ones through the same exact filter; both template editors offer "+ Add custom purpose/tone".
  */
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import {
@@ -117,6 +120,17 @@ import {
   renditionSize,
   resizeCrop,
 } from "@/modules/crm/features/email-templates/lib/logo-crop";
+import {
+  ADD_CUSTOM_OPTION,
+  OPTION_EMPTY,
+  OPTION_INVALID,
+  OPTION_LENGTH,
+  OPTION_MAX_LENGTH,
+  OPTION_MIN_LENGTH,
+  cleanOptionValue,
+  normalizeOptionValue,
+  optionValueProblem,
+} from "@/modules/crm/features/email-templates/lib/template-options";
 import type {
   DesignBlock,
   DesignBlockType,
@@ -820,6 +834,70 @@ gate("E  caret insertion", [
     ["apply to all is always confirmed first", editor.includes("<ApplyToAllDialog") && page.includes("<ApplyToAllDialog") && apply.includes("<ConfirmDialog")],
     ["the confirmation says plain-text templates do not change", apply.includes("plain-text template") && apply.includes("never converted")],
     ["the designs page shows the organization logo", page.includes("<OrganizationLogoCard")],
+  ]);
+}
+
+// ── P  custom purposes and tones ────────────────────────────────────────────────────────────
+{
+  const backend = (path: string) => readFileSync(new URL(`../../../backend/app/Modules/Crm/${path}`, import.meta.url), "utf8");
+  const service = backend("Services/Outreach/EmailTemplateOptionService.php");
+  const composer = backend("Controllers/EmailTemplateController.php");
+  const feature = (path: string) => readFileSync(new URL(`../../src/modules/crm/features/email-templates/${path}`, import.meta.url), "utf8");
+  const phpString = (name: string) => service.match(new RegExp(`public const ${name} = '([^']*)';`))?.[1];
+  const phpNumber = (name: string) => Number(service.match(new RegExp(`public const ${name} = (\\d+);`))?.[1]);
+  const TAB = String.fromCharCode(9);
+  const RLO = String.fromCharCode(0x202e);
+  const ZWSP = String.fromCharCode(0x200b);
+  const purposes = ["Proposal Check-in", "Follow-up", "Introduction", "proposal", "proposal_follow_up", "introduction", "meeting_reminder", "thank_you"];
+  const editors = [feature("components/email-template-editor.tsx"), feature("components/designer/email-template-content-editor.tsx")];
+
+  gate("P  custom purposes and tones", [
+    ["PHP parity: length limits", phpNumber("MIN_LENGTH") === OPTION_MIN_LENGTH && phpNumber("MAX_LENGTH") === OPTION_MAX_LENGTH],
+    ["PHP parity: messages", phpString("EMPTY") === OPTION_EMPTY && phpString("LENGTH") === OPTION_LENGTH && phpString("INVALID") === OPTION_INVALID],
+    [
+      "PHP: every automation key and the reserved keys are refused as custom purposes",
+      service.includes("EmailTemplateCatalog::automationPurposes()") && /RESERVED_PURPOSE_KEYS = \['follow_up', 'closing'\]/.test(service),
+    ],
+    ["cleaning trims and collapses whitespace", cleanOptionValue("  Sales   Pitch  ") === "Sales Pitch"],
+    [
+      "normalizing ignores case, spaces, underscores and hyphens",
+      ["Sales Pitch", "sales_pitch", "SALES-PITCH", "  sales  -  pitch "].every((value) => normalizeOptionValue(value) === "sales pitch"),
+    ],
+    ["an empty value", optionValueProblem("   ", "purpose", []) === OPTION_EMPTY],
+    [
+      "2 to 60 characters",
+      optionValueProblem("a", "tone", []) === OPTION_LENGTH &&
+        optionValueProblem("x".repeat(61), "tone", []) === OPTION_LENGTH &&
+        optionValueProblem("x".repeat(60), "tone", []) === null &&
+        optionValueProblem("Hi", "tone", []) === null,
+    ],
+    [
+      "braces, markup, backslashes, backticks, control and invisible characters and punctuation-only values are invalid",
+      ["{{first_name}}", "Hi {there}", "<b>Bold</b>", `Tab${TAB}bed`, `Right${RLO}left`, `Zero${ZWSP}width`, "Back\\slash", "Back`tick", "--"].every(
+        (value) => optionValueProblem(value, "purpose", []) === OPTION_INVALID,
+      ),
+    ],
+    [
+      "a value already in the list is refused however spelled",
+      optionValueProblem("follow up", "purpose", purposes) !== null &&
+        optionValueProblem("MEETING REMINDER", "purpose", purposes) !== null &&
+        optionValueProblem("Proposal", "purpose", purposes) !== null &&
+        optionValueProblem("casual", "tone", ["Warm & professional", "Formal", "Casual"]) !== null,
+    ],
+    ["an acceptable value", optionValueProblem("  Sales   Pitch ", "purpose", purposes) === null],
+    ["the add-item sentinel can never be a value", optionValueProblem(ADD_CUSTOM_OPTION, "purpose", []) === OPTION_INVALID],
+    [
+      "composer: the fixed purposes stay, custom ones are added, and the filter stays exact",
+      composer.includes("private const COMPOSER_PURPOSES = ['Proposal Check-in', 'Follow-up', 'Introduction'];") &&
+        composer.includes("$purposes = [...self::COMPOSER_PURPOSES, ...$options->customValues(EmailTemplateOptionService::TYPE_PURPOSE)];") &&
+        composer.includes("in_array($template->purpose, $purposes, true)"),
+    ],
+    [
+      "both template editors offer + Add custom purpose and + Add custom tone",
+      editors.every((text) => text.includes("<CustomPurposeItems") && text.includes("<CustomToneItems") && text.includes("ADD_CUSTOM_OPTION") && text.includes("<AddCustomOptionDialog")),
+    ],
+    ["the add dialog never submits the editor's form", feature("components/add-custom-option-dialog.tsx").includes("event.stopPropagation()")],
+    ["options go to the organization-scoped endpoint", feature("hooks/use-email-template-options.ts").includes('const ENDPOINT = "/settings/email-template-options"')],
   ]);
 }
 

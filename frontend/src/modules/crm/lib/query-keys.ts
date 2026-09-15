@@ -211,6 +211,8 @@ export const queryKeys = {
     // its catalog. The Outreach composer's rendered per-lead copies stay under leads.emailTemplates(id).
     all: ["email-templates"] as const,
     admin: () => [...queryKeys.emailTemplates.all, "admin"] as const,
+    // Built-in + custom purposes and tones with usage (GET /settings/email-template-options).
+    options: () => [...queryKeys.emailTemplates.all, "options"] as const,
     // The designers' server previews (POST /settings/email-templates/preview and /settings/email-designs/
     // preview), keyed by endpoint and what was sent. They write nothing; saving a template or a design
     // invalidates `all`, which includes these.

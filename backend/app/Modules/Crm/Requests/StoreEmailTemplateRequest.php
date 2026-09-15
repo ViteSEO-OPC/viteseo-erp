@@ -4,6 +4,7 @@ namespace App\Modules\Crm\Requests;
 
 use App\Modules\Crm\Requests\Concerns\ValidatesTemplateContent;
 use App\Modules\Crm\Requests\Concerns\ValidatesTemplatePlaceholders;
+use App\Modules\Crm\Services\Outreach\EmailTemplateOptionService;
 use App\Modules\Crm\Support\EmailTemplateCatalog;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -11,7 +12,7 @@ use Illuminate\Validation\Validator;
 
 /**
  * Creating an email template. Authorization is the route's `role:super_admin|crm_admin`; this class
- * keeps purpose and tone inside the controlled catalog and the placeholders inside the renderer's
+ * keeps purpose and tone inside the controlled catalog — the built-in values and the organization's custom ones — and the placeholders inside the renderer's
  * whitelist. Uniqueness and automation protection live in EmailTemplateManagementService.
  *
  * A template is either plain text (`body`) or designed: `content` (a JSON-encoded string) shown in the email
@@ -28,8 +29,8 @@ class StoreEmailTemplateRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'purpose' => ['required', 'string', Rule::in(EmailTemplateCatalog::purposes())],
-            'tone' => ['required', 'string', Rule::in(EmailTemplateCatalog::TONES)],
+            'purpose' => ['required', 'string', Rule::in(app(EmailTemplateOptionService::class)->purposes())],
+            'tone' => ['required', 'string', Rule::in(app(EmailTemplateOptionService::class)->tones())],
             'subject' => ['required', 'string', 'max:255'],
             'body' => $this->input('content') !== null ? ['exclude'] : ['required', 'string', 'max:'.EmailTemplateCatalog::BODY_MAX],
             'content' => ['nullable', 'string'],

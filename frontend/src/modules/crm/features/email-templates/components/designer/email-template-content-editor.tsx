@@ -22,6 +22,13 @@ import { FormField } from "@/modules/crm/components/forms/form-field/form-field"
 import { FIELD } from "@/modules/crm/features/settings/components/form-styles";
 import { cn } from "@/modules/crm/lib/utils";
 import { DesignBlockList } from "@/modules/crm/features/email-templates/components/designer/design-block-list";
+import { AddCustomOptionDialog } from "@/modules/crm/features/email-templates/components/add-custom-option-dialog";
+import {
+  CustomPurposeItems,
+  CustomToneItems,
+  systemTones,
+} from "@/modules/crm/features/email-templates/components/template-option-items";
+import { ADD_CUSTOM_OPTION } from "@/modules/crm/features/email-templates/lib/template-options";
 import {
   ColorControl,
   TextLineControl,
@@ -70,6 +77,7 @@ import type {
 import type {
   EmailTemplate,
   EmailTemplateCatalog,
+  TemplateOptionType,
   TemplateKind,
   TemplateToken,
 } from "@/modules/crm/features/email-templates/types/email-template-types";
@@ -139,6 +147,8 @@ export function EmailTemplateContentEditor({ template, seed, catalog, onClose }:
   const create = useCreateEmailTemplate();
   const update = useUpdateEmailTemplate();
   const pending = create.isPending || update.isPending;
+  // Which "+ Add custom …" dialog is open, if any.
+  const [addingOption, setAddingOption] = useState<TemplateOptionType | null>(null);
   const designList = useEmailDesigns();
 
   const [content, setContent] = useState<TemplateContent>(seed.content);
@@ -153,7 +163,7 @@ export function EmailTemplateContentEditor({ template, seed, catalog, onClose }:
   const automationBound = template !== null && catalog.automationTemplateIds.includes(template.id);
   const purposeGroups = (["composer", "automation"] as const)
     .filter((kind) => template === null || template.kind === kind)
-    .map((kind) => ({ kind, items: catalog.purposes.filter((purpose) => purpose.kind === kind) }))
+    .map((kind) => ({ kind, items: catalog.purposes.filter((purpose) => purpose.kind === kind && !purpose.custom) }))
     .filter((group) => group.items.length > 0);
 
   const schema = useMemo(() => buildSchema(catalog.tokens), [catalog.tokens]);
@@ -303,7 +313,13 @@ export function EmailTemplateContentEditor({ template, seed, catalog, onClose }:
                       render={({ field }) => (
                         <Select
                           value={field.value}
-                          onValueChange={(value) => field.onChange(typeof value === "string" ? value : "")}
+                          onValueChange={(value) => {
+                            if (value === ADD_CUSTOM_OPTION) {
+                              setAddingOption("purpose");
+                              return;
+                            }
+                            field.onChange(typeof value === "string" ? value : "");
+                          }}
                           disabled={automationBound || pending}
                         >
                           <SelectTrigger className="w-full" aria-label="Purpose">
@@ -320,6 +336,7 @@ export function EmailTemplateContentEditor({ template, seed, catalog, onClose }:
                                 ))}
                               </SelectGroup>
                             ))}
+                            {template === null || template.kind === "composer" ? <CustomPurposeItems catalog={catalog} /> : null}
                           </SelectContent>
                         </Select>
                       )}
@@ -333,18 +350,25 @@ export function EmailTemplateContentEditor({ template, seed, catalog, onClose }:
                       render={({ field }) => (
                         <Select
                           value={field.value}
-                          onValueChange={(value) => field.onChange(typeof value === "string" ? value : "")}
+                          onValueChange={(value) => {
+                            if (value === ADD_CUSTOM_OPTION) {
+                              setAddingOption("tone");
+                              return;
+                            }
+                            field.onChange(typeof value === "string" ? value : "");
+                          }}
                           disabled={pending}
                         >
                           <SelectTrigger className="w-full" aria-label="Tone">
                             <SelectValue placeholder="Choose a tone">{field.value || undefined}</SelectValue>
                           </SelectTrigger>
                           <SelectContent>
-                            {catalog.tones.map((tone) => (
+                            {systemTones(catalog).map((tone) => (
                               <SelectItem key={tone} value={tone}>
                                 {tone}
                               </SelectItem>
                             ))}
+                            <CustomToneItems catalog={catalog} />
                           </SelectContent>
                         </Select>
                       )}
@@ -595,6 +619,14 @@ export function EmailTemplateContentEditor({ template, seed, catalog, onClose }:
             </Button>
           </SheetFooter>
         </form>
+        {addingOption ? (
+          <AddCustomOptionDialog
+            type={addingOption}
+            existing={addingOption === "purpose" ? catalog.purposes.map((purpose) => purpose.value) : catalog.tones}
+            onClose={() => setAddingOption(null)}
+            onCreated={(value) => form.setValue(addingOption, value, { shouldDirty: true, shouldValidate: true })}
+          />
+        ) : null}
       </SheetContent>
     </Sheet>
   );
