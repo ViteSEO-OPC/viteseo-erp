@@ -124,7 +124,13 @@ Route::middleware(['auth:sanctum', 'set-current-org', 'subscription-active', 'fe
         // ownership-scoped dataset as the list, so the tabs can never disagree with the table.
         // Declared before the /leads/{lead} wildcards, like priority-summary above.
         Route::get('/leads/status-summary', [LeadController::class, 'statusSummary'])->can('viewAny', Lead::class);
-        Route::post('/leads/import', [LeadController::class, 'import'])->can('import', Lead::class);
+        // Import starts are rate-limited per user (CEO audit crm-06): every preview and every commit is a
+        // full parse of the uploaded file, and a commit writes the whole sheet in one transaction. The
+        // `crm-lead-import:` prefix gives this route its own bucket, so it never shares a counter with
+        // any other CRM throttle. Status polling and discovered-lead ingest below stay unthrottled.
+        Route::post('/leads/import', [LeadController::class, 'import'])
+            ->middleware('throttle:10,1,crm-lead-import:')
+            ->can('import', Lead::class);
 
         // Poll a queued `.xls` conversion. Same `import` ability as the upload — no new permission
         // surface; ownership is enforced per-record in XlsImportJobStore (foreign job => 404).

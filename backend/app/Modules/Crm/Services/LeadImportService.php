@@ -64,6 +64,15 @@ class LeadImportService
     /** A safety net only: a normal commit releases the lock the moment its transaction ends. */
     private const COMMIT_LOCK_SECONDS = 600;
 
+    /**
+     * Most data rows a single import may carry (CEO audit crm-06). A commit writes about seven statements
+     * per row inside one request and one transaction, so an uncapped 10 MB sheet (~60,000 rows) could hold
+     * the lead tables for minutes and outlive every client and proxy timeout. Enforced while the file is
+     * read — before preview, deduplication, the commit lock or any write — so an over-cap file costs one
+     * bounded read and writes nothing. The header row and wholly blank rows do not count.
+     */
+    public const MAX_IMPORT_ROWS = 5000;
+
     public function __construct(
         private readonly XlsConverter $xls = new XlsConverter,
         private readonly ?LeadNoteCreator $notes = null,
@@ -903,17 +912,34 @@ class LeadImportService
         $reader->open($path);
 
         $rows = [];
-        foreach ($reader->getSheetIterator() as $sheet) {
-            foreach ($sheet->getRowIterator() as $row) {
-                $cells = [];
-                foreach ($row->toArray() as $value) {
-                    $cells[] = $this->stringify($value);
+        $dataRows = 0;
+        try {
+            foreach ($reader->getSheetIterator() as $sheet) {
+                foreach ($sheet->getRowIterator() as $row) {
+                    $cells = [];
+                    foreach ($row->toArray() as $value) {
+                        $cells[] = $this->stringify($value);
+                    }
+
+                    // Row cap ({@see MAX_IMPORT_ROWS}), counted as the sheet streams in so an over-cap file is
+                    // refused before the rest of it is ever loaded. The first row is the header, and a wholly
+                    // blank row is not data; both are still kept, so reported row numbers do not shift.
+                    if ($rows !== [] && trim(implode('', $cells)) !== '' && ++$dataRows > self::MAX_IMPORT_ROWS) {
+                        throw ValidationException::withMessages([
+                            'file' => sprintf(
+                                'This file has more than %s rows. Split it into smaller files.',
+                                number_format(self::MAX_IMPORT_ROWS),
+                            ),
+                        ]);
+                    }
+
+                    $rows[] = $cells;
                 }
-                $rows[] = $cells;
+                break; // MVP: first sheet only
             }
-            break; // MVP: first sheet only
+        } finally {
+            $reader->close();
         }
-        $reader->close();
 
         return $rows;
     }
