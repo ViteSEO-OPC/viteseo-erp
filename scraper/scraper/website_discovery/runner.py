@@ -29,6 +29,7 @@ from scraper.website_discovery.fetcher import fetch_candidate
 from scraper.website_discovery.tier0 import (
     candidates_for,
     fetch_osm_elements,
+    resolve_osm_elements_by_location,
     resolve_wikidata_websites,
 )
 from scraper.website_discovery.tier1 import TIER_PROBE
@@ -123,15 +124,31 @@ def run_website_discovery(config: Config, limit: int, *, commit: bool = False) -
             [str(l.get("placeId") or "") for l in leads],
             overpass_url=config.overpass_url, user_agent=config.user_agent,
         )
+
+        # THE SECOND WAY TO REACH AN ELEMENT. A Google lead's `places/ChIJ…` is not an OSM id, so the
+        # lookup above cannot see it and Tier 0 had nowhere to look for the entire Google pool. Here
+        # the lead's own coordinates and name are matched against real elements instead. A match
+        # contributes the tags OSM genuinely holds, keyed by the lead's place_id so the assembly
+        # below reads them exactly as it reads a directly-resolved element's. No match contributes
+        # nothing, and that lead's Tier 0 stays honestly unrun.
+        resolved = resolve_osm_elements_by_location(
+            leads, overpass_url=config.overpass_url, user_agent=config.user_agent,
+        )
+        for place_id, element in resolved.items():
+            tags_by_place.setdefault(place_id, element["tags"])
+        resolved_by_place = {pid: e["osm_id"] for pid, e in resolved.items()}
+
         qids = {t.get("brand:wikidata") for t in tags_by_place.values() if t.get("brand:wikidata")}
         websites_by_qid = resolve_wikidata_websites(qids, user_agent=config.user_agent)
 
-        results = candidates_for(leads, tags_by_place, websites_by_qid)
+        results = candidates_for(leads, tags_by_place, websites_by_qid, resolved_by_place)
 
         tier0_found = sum(len(r.candidates) for r in results)
+        tier0_ran = sum(1 for r in results if r.tiers_run)
         print(
             f"  tier 0: {tier0_found} candidate(s) across {len(results)} lead(s) "
-            f"({len(qids)} brand(s) resolved).",
+            f"({len(qids)} brand(s) resolved); element available for {tier0_ran} lead(s), "
+            f"{len(resolved)} matched by location.",
             file=sys.stderr,
         )
 

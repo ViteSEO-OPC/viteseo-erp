@@ -23,6 +23,7 @@ enum NerbyProvider: string
 {
     case OPENSTREETMAP = 'openstreetmap';
     case OPENAI = 'openai';
+    case GOOGLE_PLACES = 'google_places';
 
     // Future, pending evaluation — see the class docblock. Adding it here is the ONLY code change
     // the configuration layer needs; the credential column, options bag and resolver already fit it.
@@ -62,6 +63,7 @@ enum NerbyProvider: string
     {
         return match ($this) {
             self::OPENAI => ['model'],
+            self::GOOGLE_PLACES => [],
             self::OPENSTREETMAP => [],
         };
     }
@@ -71,6 +73,7 @@ enum NerbyProvider: string
         return match ($this) {
             self::OPENSTREETMAP => 'Python / OpenStreetMap',
             self::OPENAI => 'OpenAI (AI-Powered)',
+            self::GOOGLE_PLACES => 'Google Places (API New)',
         };
     }
 }

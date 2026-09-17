@@ -5,6 +5,8 @@ namespace App\Modules\Crm\Services;
 use App\Models\User;
 use App\Modules\Crm\Models\Lead;
 use App\Modules\Crm\Requests\StoreLeadRequest;
+use App\Modules\Crm\Services\Discovery\Geo\PhilippinesBoundary;
+use App\Modules\Crm\Services\Website\WebsiteUrlClassifier;
 use App\Modules\Crm\Services\Import\LeadImportInProgressException;
 use App\Modules\Crm\Services\Import\XlsConverter;
 use App\Support\CurrentOrg;
@@ -441,7 +443,19 @@ class LeadImportService
     private const DISCOVERED_FIELDS = [
         'business_name', 'contact_name', 'email', 'phone', 'industry', 'website_status',
         'region', 'province', 'city', 'latitude', 'longitude', 'place_id', 'source', 'website',
+        // Where a discovered SOCIAL url is filed. The provider does not send these; the normalizer
+        // below routes them here after classifying the single URL the provider does send, so a
+        // Facebook page is kept as a Facebook page instead of being recorded as a website.
+        'facebook', 'instagram',
     ];
+
+    /**
+     * The storage ceiling for `crm_leads.website`, mirroring both the column and the ingest
+     * validator's own `max:2048`. Kept as a named constant because it is a DATA CONTRACT shared by
+     * three places (column, request rule, and the normalizer's defensive drop below) — when they
+     * disagree, a provider URL passes validation and then dies at the INSERT.
+     */
+    private const WEBSITE_MAX_LENGTH = 2048;
 
     /**
      * Programmatic enrichment ingest — lands a batch of normalized, discovered businesses as leads.
@@ -466,6 +480,28 @@ class LeadImportService
 
         /** @var list<array<string, mixed>> $rows */
         $rows = array_map(fn (array $b): array => $this->normalizeDiscovered($b), $businesses);
+
+        // THE NATIONAL BOUNDARY, ENFORCED AT THE ONLY DOOR. Every discovered business enters the CRM
+        // through this method, whichever provider found it and whichever process sent it, so this is
+        // where "Philippines only" is decided — not in the planner that drew the search box, and not
+        // in the engine that made the call. A bounded request is an instruction to a provider; this
+        // is a fact about the business, checked against the vendored national polygon with no
+        // tolerance. A row outside the country is REJECTED and counted, never stored and never
+        // silently dropped. Rows with no coordinates are untouched by this rule: absence of a
+        // position is not evidence of a foreign one, and pre-existing providers legitimately send
+        // businesses without one.
+        $rejected = 0;
+        $rows = array_values(array_filter($rows, function (array $row) use (&$rejected): bool {
+            if (! isset($row['latitude'], $row['longitude'])) {
+                return true;
+            }
+            if ($this->philippines()->contains((float) $row['latitude'], (float) $row['longitude'])) {
+                return true;
+            }
+            $rejected++;
+
+            return false;
+        }));
 
         $existingByPlaceId = $this->existingPlaceIdLeads($rows);
         $existingEmails = $this->existingDiscoveredEmailSet($rows);
@@ -528,6 +564,10 @@ class LeadImportService
                 'valid' => count($valid),
                 'duplicates' => $duplicates,
                 'updated' => count($websiteBackfills),
+                // Businesses refused by the national boundary. Surfaced so a run can report honestly
+                // that a provider returned results the CRM would not accept, rather than showing an
+                // unexplained shortfall between "found" and "added".
+                'rejected' => $rejected,
             ],
             'importedCount' => $importedCount,
         ];
@@ -548,6 +588,19 @@ class LeadImportService
      * @param  array<string, mixed>  $business
      * @return array<string, mixed>
      */
+    /**
+     * The national boundary, resolved lazily.
+     *
+     * Deliberately NOT a constructor dependency: this service is also constructed directly in places
+     * that have nothing to do with discovery (the spreadsheet import path), and the boundary parses a
+     * 160KB polygon on first use. Resolving it here means the CSV importer never pays for it, while
+     * the discovery ingest gets the container's shared instance.
+     */
+    private function philippines(): PhilippinesBoundary
+    {
+        return app(PhilippinesBoundary::class);
+    }
+
     private function normalizeDiscovered(array $business): array
     {
         $row = [];
@@ -567,6 +620,51 @@ class LeadImportService
 
         if (! isset($row['contact_name']) && isset($row['business_name'])) {
             $row['contact_name'] = $row['business_name'];
+        }
+
+        // THE BUSINESS SURVIVES ITS OWN BAD FIELD. A provider URL longer than the column can hold
+        // used to reach the INSERT and raise SQLSTATE[22001], which the endpoint returned as a 500
+        // and the scraper treated as a dead target — so one oversized URL discarded every other
+        // valid business discovered alongside it. The URL is DROPPED rather than cut: a truncated
+        // link is a broken link, and inventing a shortened one would be fabricating provider data.
+        // The lead itself is kept, and Website Intelligence will search for its site later exactly
+        // as it does for any discovered business that arrived without one.
+        if (isset($row['website']) && mb_strlen((string) $row['website']) > self::WEBSITE_MAX_LENGTH) {
+            unset($row['website']);
+        }
+
+        // A URL IS NOT AUTOMATICALLY A WEBSITE. Google Places returns one `websiteUri` per place and
+        // it is whatever the owner typed: measured on this pool, a third of them were Facebook or
+        // Instagram profiles. Storing those in `website` makes the board show a social profile under
+        // WEBSITE, and — far worse — offers the audit a page that will pass identity verification on
+        // its title and phone, because the page really is about the business. The lead then reads as
+        // "has a website" when its only web presence is somebody else's platform, which is the exact
+        // inverse of the prospect signal it was discovered for.
+        //
+        // Classified by HOST, which needs no fetch and so can happen here at the door. Social URLs
+        // are MOVED, never dropped — the Lead has had `facebook` and `instagram` columns all along.
+        // Directory listings and link-in-bio hubs have no column and are simply not recorded as the
+        // website; the business, its place_id and its coordinates are untouched, and Website
+        // Intelligence will look for a real site later exactly as it does for any lead without one.
+        if (isset($row['website'])) {
+            $classifier = app(WebsiteUrlClassifier::class);
+            $url = (string) $row['website'];
+
+            if (! $classifier->isOwnWebsiteCandidate($url)) {
+                $column = $classifier->socialColumn($url);
+                // Never overwrite a social handle the record already carries: a spreadsheet import or
+                // a BD may have filled it in, and their value is the better-attested one.
+                //
+                // `socialColumn()` returns null when there is nowhere to file the URL — a TikTok
+                // link, or a Facebook link-shim longer than the 255-char column. The URL is then
+                // dropped rather than left in `website`, which is exactly what this path already
+                // does for an over-long website URL: an unusable link is not worth recording as the
+                // wrong kind of fact, and the business itself is kept in full either way.
+                if ($column !== null && ! isset($row[$column])) {
+                    $row[$column] = $url;
+                }
+                unset($row['website']);
+            }
         }
 
         // Not a passthrough — a refusal. See the docblock.

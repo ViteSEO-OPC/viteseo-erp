@@ -111,6 +111,40 @@ class WebsiteEvidenceChainTest extends TestCase
             ->assertJsonPath('data.0.business', 'Vigan Dental Care');
     }
 
+    public function test_the_queue_carries_the_coordinates_tier_0_needs_to_find_an_osm_element(): void
+    {
+        // WHY THE QUEUE SENDS A POSITION. Tier 0 reads an OSM element and finds it by id. A Google
+        // lead's `places/ChIJ…` is not an OSM id and cannot be converted into one, so for that entire
+        // pool Tier 0 had nowhere to look, `tiers_run` was honestly empty forever, and the lead could
+        // never reach a genuine exhaustion however absent its website really was. Coordinates are the
+        // other way to reach the same element — already captured at ingest, sent here so the tier has
+        // somewhere to look.
+        Sanctum::actingAs($this->user('crm_admin'));
+        $lead = $this->discoveredLead();
+        $lead->update([
+            'place_id' => 'places/ChIJ_anF5hvJlzMR9ku',
+            'latitude' => 14.5995,
+            'longitude' => 120.9842,
+        ]);
+
+        $this->getJson('/api/v1/crm/website-evidence/queue')->assertOk()
+            ->assertJsonPath('data.0.placeId', 'places/ChIJ_anF5hvJlzMR9ku')
+            ->assertJsonPath('data.0.latitude', 14.5995)
+            ->assertJsonPath('data.0.longitude', 120.9842);
+    }
+
+    public function test_a_lead_without_coordinates_is_still_queued_with_nulls(): void
+    {
+        // Absence of a position is not a reason to withhold the lead: the probe tier does not need
+        // one, and the resolver simply cannot match it. It must not become a null-pointer either.
+        Sanctum::actingAs($this->user('crm_admin'));
+        $this->discoveredLead()->update(['latitude' => null, 'longitude' => null]);
+
+        $this->getJson('/api/v1/crm/website-evidence/queue')->assertOk()
+            ->assertJsonPath('data.0.latitude', null)
+            ->assertJsonPath('data.0.longitude', null);
+    }
+
     public function test_a_lead_that_already_has_a_url_is_not_queued(): void
     {
         // It has a URL, so the ORDINARY audit owns it. Searching for a website it already has would

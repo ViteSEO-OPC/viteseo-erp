@@ -21,6 +21,7 @@ use App\Modules\Crm\Controllers\EmailTemplateController;
 use App\Modules\Crm\Controllers\EmailTemplateManagementController;
 use App\Modules\Crm\Controllers\EmailTemplateOptionController;
 use App\Modules\Crm\Controllers\DiscoveryConfigController;
+use App\Modules\Crm\Controllers\DiscoveryRunController;
 use App\Modules\Crm\Controllers\GmailOAuthController;
 use App\Modules\Crm\Controllers\NerbyProviderSettingController;
 use App\Modules\Crm\Controllers\LeadAttachmentController;
@@ -185,7 +186,13 @@ Route::middleware(['auth:sanctum', 'set-current-org', 'subscription-active', 'fe
         Route::get('/leads/{lead}/website-evidence', [WebsiteEvidenceController::class, 'show'])->can('viewWebsiteEvidence', 'lead');
         Route::post('/leads/{lead}/website-absence', [WebsiteEvidenceController::class, 'confirmAbsence'])->can('confirmWebsiteAbsence', 'lead');
 
-        Route::get('/discovery/config', [DiscoveryConfigController::class, 'config'])->can('import', Lead::class);
+        // Throttled like its siblings, though it spends nothing itself: the Nearby board now reads it
+        // on every load to choose its map, so it went from an occasional scraper call to a
+        // per-page-view request. A cheap read is still a read worth bounding. Deliberately looser than
+        // the paid endpoints' 30/min — this one is expected to be called by every BD viewing the board.
+        Route::get('/discovery/config', [DiscoveryConfigController::class, 'config'])
+            ->can('import', Lead::class)
+            ->middleware('throttle:60,1');
         Route::post('/discovery/proposals', [DiscoveryConfigController::class, 'proposals'])
             ->can('import', Lead::class)
             ->middleware(['role:super_admin|crm_admin', 'throttle:30,1']);
@@ -196,6 +203,50 @@ Route::middleware(['auth:sanctum', 'set-current-org', 'subscription-active', 'fe
         Route::post('/discovery/tag-expansions', [DiscoveryConfigController::class, 'tagExpansions'])
             ->can('import', Lead::class)
             ->middleware(['role:super_admin|crm_admin', 'throttle:30,1']);
+        // Google Places (API New) Text Search, made server-side with the encrypted key. Same guard and
+        // throttle as `proposals`, because it reaches a paid provider.
+        Route::post('/discovery/places', [DiscoveryConfigController::class, 'places'])
+            ->can('import', Lead::class)
+            ->middleware(['role:super_admin|crm_admin', 'throttle:30,1']);
+        // HOW to search, for whichever provider is executing — selectors, query phrases, place types
+        // and sub-areas. Same guard and throttle as the other paid capabilities; unlike them it is
+        // NOT gated on the effective provider, because strategy is useful to all of them.
+        Route::post('/discovery/strategy', [DiscoveryConfigController::class, 'strategy'])
+            ->can('import', Lead::class)
+            ->middleware(['role:super_admin|crm_admin', 'throttle:30,1']);
+
+        // ── On-demand discovery runs ────────────────────────────────────────────────────────────
+        // ADDITIVE. The prospect pool (`GET /nearby-clients` below) and the curated rotation
+        // (`discover-all` over discovery-targets.json) are untouched and remain the default
+        // behaviour; these four routes are the only way to start a FRESH discovery run, and nothing
+        // starts one implicitly. Changing a filter on the board reaches none of them.
+        //
+        // THE GATE IS COPIED, NOT INVENTED. Identical to the paid capabilities directly above —
+        // `can('import', Lead::class)` plus `role:super_admin|crm_admin` — for the identical
+        // documented reason: `crm.leads.import` is deliberately held by Business Development
+        // managers for their own spreadsheet imports, so the permission alone would let any BD run
+        // up a provider bill. No existing role, policy, permission or middleware is added to,
+        // weakened or modified by this feature.
+        //
+        // Starting a run is throttled harder than its siblings and in its own bucket: one click can
+        // schedule many provider searches, so the expensive verb is bounded more tightly than the
+        // cheap reads that follow it.
+        Route::post('/discovery/runs', [DiscoveryRunController::class, 'store'])
+            ->can('import', Lead::class)
+            ->middleware(['role:super_admin|crm_admin', 'throttle:10,1,crm-discovery-run:']);
+        // Polling must stay responsive for the whole life of a run, so the reads keep the looser
+        // 60/min bound rather than the start verb's 10/min.
+        Route::get('/discovery/runs', [DiscoveryRunController::class, 'index'])
+            ->can('import', Lead::class)
+            ->middleware(['role:super_admin|crm_admin', 'throttle:60,1']);
+        Route::get('/discovery/runs/{discoveryRun}', [DiscoveryRunController::class, 'show'])
+            ->can('import', Lead::class)
+            ->middleware(['role:super_admin|crm_admin', 'throttle:60,1']);
+        // Stops the NEXT search. It cannot refund a provider call already made, and everything
+        // already discovered stays in the CRM — the controller says so in its response.
+        Route::post('/discovery/runs/{discoveryRun}/cancel', [DiscoveryRunController::class, 'cancel'])
+            ->can('import', Lead::class)
+            ->middleware(['role:super_admin|crm_admin', 'throttle:60,1']);
         Route::get('/leads/{lead}/activities', [LeadController::class, 'activities'])->can('view', 'lead');
         // One lead as a PDF profile. Authorized by `view` on the lead — the same ownership boundary as
         // reading it — so a BD can export their own leads and nobody can export a lead they cannot see.

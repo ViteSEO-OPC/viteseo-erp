@@ -68,13 +68,15 @@ class OpenAiProposalGenerator implements ProposalGenerator
         }
 
         $model = (string) ($row->option('model') ?: config('openai.model', 'gpt-4o-mini'));
+        // OpenAI or OpenRouter, chosen by the stored key; OpenRouter gets a vendor-prefixed model id.
+        $endpoint = AiChatEndpoint::for((string) $row->api_key, $model);
         $ask = max(1, min($count, self::MAX_PROPOSALS));
 
         try {
             $response = Http::withToken((string) $row->api_key)
                 ->timeout((float) config('openai.timeout', 30))
-                ->post(rtrim((string) config('openai.base_url', 'https://api.openai.com/v1'), '/').'/chat/completions', [
-                    'model' => $model,
+                ->post($endpoint->chatCompletionsUrl(), [
+                    'model' => $endpoint->model,
                     // Deterministic sampling: the same target must not produce different candidate
                     // sets on two runs, or a provider comparison measures noise.
                     'temperature' => 0,
@@ -137,7 +139,7 @@ class OpenAiProposalGenerator implements ProposalGenerator
             // what reaches the resolver.
             'proposals' => array_slice($names, 0, $ask),
             'usage' => [
-                'model' => $model,
+                'model' => $endpoint->model,
                 'prompt_tokens' => (int) $response->json('usage.prompt_tokens', 0),
                 'completion_tokens' => (int) $response->json('usage.completion_tokens', 0),
             ],

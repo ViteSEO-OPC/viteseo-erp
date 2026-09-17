@@ -1,0 +1,40 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Docker build context — DENY EVERYTHING, then allow the two files the image
+# actually needs.
+#
+# WHY A WHITELIST. The build context moved to the repository root so the image
+# can read scraper/requirements.txt as the ONE source of truth for the discovery
+# engine's dependencies. The root is ~19 GB (frontend/.next alone is 17 GB) and
+# contains both .env files, so a deny-list here would be one forgotten pattern
+# away from shipping a 19 GB context or baking a credential into an image.
+#
+# Starting from `*` inverts the risk: anything new added to the repo is excluded
+# by default, and including it has to be a deliberate edit to this file.
+#
+# Verify after changing this file — never assume:
+#   docker compose build worker        # read "transferring context: …"
+#   docker run --rm viteseo-php:8.4 find / -maxdepth 3 -name ".env*"
+# ─────────────────────────────────────────────────────────────────────────────
+
+# 1. Exclude everything.
+*
+
+# 2. Allow only what the Dockerfile reads.
+#    - the Dockerfile itself (compose reads it from the context)
+#    - the scraper's dependency manifest, baked into /opt/scraper-venv
+!docker/php/Dockerfile
+!scraper/requirements.txt
+
+# Nothing else is needed: the application source is bind-mounted at runtime
+# (./backend -> /app, ./scraper -> /scraper:ro), never copied into the image.
+#
+# Consequently these are all excluded by rule 1 above, and are listed here only
+# so the intent is searchable — do NOT re-include any of them:
+#   .git/                  history, remotes, credentials in URLs
+#   **/.env, **/.env.*     backend/.env, frontend/.env.local, scraper/.env
+#   frontend/.next/        17 GB of build output
+#   **/node_modules/       881 MB
+#   backend/vendor/        351 MB
+#   scraper/.venv/         124 MB, built for the HOST interpreter
+#   backend/storage/       logs, uploads, local lead attachments
+#   docs/, *.md            not needed to build a runtime image

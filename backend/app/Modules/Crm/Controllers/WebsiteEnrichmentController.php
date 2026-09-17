@@ -36,6 +36,13 @@ class WebsiteEnrichmentController extends Controller
             ->with('websiteEnrichment')
             ->orderByRaw('e.last_checked_at IS NOT NULL') // never-checked (NULL) first
             ->orderBy('e.last_checked_at')
+            // A DETERMINISTIC TIEBREAK, not a change of order. Every never-checked lead has the same
+            // NULL for both keys above, so which of them a tick receives was left to whatever order
+            // the storage engine happened to scan in — two ticks could return overlapping slices
+            // while other leads waited, and the same verification run twice could disagree. The
+            // ordering contract (never-checked first, then oldest-checked) is unchanged; this only
+            // settles the ties inside it.
+            ->orderBy('crm_leads.id')
             ->limit($limit)
             ->get(['crm_leads.*']);
 

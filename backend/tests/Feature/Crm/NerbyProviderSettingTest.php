@@ -565,7 +565,8 @@ class NerbyProviderSettingTest extends TestCase
     {
         $this->actingAsAdmin();
 
-        $this->putJson(self::BASE.'/provider', ['provider' => 'google_places'])
+        // `google_places` is a real provider now, so a genuinely unknown value keeps this assertion honest.
+        $this->putJson(self::BASE.'/provider', ['provider' => 'bing_places'])
             ->assertStatus(422)->assertJsonValidationErrors('provider');
     }
 

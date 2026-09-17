@@ -315,10 +315,17 @@ class NerbyProviderSettingService
      */
     private function probe(NerbyProvider $provider, string $apiKey): string
     {
+        if ($provider === NerbyProvider::GOOGLE_PLACES) {
+            // Its own request shape (a key header, not a bearer token) — and an ids-only search.
+            return app(GooglePlacesTextSearch::class)->probe($apiKey);
+        }
+
         $url = match ($provider) {
-            NerbyProvider::OPENAI => rtrim((string) config('openai.base_url', 'https://api.openai.com/v1'), '/').'/models',
-            // Unreachable today: the baseline never requires credentials and is filtered out above.
-            NerbyProvider::OPENSTREETMAP => null,
+            // OpenAI or OpenRouter, chosen by the stored key — see AiChatEndpoint.
+            NerbyProvider::OPENAI => AiChatEndpoint::for($apiKey, '')->probeUrl(),
+            // Unreachable today: the baseline never requires credentials and is filtered out above,
+            // and Google Places returned just above.
+            NerbyProvider::OPENSTREETMAP, NerbyProvider::GOOGLE_PLACES => null,
         };
 
         if ($url === null) {

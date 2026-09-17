@@ -169,7 +169,17 @@ class WebsiteEvidenceService
     public function recordVerification(LeadWebsiteCandidate $candidate, array $findings): LeadWebsiteCandidate
     {
         $lead = $candidate->lead;
-        $verdict = $this->verifier->verify($lead, $findings);
+
+        // A PROBE CANDIDATE'S HOST WAS WRITTEN FROM THE BUSINESS NAME, so "the domain matches the
+        // name" is true by construction and is not evidence about this candidate. Told to the
+        // verifier rather than recomputed here: identity matching stays in one place, and this call
+        // site simply reports where the URL came from. Every other tier ASSERTED its URL — an OSM
+        // tag, a Wikidata entity, a person — so their domain evidence is independent and still counts.
+        $verdict = $this->verifier->verify(
+            $lead,
+            $findings,
+            domainDerivedFromName: $candidate->source === LeadWebsiteCandidate::SOURCE_PROBE,
+        );
 
         $reachable = (bool) ($findings['website_reachable'] ?? false);
 
@@ -475,6 +485,43 @@ class WebsiteEvidenceService
     private function recordDeterminedAbsence(Lead $lead, LeadWebsiteSearch $search): void
     {
         if ($lead->website_status !== 'website-unknown') {
+            return;
+        }
+
+        // A REFUSED CANDIDATE IS NOT AN ABSENT ONE. Exhaustion says every tier ran and nothing was
+        // VERIFIED; it does not say nothing was FOUND. Those come apart exactly here, and the
+        // difference is the whole conclusion:
+        //
+        //   * `not_reachable` / `invalid_url` — a name resolved but nothing answered, or the string
+        //     was never a URL. Neither is a website, and neither weakens an absence claim.
+        //   * `identity_unverified` / `insufficient_margin` — a LIVE PAGE answered, bearing this
+        //     business's name closely enough for a tier to propose it, and the verifier could not
+        //     confirm it belonged to them. That is "we do not know", not "there is nothing".
+        //
+        // MEASURED, and why this guard exists: of the first 41 automatic determinations on this pool,
+        // 12 held a live name-matching domain refused on identity alone — Matabungkay Beach Hotel was
+        // told it had no website while `matabungkaybeachhotel.com` was answering. Writing `no-website`
+        // there asserts something the evidence contradicts, and it is the same overreach the tier
+        // rule already refuses, wearing a different hat: there, a tier that could not look; here, a
+        // candidate we could not judge.
+        //
+        // The SEARCH still exhausts. This withholds only the machine's own conclusion, so the lead
+        // stays `website-unknown` — the honest state for insufficient evidence — while the trail
+        // remains complete and a human can still confirm absence against it through
+        // {@see confirmAbsent()}, which is exactly the division of labour this class already draws.
+        $inconclusive = LeadWebsiteCandidate::query()
+            ->where('lead_id', $lead->id)
+            ->whereIn('rejection_reason', [
+                LeadWebsiteCandidate::REJECTED_IDENTITY,
+                LeadWebsiteCandidate::REJECTED_MARGIN,
+            ])
+            ->exists();
+
+        if ($inconclusive) {
+            Log::info('Automatic absence withheld: a live candidate was refused on identity, not absence', [
+                'lead_id' => $lead->id,
+            ]);
+
             return;
         }
 

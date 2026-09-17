@@ -35,6 +35,49 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         pcntl sockets \
  && rm -rf /var/lib/apt/lists/*
 
+# ─────────────────────────────────────────────────────────────────────────────
+# PYTHON, FOR THE DISCOVERY ENGINE ONLY.
+#
+# The scraper in ./scraper IS the discovery engine — Google Places, OpenStreetMap,
+# the AI strategy client, partitioning and deduplication all live there. The
+# queue worker invokes it as a subprocess rather than any of that logic being
+# reimplemented in PHP, which would be a second engine to keep in step.
+#
+# `python3-venv` is separate from `python3` on Debian, and `pip` is needed to
+# populate the venv. Nothing here touches the PHP extensions above.
+# ─────────────────────────────────────────────────────────────────────────────
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        python3 python3-venv python3-pip \
+ && rm -rf /var/lib/apt/lists/*
+
+# ─────────────────────────────────────────────────────────────────────────────
+# THE DISCOVERY ENGINE'S DEPENDENCIES, BAKED IN.
+#
+# These used to be installed at runtime into a named volume, which needed three
+# undocumented manual steps on any new machine: chown the volume (Docker creates
+# mountpoints as root, the containers run as uid 1000), create the venv, then pip
+# install. None of that was expressed in the repository, so a fresh
+# `git clone && docker compose up -d` produced a worker that started, polled, and
+# failed the moment it invoked Python.
+#
+# Baking the venv removes all three. It is built as root and only ever READ at
+# runtime — verified that uid 1000 can execute a root-owned venv — so ownership
+# stops being a problem and the volume disappears entirely.
+#
+# ONE SOURCE OF TRUTH: scraper/requirements.txt is copied from the repository
+# root rather than duplicated here, which is why the build context is the root
+# (see .dockerignore — it allows exactly this file and the Dockerfile).
+# Changing that manifest now correctly requires an image rebuild.
+# ─────────────────────────────────────────────────────────────────────────────
+COPY scraper/requirements.txt /tmp/scraper-requirements.txt
+RUN python3 -m venv /opt/scraper-venv \
+ && /opt/scraper-venv/bin/python -m pip install --no-cache-dir --upgrade pip \
+ && /opt/scraper-venv/bin/python -m pip install --no-cache-dir -r /tmp/scraper-requirements.txt \
+ && rm -f /tmp/scraper-requirements.txt \
+ # World-readable/executable so the non-root runtime user can run it without
+ # owning it. Nothing writes here at runtime.
+ && chmod -R a+rX /opt/scraper-venv
+
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
 # The application itself is NOT baked in — docker-compose.yml bind-mounts

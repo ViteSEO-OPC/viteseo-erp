@@ -90,12 +90,14 @@ class OpenAiTagExpander implements TagExpander
         }
 
         $model = (string) ($row->option('model') ?: config('openai.model', 'gpt-4o-mini'));
+        // OpenAI or OpenRouter, chosen by the stored key; OpenRouter gets a vendor-prefixed model id.
+        $endpoint = AiChatEndpoint::for((string) $row->api_key, $model);
 
         try {
             $response = Http::withToken((string) $row->api_key)
                 ->timeout((float) config('openai.timeout', 30))
-                ->post(rtrim((string) config('openai.base_url', 'https://api.openai.com/v1'), '/').'/chat/completions', [
-                    'model' => $model,
+                ->post($endpoint->chatCompletionsUrl(), [
+                    'model' => $endpoint->model,
                     // Deterministic: the same category must not yield different tag sets on two runs,
                     // or a cached answer would differ from the one that produced the measurement.
                     'temperature' => 0,
@@ -154,7 +156,7 @@ class OpenAiTagExpander implements TagExpander
             'status' => self::STATUS_OK,
             'selectors' => $selectors,
             'usage' => [
-                'model' => $model,
+                'model' => $endpoint->model,
                 'prompt_tokens' => (int) $response->json('usage.prompt_tokens', 0),
                 'completion_tokens' => (int) $response->json('usage.completion_tokens', 0),
             ],

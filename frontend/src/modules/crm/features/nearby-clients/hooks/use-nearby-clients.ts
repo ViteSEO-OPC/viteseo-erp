@@ -5,6 +5,11 @@ import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "@/modules/crm/lib/axios";
 import { queryKeys } from "@/modules/crm/lib/query-keys";
 import { centroid, haversineKm, type LatLng } from "@/modules/crm/features/nearby-clients/lib/distance";
+import {
+  geolocationPreflight,
+  geolocationStatusFor,
+  type GeolocationStatus,
+} from "@/modules/crm/features/nearby-clients/lib/geolocation";
 import type { NearbyClient } from "@/modules/crm/features/nearby-clients/types/nearby-clients-types";
 
 /** Where the search radius is measured from. NEVER derived from the whole dataset's centroid. */
@@ -39,9 +44,19 @@ export const RADIUS_OPTIONS = [5, 10, 25, 50] as const;
 
 // `foundBy: ""` is what makes the default board identical to before this filter existed: an empty
 // value skips the predicate entirely rather than selecting a lane.
-const INITIAL: NearbyFilters = { search: "", radiusKm: 10, niche: "", status: "", priority: "", foundBy: "" };
+const INITIAL: NearbyFilters = {
+  search: "",
+  radiusKm: 10,
+  niche: "",
+  status: "",
+  priority: "",
+  foundBy: "",
+};
 
-export type GeolocationStatus = "idle" | "locating" | "granted" | "denied" | "unavailable";
+// The status vocabulary and the mapping that produces it live in `lib/geolocation`, so the decision
+// is a pure function the gates harness can drive instead of logic trapped inside a React callback.
+// Re-exported here because this hook has always been where consumers import it from.
+export type { GeolocationStatus } from "@/modules/crm/features/nearby-clients/lib/geolocation";
 
 /**
  * Nearby clients (discovered businesses) + filter state. The returned `clients` drive BOTH the list
@@ -65,8 +80,28 @@ export function useNearbyClients() {
   });
 
   // Humanize the status enum once so options / display / filtering all use the same readable label.
+  /**
+   * The pool this board shows: every discovered business EXCEPT the ones the national boundary
+   * places outside the Philippines.
+   *
+   * NEARBY CLIENTS IS A PHILIPPINE PROSPECTING SURFACE. Twenty leads in San Jose, California
+   * predate the discovery fence — real records, created when an unconstrained geocoder resolved
+   * "San Jose" to the wrong continent — and they were drawing their own cluster in North America on
+   * a map of the Philippines. They are NOT deleted and NOT modified: the API still serves them and
+   * the rows are untouched in the database; they simply are not part of this view.
+   *
+   * `inPhilippines === false` ONLY. `null` means the lead has no coordinates, which is not evidence
+   * of a foreign one — the ingest applies exactly that rule — and a third of the pool has no
+   * position, so treating null as foreign would empty the board.
+   *
+   * Filtered HERE, in the display layer, rather than in the pool query: `NearbyClientController` and
+   * its scope are frozen, and this needs no change to either.
+   */
   const all = useMemo(
-    () => (query.data ?? []).map((c) => ({ ...c, status: formatStatus(c.status) })),
+    () =>
+      (query.data ?? [])
+        .filter((c) => c.inPhilippines !== false)
+        .map((c) => ({ ...c, status: formatStatus(c.status) })),
     [query.data],
   );
 
@@ -106,6 +141,25 @@ export function useNearbyClients() {
         q ? c.business.toLowerCase().includes(q) || c.contact.toLowerCase().includes(q) : true,
       );
   }, [all, filters.search, filters.niche, filters.status, filters.priority, filters.foundBy]);
+
+  // The same candidate set with the PRIORITY predicate removed, and nothing else changed.
+  //
+  // Its only job is to answer one question honestly: would dropping the priority filter have shown
+  // anything? Without it the UI can see that the list is empty but not why, and an unsatisfiable
+  // priority reads exactly like a discovery that found nothing.
+  const matchesIgnoringPriority = useMemo(() => {
+    if (!filters.priority) {
+      return 0;
+    }
+    const q = filters.search.trim().toLowerCase();
+    return all
+      .filter((c) => (filters.niche ? c.niche === filters.niche : true))
+      .filter((c) => (filters.status ? c.status === filters.status : true))
+      .filter((c) => (filters.foundBy ? formatFoundBy(c.foundBy) === filters.foundBy : true))
+      .filter((c) =>
+        q ? c.business.toLowerCase().includes(q) || c.contact.toLowerCase().includes(q) : true,
+      ).length;
+  }, [all, filters.search, filters.niche, filters.status, filters.foundBy, filters.priority]);
 
   // Final result set (list + map).
   //  - With an origin: businesses within `radiusKm` of that origin, nearest first.
@@ -150,22 +204,34 @@ export function useNearbyClients() {
 
   /** (2) Browser geolocation: measure distance from the user's device position, if permitted. */
   const useMyLocation = useCallback(() => {
-    if (typeof navigator === "undefined" || !navigator.geolocation) {
-      setGeoStatus("unavailable");
+    // CHECKED BEFORE ASKING, because asking would answer the wrong question. On an insecure origin
+    // the browser refuses outright and reports PERMISSION_DENIED — indistinguishable from a user who
+    // clicked Block, and the reason this UI kept blaming a permission nobody had touched.
+    const blocked = geolocationPreflight(
+      typeof navigator === "undefined" ? undefined : navigator,
+      typeof window === "undefined" ? undefined : window,
+    );
+    if (blocked) {
+      setGeoStatus(blocked);
       return;
     }
+
     setGeoStatus("locating");
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         setGeoStatus("granted");
         setOrigin({
+          // The browser's REAL coordinates. Nothing here substitutes, rounds or defaults them: an
+          // origin that is not where the user actually is would silently mis-filter the radius.
           lat: pos.coords.latitude,
           lng: pos.coords.longitude,
           label: "My location",
           kind: "geolocation",
         });
       },
-      () => setGeoStatus("denied"),
+      // The error's own code, mapped one-to-one. READING IT is the whole fix — this callback used
+      // to discard its argument and report every failure as a refused permission.
+      (error: GeolocationPositionError) => setGeoStatus(geolocationStatusFor(error)),
       { enableHighAccuracy: false, timeout: 10_000, maximumAge: 60_000 },
     );
   }, []);
@@ -184,6 +250,8 @@ export function useNearbyClients() {
     clearOrigin,
     geoStatus,
     totalCount: all.length,
+    /** How many rows would show if the priority filter alone were dropped. See `matchesIgnoringPriority`. */
+    matchesIgnoringPriority,
     isLoading: query.isLoading,
     isError: query.isError,
   };
@@ -211,11 +279,21 @@ function formatPriority(priority: string): string {
 
 // Discovery lanes, baseline first. Like PRIORITY_ORDER this is a CLOSED vocabulary the server
 // decides, not a set derived from whatever the pool currently contains.
-const FOUND_BY_ORDER = ["OpenStreetMap", "AI-assisted"] as const;
+const FOUND_BY_ORDER = ["OpenStreetMap", "AI-assisted", "Google Places"] as const;
+
+// Server lane value → readable label. EXPLICIT, with no catch-all: a lane this build does not know
+// must stay visibly distinct rather than being folded into OpenStreetMap, which would credit the
+// deterministic sweep with a lead it never found. "Unknown" is deliberately absent from
+// FOUND_BY_ORDER, so such a row is never selectable by lane but still appears under "All sources".
+const FOUND_BY_LABELS: Record<string, string> = {
+  openstreetmap: "OpenStreetMap",
+  "ai-assisted": "AI-assisted",
+  "google-places": "Google Places",
+};
 
 /** Readable label for a discovery lane ("openstreetmap" → "OpenStreetMap"). */
 function formatFoundBy(foundBy: string): string {
-  return foundBy === "ai-assisted" ? "AI-assisted" : "OpenStreetMap";
+  return FOUND_BY_LABELS[foundBy] ?? "Unknown";
 }
 
 function distinct(values: (string | null)[]): string[] {

@@ -169,28 +169,76 @@ export function NerbyIntegrationCard() {
   );
 }
 
+/**
+ * The one provider that is an INTELLIGENCE layer rather than a source of businesses.
+ *
+ * Everything else in the list supplies facts — records, identifiers, coordinates — and belongs in
+ * the factual group automatically, including any provider added later. Only this one is special,
+ * so only this one is named.
+ */
+const INTELLIGENCE_PROVIDER = "openai";
+
+function SectionHeading({ title, detail }: { title: string; detail: string }) {
+  return (
+    <div className="mb-2">
+      <h4 className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+        {title}
+      </h4>
+      <p className="mt-1 text-xs text-muted-foreground">{detail}</p>
+    </div>
+  );
+}
+
+/**
+ * TWO SECTIONS, BECAUSE THERE ARE TWO DECISIONS.
+ *
+ * Presenting all three options as one radio list made them read as rivals, so choosing AI looked
+ * like the way to "turn AI on" — when it actually selects the AI-assisted OpenStreetMap lane, which
+ * is why enabling AI appeared to give an OSM map instead of Google's. Splitting the list says what
+ * the backend has always done: one choice decides where businesses come FROM (and therefore which
+ * map draws them), and a separate switch decides whether AI helps plan the search.
+ *
+ * The radio itself is unchanged — selecting AI still selects the AI-assisted OSM lane, because that
+ * is currently the only way to reach it. Nothing here alters provider resolution.
+ */
 function Body({ integration }: { integration: NerbyIntegration }) {
+  const factual = integration.providers.filter((p) => p.provider !== INTELLIGENCE_PROVIDER);
+  const intelligence = integration.providers.filter((p) => p.provider === INTELLIGENCE_PROVIDER);
+
   return (
     <>
       <EffectiveProviderSummary integration={integration} />
 
-      <div className="flex flex-col gap-3">
-        {integration.providers.map((provider) => (
-          <ProviderOption
-            key={provider.provider}
-            provider={provider}
-            integration={integration}
-          />
-        ))}
-
-        {/* ROADMAP ONLY — deliberately hard-coded rather than driven by the API, because Google
-            Places is not a provider the backend knows about. Rendering it from a real provider list
-            would mean inventing an option that cannot be selected. Disabled, no controls. */}
-        <ComingSoonOption
-          label="Google Places"
-          description="Structured places data with stable Place IDs, coordinates and website fields. Pending an evaluation of Philippine coverage, pricing, quotas and data-persistence licensing."
+      <section>
+        <SectionHeading
+          title="Factual discovery provider"
+          detail="Where discovered businesses actually come from. This choice also decides which map the Nearby board draws — OpenStreetMap results on the OpenStreetMap map, Google Places results on Google's."
         />
-      </div>
+        <div className="flex flex-col gap-3">
+          {factual.map((provider) => (
+            <ProviderOption key={provider.provider} provider={provider} integration={integration} />
+          ))}
+        </div>
+      </section>
+
+      {intelligence.length > 0 ? (
+        <section>
+          <SectionHeading
+            title="AI intelligence"
+            detail="Optional. AI plans HOW to search — query wording, place types, sub-areas — and never supplies a business, identifier or coordinate. Turning it ON assists whichever factual provider is selected, including Google Places. Selecting it below instead makes AI-assisted OpenStreetMap the factual provider."
+          />
+          <div className="flex flex-col gap-3">
+            {intelligence.map((provider) => (
+              <ProviderOption
+                key={provider.provider}
+                provider={provider}
+                integration={integration}
+                isIntelligence
+              />
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       <CapabilityTiers />
     </>
@@ -280,9 +328,12 @@ function fallbackMessage(integration: NerbyIntegration): string {
 function ProviderOption({
   provider,
   integration,
+  isIntelligence = false,
 }: {
   provider: NerbyProviderConfig;
   integration: NerbyIntegration;
+  /** Renders this row as the optional intelligence layer rather than a source of businesses. */
+  isIntelligence?: boolean;
 }) {
   const select = useSelectNerbyProvider();
   const isSelected = provider.provider === integration.activeProvider;
@@ -315,7 +366,13 @@ function ProviderOption({
           />
           <span>
             <span className="flex flex-wrap items-center gap-2">
-              <span className="text-sm font-semibold text-foreground">{provider.label}</span>
+              {/* Named for what SELECTING it does. The server's label ("OpenAI (AI-Powered)") reads
+                  as a peer provider, which is the confusion this card exists to remove; the factual
+                  lane it actually selects is OpenStreetMap. Presentation only — the server's
+                  vocabulary is untouched. */}
+              <span className="text-sm font-semibold text-foreground">
+                {isIntelligence ? "AI-assisted OpenStreetMap" : provider.label}
+              </span>
               {/* ONE state chip, not a pile of overlapping badges. Which lifecycle stage this
                   provider is at, ending at Active only when it is genuinely running. */}
               <Badge
@@ -329,7 +386,10 @@ function ProviderOption({
                   Baseline
                 </Badge>
               ) : null}
-              {provider.requiresCredentials ? (
+              {/* Only the intelligence layer is AI-powered. This was keyed to `requiresCredentials`,
+                  which is also true of Google Places — so a purely factual provider wore an AI badge,
+                  the exact conflation this grouping removes. */}
+              {isIntelligence ? (
                 <Badge variant="outline" className="gap-1">
                   <Sparkles className="size-3" aria-hidden />
                   AI-Powered
@@ -564,30 +624,6 @@ function TestStatusChip({ provider }: { provider: NerbyProviderConfig }) {
   return <Badge variant="outline">{testStatusLabel(status)}</Badge>;
 }
 
-/** A roadmap entry. No controls, cannot be selected, and not backed by any provider. */
-function ComingSoonOption({ label, description }: { label: string; description: string }) {
-  return (
-    <div className="rounded-lg border border-dashed border-border bg-muted/20 p-4 opacity-70">
-      <div className="flex items-start gap-3">
-        <input
-          type="radio"
-          name="nerby-provider"
-          className="mt-1 size-4"
-          disabled
-          checked={false}
-          aria-label={`${label} — not yet available`}
-        />
-        <div>
-          <span className="flex flex-wrap items-center gap-2">
-            <span className="text-sm font-semibold text-muted-foreground">{label}</span>
-            <Badge variant="outline">Coming soon</Badge>
-          </span>
-          <p className="mt-1 text-xs text-muted-foreground">{description}</p>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 /**
  * What the AI provider can do today, what it needs, and what has yet to be proven — as three

@@ -118,6 +118,15 @@ def build_record(
         "valid": summary.get("valid"),
         "duplicates": summary.get("duplicates"),
         "updated": summary.get("updated"),
+        # Businesses the CRM REFUSED on geography — outside the national boundary it enforces at
+        # ingest. Recorded as its own number rather than left to be inferred from
+        # `total - valid - duplicates`, because that residual also contains rows that failed ordinary
+        # validation, and the two are different findings: one says a provider returned a business in
+        # another country, the other says a row was malformed. A feature whose headline promise is
+        # "nothing outside the Philippines is stored" has to be able to show the count it rejected.
+        # `None` from a CRM that predates the field — absent, never zero, so "no rejections" and "this
+        # CRM cannot say" stay distinguishable.
+        "rejected": summary.get("rejected"),
         "imported": imported,
     }
 

@@ -4,10 +4,14 @@ namespace App\Modules\Crm\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Modules\Crm\Enums\NerbyProvider;
+use App\Modules\Crm\Requests\DiscoveryPlacesRequest;
 use App\Modules\Crm\Requests\DiscoveryProposalRequest;
+use App\Modules\Crm\Requests\DiscoveryStrategyRequest;
 use App\Modules\Crm\Requests\DiscoveryTagExpansionRequest;
+use App\Modules\Crm\Services\Discovery\Contracts\DiscoveryStrategist;
 use App\Modules\Crm\Services\Discovery\Contracts\ProposalGenerator;
 use App\Modules\Crm\Services\Discovery\Contracts\TagExpander;
+use App\Modules\Crm\Services\Discovery\GooglePlacesTextSearch;
 use App\Modules\Crm\Services\Discovery\NerbyProviderSettingService;
 use Illuminate\Http\JsonResponse;
 use Symfony\Component\HttpFoundation\Response;
@@ -174,6 +178,125 @@ class DiscoveryConfigController extends Controller
             // not mistake a failed model call for a category that genuinely has no other tags.
             return response()->json([
                 'message' => 'The discovery provider could not be reached or refused the request.',
+                'data' => $payload,
+            ], Response::HTTP_BAD_GATEWAY);
+        }
+
+        return response()->json(['data' => $payload]);
+    }
+
+    /**
+     * Google Places (API New) Text Search, made HERE with the encrypted credential. The scraper sends an
+     * area, a category, an optional Places type and the area's bounding box, and gets business records
+     * back in the provider-neutral discovery shape — never the credential.
+     */
+    public function places(DiscoveryPlacesRequest $request, GooglePlacesTextSearch $places): JsonResponse
+    {
+        $effective = $this->settings->resolveQuietly();
+
+        if ($effective->provider !== NerbyProvider::GOOGLE_PLACES) {
+            return response()->json([
+                'message' => 'Google Places is not the effective provider.',
+                'data' => [
+                    'effectiveProvider' => $effective->provider->value,
+                    'reason' => $effective->reason,
+                    'businesses' => [],
+                ],
+            ], Response::HTTP_CONFLICT);
+        }
+
+        $includedType = $request->validated('includedType');
+
+        $result = $places->search(
+            (string) $request->validated('area'),
+            (string) $request->validated('category'),
+            (int) ($request->validated('limit') ?? GooglePlacesTextSearch::PAGE_SIZE),
+            is_string($includedType) ? $includedType : null,
+            $request->boundingBox(),
+            $request->plannedQueries(),
+        );
+
+        $payload = [
+            'effectiveProvider' => $effective->provider->value,
+            'executionStatus' => $result['status'],
+            'errorReason' => $result['error'],
+            'businesses' => $result['places'],
+            'pages' => $result['pages'],
+            // How many planned phrases were actually run. Reported because "AI proposed three
+            // queries" and "three queries were paid for" are different facts, and only the second
+            // one is a cost.
+            'queriesExecuted' => $result['queries_executed'] ?? 1,
+        ];
+
+        if ($result['status'] !== GooglePlacesTextSearch::STATUS_OK) {
+            // 502, like `proposals`: a failed Google call must never read as an area with no businesses.
+            return response()->json([
+                'message' => 'The discovery provider could not be reached or refused the request.',
+                'data' => $payload,
+            ], Response::HTTP_BAD_GATEWAY);
+        }
+
+        return response()->json(['data' => $payload]);
+    }
+
+    /**
+     * HOW to search — the provider-neutral AI strategy capability.
+     *
+     * DELIBERATELY NOT GATED ON THE EFFECTIVE PROVIDER, unlike `proposals` and `places`. Those ask a
+     * provider to DO something, so asking one that is not running would be incoherent. This asks how
+     * a search should be SHAPED, and that answer is useful to whichever provider is executing — which
+     * is the entire point of making the capability provider-neutral. Gating it the other way is what
+     * previously meant an AI-assisted Google run received no assistance at all.
+     *
+     * It is still gated on AI being configured AND enabled, because it spends money per call. 409
+     * when it is not: the request is authorized, the optional capability is simply switched off, and
+     * a caller must treat that as "no advice" rather than as an error.
+     */
+    public function strategy(
+        DiscoveryStrategyRequest $request,
+        DiscoveryStrategist $strategist,
+    ): JsonResponse {
+        $ai = $this->settings->for(NerbyProvider::OPENAI);
+        $empty = ['selectors' => [], 'queries' => [], 'placeTypes' => [], 'subAreas' => []];
+
+        if (! $ai->exists || ! $ai->hasApiKey() || ! $ai->enabled) {
+            return response()->json([
+                'message' => 'AI-assisted discovery strategy is not available.',
+                'data' => [
+                    'available' => false,
+                    'reason' => $ai->exists && $ai->hasApiKey() ? 'provider_disabled' : 'provider_not_configured',
+                    'strategy' => $empty,
+                ],
+            ], Response::HTTP_CONFLICT);
+        }
+
+        $known = $request->validated('knownSelectors');
+
+        $limit = $request->validated('limit');
+
+        $result = $strategist->plan(
+            (string) $request->validated('category'),
+            (string) ($request->validated('scope') ?? ''),
+            is_array($known) ? array_values(array_filter($known, 'is_string')) : [],
+            is_numeric($limit) ? (int) $limit : null,
+        );
+
+        $payload = [
+            'available' => true,
+            // WHETHER THE CALL WORKED, always — never inferred from an empty strategy. "This category
+            // needs no extra strategy" and "the key was rejected" are both nothing, and a caller that
+            // could only see the plan would report a broken integration as a settled question.
+            'executionStatus' => $result['status'],
+            'errorReason' => $result['error'],
+            // Queries, never records. Nothing here is authoritative and nothing here is a credential.
+            'strategy' => $result['strategy'],
+            'usage' => $result['usage'],
+        ];
+
+        if ($result['status'] !== DiscoveryStrategist::STATUS_OK) {
+            // 502, like `proposals`: the CRM is fine, its upstream provider is not.
+            return response()->json([
+                'message' => 'The discovery strategy provider could not be reached or refused the request.',
                 'data' => $payload,
             ], Response::HTTP_BAD_GATEWAY);
         }

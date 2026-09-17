@@ -98,6 +98,18 @@ export const queryKeys = {
     all: ["nearby-clients"] as const,
     // Discovered-business prospect pool (GET /nearby-clients).
     list: () => [...queryKeys.nearbyClients.all, "list"] as const,
+    // Which discovery provider is actually running — read by the board to choose its MAP. Kept under
+    // the Nearby namespace rather than `integrations` because this is the BD-readable effective-state
+    // endpoint, not the super-admin settings resource.
+    discoveryConfig: () => [...queryKeys.nearbyClients.all, "discovery-config"] as const,
+    // Advanced Lead Discovery — the on-demand Stage 2 runs that FILL the pool above.
+    //
+    // Nested under the Nearby namespace because a finished run changes what the board shows, so an
+    // invalidation of `nearbyClients.all` should sweep these too. The run poller deliberately
+    // invalidates `list()` and not `all`, so refreshing the board never cancels the poll that is
+    // still watching the run.
+    discoveryRuns: () => [...queryKeys.nearbyClients.all, "discovery-runs"] as const,
+    discoveryRun: (runId: string) => [...queryKeys.nearbyClients.all, "discovery-runs", runId] as const,
   },
   websiteEvidence: {
     all: ["website-evidence"] as const,
