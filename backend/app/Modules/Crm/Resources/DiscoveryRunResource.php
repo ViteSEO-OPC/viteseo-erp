@@ -61,6 +61,15 @@ class DiscoveryRunResource extends JsonResource
                 'degradedReason' => $this->degraded_reason,
             ],
 
+            // AI SEARCH PLANNING, reported the way the provider is: what was ASKED for, separately
+            // from what HAPPENED. `outcome` is applied | not_applied | insufficient_credit and is
+            // `applied` only once the engine reported a search actually shaped by a returned plan.
+            // Status words only — no model, no prompt, no plan contents, no internal feedback.
+            'ai' => [
+                'requested' => (bool) $this->ai_strategy_requested,
+                'outcome' => $this->aiOutcome(),
+            ],
+
             'progress' => [
                 'targetsTotal' => $total,
                 'targetsCompleted' => (int) $this->targets_completed,

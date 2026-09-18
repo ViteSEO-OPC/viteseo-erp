@@ -552,3 +552,24 @@ def test_the_planner_remains_available_when_explicitly_requested(monkeypatch):
 
     assert len(asked) == 1
     assert calls[0][1]["json"]["textQueries"] == ["artisan sourdough bakery"]
+
+
+def test_the_planning_status_travels_with_the_stats_only_when_planning_was_consulted(monkeypatch):
+    # Per-run AI Discovery: the CRM must be able to tell "no credit" from "AI switched off", and a
+    # Google-only run (planning off) must report nothing about planning at all.
+    import scraper.strategy
+
+    def refused(**kwargs):
+        kwargs["report"]["status"] = "insufficient_credit"
+        return None
+
+    monkeypatch.setattr(scraper.strategy, "fetch_strategy", refused)
+    provider, _, _ = build(monkeypatch, respond=ok([row()]), use_strategy=True)
+    provider.discover(area="Anywhere", category="pharmacy", limit=10)
+    stats = provider.stats()
+    assert stats["strategy_status"] == "insufficient_credit"
+    assert stats["strategy_applied"] is False
+
+    plain, _, _ = build(monkeypatch, respond=ok([row()]), use_strategy=False)
+    plain.discover(area="Anywhere", category="pharmacy", limit=10)
+    assert "strategy_status" not in plain.stats()

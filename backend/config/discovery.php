@@ -38,6 +38,87 @@ return [
     'allow_remote_commit' => (bool) env('DISCOVERY_ALLOW_REMOTE_COMMIT', false),
 
     /*
+     * ── AI SEARCH STRATEGY ─────────────────────────────────────────────────────────────────────
+     *
+     * Whether a run started by this CRM may consult the optional AI strategist before searching.
+     *
+     * WHAT IT DOES NOT DO. It does not make AI a source of businesses, and it cannot: the strategist
+     * answers only with SEARCH INSTRUCTIONS — tag selectors, query phrases, place types and
+     * candidate sub-area names — and the factual provider (Google Places, or the OSM baseline) still
+     * supplies every business, identifier, coordinate, phone and website that reaches a lead. With
+     * this flag on, a run searches differently; it does not learn anything new about the world from
+     * the model. See Services/Discovery/Contracts/DiscoveryStrategist.
+     *
+     * FALSE BY DEFAULT, AND FAIL-CLOSED BY CONSTRUCTION. The engine's own `use_ai_strategy` is also
+     * false unless its environment says otherwise, so BOTH sides must agree before a single model
+     * call is made. An environment that never sets DISCOVERY_AI_STRATEGY gets today's behaviour
+     * byte for byte: no strategy request, no token spend, no change to which businesses are found.
+     * Turning it on is a deliberate operational act, per environment, and it stays off in staging
+     * and production until someone decides otherwise.
+     *
+     * IT BUYS CAPABILITY, NEVER A DEPENDENCY. A strategy call that fails — no credential, no credit,
+     * a timeout — leaves the run executing exactly the search it would have executed anyway.
+     */
+    'ai_strategy' => (bool) env('DISCOVERY_AI_STRATEGY', false),
+
+    /*
+     * ── QUERY YIELD PROBE ──────────────────────────────────────────────────────────────────────
+     *
+     * Measurement, not discovery. A probe asks Google what ONE search phrase reaches, using the
+     * cheapest field mask the API offers (`places.id`): no name, no address, no coordinate, no
+     * phone, no website. A probe result therefore cannot become a CRM record — there is no business
+     * data in it to ingest.
+     *
+     * WHY IT IS A SEPARATE SPEND, STATED OUT LOUD. Each probe is one extra Text Search request. The
+     * production search is untouched and costs exactly what it always did; this buys per-phrase
+     * measurement that the production path structurally cannot provide, because that path merges
+     * every phrase's results into one de-duplicated set.
+     *
+     * OFF BY DEFAULT, like every other optional capability here: it spends money, so switching it on
+     * is a deliberate operational act. An environment that never sets these gets today's behaviour
+     * and today's bill.
+     */
+    'probe' => [
+        'enabled' => (bool) env('DISCOVERY_QUERY_PROBE', false),
+
+        /*
+         * THE SAMPLING POLICY, EXPLICIT RATHER THAN IMPLIED. At most this many phrases are measured
+         * per strategy cycle, taken from the front of the AI's ranking — the phrases that would
+         * actually be executed anyway. Defaulted to the provider's own query ceiling so a cycle can
+         * never probe more phrases than a run could search.
+         *
+         * A cycle ends when the plan changes, which is what makes this "one probe per phrase per
+         * cycle": a phrase already measured in the current cycle is not measured again.
+         */
+        'max_phrases_per_cycle' => (int) env('DISCOVERY_QUERY_PROBE_MAX_PHRASES', 3),
+
+        /*
+         * Results per probe. One page, never paged: a measurement that paged would multiply its own
+         * cost. A full page means the count is a FLOOR, and the record says so.
+         */
+        'page_size' => (int) env('DISCOVERY_QUERY_PROBE_PAGE_SIZE', 20),
+    ],
+
+    /*
+     * ── ADAPTIVE FEEDBACK ──────────────────────────────────────────────────────────────────────
+     *
+     * Whether measurements are allowed to INFLUENCE the next strategy, as opposed to merely being
+     * collected. Independent of `probe` on purpose: an operator can measure for a while and look at
+     * what accumulates before letting any of it change what the model is told.
+     *
+     * OFF BY DEFAULT. With it off the strategy payload is byte-identical to its pre-feedback shape,
+     * so the model is asked exactly the question it was asked before this existed.
+     *
+     * WHAT IT COSTS WHEN ON, stated plainly: feedback participates in the plan cache key, because a
+     * question asked with new measurements is a different question. So a plan is re-asked whenever
+     * measurements change — roughly one extra model call per target per measurement cycle. That is
+     * the price of adaptivity, and it is the reason this is a switch rather than a default.
+     */
+    'feedback' => [
+        'enabled' => (bool) env('DISCOVERY_FEEDBACK', false),
+    ],
+
+    /*
      * Per-TASK wall clock. The queue worker's own ceiling is 900s (see docker-compose.yml), so a
      * single hung area must not be allowed to consume the whole run's budget: one task that stalls
      * is one task that fails, and the run continues.

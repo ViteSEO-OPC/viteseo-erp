@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Globe2, Loader2, MapPin, Search } from "lucide-react";
+import { Globe2, Loader2, MapPin, Search, Sparkles } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -22,9 +22,16 @@ import {
 } from "@/modules/crm/components/ui/progress";
 import { AlertBanner } from "@/modules/crm/components/shared/alert-banner/alert-banner";
 import {
+  useCancelDiscoveryRun,
   useDiscoveryRun,
   useStartDiscoveryRun,
 } from "@/modules/crm/features/nearby-clients/hooks/use-discovery-runs";
+import {
+  aiOutcomeLabel,
+  aiOutcomeMessage,
+  discoveryPhase,
+  isAiStartRefusal,
+} from "@/modules/crm/features/nearby-clients/lib/ai-discovery";
 import { useDiscoveryCapability } from "@/modules/crm/features/nearby-clients/hooks/use-map-provider";
 import { Badge } from "@/modules/crm/components/ui/badge";
 import {
@@ -79,12 +86,21 @@ export function AdvancedDiscoveryDialog({ open, onOpenChange }: Props) {
   // per-cell limit is server configuration, and this input is not shown for it.
   const [limitPerTask, setLimitPerTask] = useState(20);
   const [runId, setRunId] = useState<string | null>(null);
+  // Which action started the request in flight, so its spinner lands on the button that was pressed.
+  const [aiSubmitted, setAiSubmitted] = useState(false);
 
   const start = useStartDiscoveryRun();
+  const cancelRun = useCancelDiscoveryRun();
   const { data: run } = useDiscoveryRun(runId);
   // Nationwide is Google-only, exactly as the orchestrator requires. Offering it on any other
   // provider could only ever produce a run that fails the moment the worker picks it up.
-  const { canRunNationwide } = useDiscoveryCapability();
+  // AI Discovery is offered only when the backend reports AI available on the Google flow.
+  const { canRunNationwide, canRunAi, aiStatus } = useDiscoveryCapability();
+  const phase = discoveryPhase({
+    submitting: start.isPending,
+    run,
+    aiStartRefusedForCredit: isAiStartRefusal(start.error) && aiStatus === "insufficient_credit",
+  });
 
   const nationwide = mode === "nationwide" && canRunNationwide;
   const locations = useMemo(() => splitFreeText(locationsText), [locationsText]);
@@ -105,16 +121,22 @@ export function AdvancedDiscoveryDialog({ open, onOpenChange }: Props) {
   const canStart =
     (nationwide ? nationwideReady : scopedReady) && !start.isPending && runId === null;
 
-  const submit = () => {
-    if (!canStart) return;
+  /**
+   * Start a run. `ai` is set only by the "Discover with AI" action; Enter and "Run discovery" start
+   * the ordinary run exactly as before, and its request carries no `ai_strategy` key at all.
+   */
+  const submit = (ai = false) => {
+    if (!canStart || (ai && !canRunAi)) return;
     // Stable for this dialog session, so a double-click or a retried request resolves to the same
     // run rather than buying a second one.
     const idempotencyKey = `nearby-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    const aiStrategy = ai ? { aiStrategy: true } : {};
+    setAiSubmitted(ai);
 
     start.mutate(
       nationwide
-        ? { scope: "nationwide", niches, country, idempotencyKey }
-        : { scope: "scoped", locations, niches, limitPerTask, country, idempotencyKey },
+        ? { scope: "nationwide", niches, country, idempotencyKey, ...aiStrategy }
+        : { scope: "scoped", locations, niches, limitPerTask, country, idempotencyKey, ...aiStrategy },
       { onSuccess: (created) => setRunId(created.runId) },
     );
   };
@@ -137,7 +159,9 @@ export function AdvancedDiscoveryDialog({ open, onOpenChange }: Props) {
 
   const reset = () => {
     setRunId(null);
+    setAiSubmitted(false);
     start.reset();
+    cancelRun.reset();
   };
 
   /**
@@ -214,6 +238,15 @@ export function AdvancedDiscoveryDialog({ open, onOpenChange }: Props) {
                 onLimit={setLimitPerTask}
               />
             )}
+            {/* Why the AI action is missing, when the reason is one an operator can fix. Only on the
+                Google flow, where AI Discovery would otherwise be offered; standard discovery above
+                is unaffected either way. */}
+            {canRunNationwide && (phase === "insufficient_credit" || aiStatus === "insufficient_credit") && (
+              <p className="text-caption text-muted-foreground">
+                AI Discovery is unavailable: the AI account has no credit. Standard discovery still
+                works.
+              </p>
+            )}
           </>
         ) : (
           <RunPanel run={run} />
@@ -237,8 +270,32 @@ export function AdvancedDiscoveryDialog({ open, onOpenChange }: Props) {
               <Button variant="outline" onClick={() => close(false)} disabled={start.isPending}>
                 {runId === null ? "Cancel" : "Close"}
               </Button>
-              <Button onClick={submit} disabled={!canStart}>
-                {start.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />}
+              {/* Stops the NEXT search; anything already found stays in the CRM. */}
+              {runId !== null && run !== undefined && !run.isTerminal && (
+                <Button
+                  variant="destructive"
+                  onClick={() => cancelRun.mutate(runId)}
+                  disabled={cancelRun.isPending}
+                >
+                  {cancelRun.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />}
+                  Cancel run
+                </Button>
+              )}
+              {/* AI DISCOVERY — the same inputs, the same run, plus `ai_strategy: true`. Drawn only
+                  when the backend reports AI available on the Google flow, so an action that cannot
+                  work is never offered. */}
+              {runId === null && canRunAi && (
+                <Button variant="teal-outline" onClick={() => submit(true)} disabled={!canStart}>
+                  {start.isPending && aiSubmitted ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
+                  ) : (
+                    <Sparkles className="mr-2 h-4 w-4" aria-hidden />
+                  )}
+                  Discover with AI
+                </Button>
+              )}
+              <Button onClick={() => submit()} disabled={!canStart}>
+                {start.isPending && !aiSubmitted && <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />}
                 {runId !== null
                   ? "Running…"
                   : nationwide
@@ -573,6 +630,10 @@ function RunPanel({ run }: { run: DiscoveryRun }) {
   const nationwide = run.scopeClass === "nationwide";
   // Planning tiles the national polygon before any area exists. Saying so beats showing "0 of 0".
   const planning = nationwide && run.phase === "planning";
+  // A run that asked for AI and was stopped because the AI account could not pay.
+  const aiCreditStop = discoveryPhase({ submitting: false, run }) === "insufficient_credit";
+  const aiLabel = aiOutcomeLabel(run);
+  const aiMessage = aiOutcomeMessage(run);
 
   return (
     <div className="flex flex-col gap-4 py-2">
@@ -589,7 +650,7 @@ function RunPanel({ run }: { run: DiscoveryRun }) {
             {run.status === "pending" && "Queued…"}
             {run.status === "completed" &&
               (run.stopReason === "budget_limited" ? "Stopped at its budget" : "Discovery complete")}
-            {run.status === "failed" && "Discovery failed"}
+            {run.status === "failed" && (aiCreditStop ? "AI Discovery stopped — no AI credit" : "Discovery failed")}
             {run.status === "cancelled" && "Discovery cancelled"}
           </span>
           <span className="text-caption text-muted-foreground">
@@ -632,6 +693,22 @@ function RunPanel({ run }: { run: DiscoveryRun }) {
             {provider.degradedReason !== null ? ` (${provider.degradedReason})` : ""}. These results
             came from {providerLabel(provider.effective)}.
           </p>
+        )}
+        {/* AI planning, stated from the run's recorded outcome — never from which button started it.
+            Absent entirely for an ordinary run that AI did not shape. */}
+        {aiLabel !== null && (
+          <>
+            <div className="mt-2 flex items-center justify-between gap-3">
+              <span className="flex items-center gap-1.5 text-caption text-muted-foreground">
+                <Sparkles className="h-3.5 w-3.5" aria-hidden />
+                AI search planning
+              </span>
+              <span className="text-sm font-medium">{aiLabel}</span>
+            </div>
+            {aiMessage !== null && (
+              <p className="mt-1 text-caption text-muted-foreground">{aiMessage}</p>
+            )}
+          </>
         )}
       </div>
 

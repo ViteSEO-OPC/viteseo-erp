@@ -6,6 +6,10 @@ import { apiClient } from "@/modules/crm/lib/axios";
 import { getApiErrorMessage } from "@/modules/crm/lib/api-error";
 import { queryKeys } from "@/modules/crm/lib/query-keys";
 import {
+  buildStartRunBody,
+  isAiStartRefusal,
+} from "@/modules/crm/features/nearby-clients/lib/ai-discovery";
+import {
   isRunTerminal,
   type DiscoveryRun,
   type StartDiscoveryRunInput,
@@ -29,38 +33,57 @@ const POLL_MS = 2000;
  * dispatch would be a lie; the refresh happens when the run reaches a terminal state.
  */
 export function useStartDiscoveryRun() {
+  const queryClient = useQueryClient();
+
   return useMutation({
     mutationFn: (input: StartDiscoveryRunInput) =>
       apiClient
-        .post(
-          "/discovery/runs",
-          // THE TWO MODES SEND DIFFERENT BODIES, and the nationwide one deliberately sends LESS. No
-          // locations, because coverage comes from the national polygon rather than anything a user
-          // typed; and no `limit_per_task`, because the per-cell limit belongs to server
-          // configuration — sending the scoped form's 20 here would silently make a nationwide run
-          // inherit a number that has nothing to do with it. The backend rejects `locations` on a
-          // nationwide request outright, so the two shapes cannot blur.
-          input.scope === "nationwide"
-            ? {
-                scope: "nationwide",
-                country: input.country,
-                niches: input.niches,
-                idempotency_key: input.idempotencyKey,
-              }
-            : {
-                scope: "scoped",
-                country: input.country,
-                locations: input.locations,
-                niches: input.niches,
-                limit_per_task: input.limitPerTask,
-                idempotency_key: input.idempotencyKey,
-              },
-        )
+        // THE TWO MODES SEND DIFFERENT BODIES, and the nationwide one deliberately sends LESS — see
+        // `buildStartRunBody`. `ai_strategy` travels only on an AI Discovery run, so an ordinary
+        // run's request is exactly what it was before AI Discovery existed.
+        .post("/discovery/runs", buildStartRunBody(input))
         .then((r) => r.data.data as DiscoveryRun),
     onError: (err) => {
       // 409 = an overlapping scope is already running. Nothing broke and nothing was charged, so
       // report it neutrally, the way the qualify-prospect conflict does — not as a red failure.
       toast.error(getApiErrorMessage(err, "Could not start discovery"));
+
+      // AI was refused before anything was spent: the capability this dialog read is stale (credit
+      // ran out, or an admin switched AI off). Re-read it so the AI action stops being offered.
+      if (isAiStartRefusal(err)) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.nearbyClients.discoveryConfig() });
+      }
+    },
+  });
+}
+
+/**
+ * Stop a run between searches → POST /discovery/runs/{id}/cancel.
+ *
+ * Honest about its limits, exactly as the endpoint is: it prevents the NEXT provider call, cannot
+ * refund one already made, and leaves everything already discovered in the CRM. The poller picks up
+ * the `cancelled` status on its next tick; the response is also written straight into its cache so
+ * the panel changes the moment the server agrees. 409 means the run had already finished — the poll
+ * is refreshed so the panel shows how it actually ended.
+ */
+export function useCancelDiscoveryRun() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (runId: string) =>
+      apiClient
+        .post(`/discovery/runs/${runId}/cancel`)
+        .then((r) => r.data.data as DiscoveryRun),
+    onSuccess: (run) => {
+      queryClient.setQueryData(queryKeys.nearbyClients.discoveryRun(run.runId), (prev: DiscoveryRun | undefined) =>
+        // The cancel response omits the per-area summary; keep what the poller already had.
+        prev === undefined ? run : { ...prev, ...run, areas: run.areas ?? prev.areas },
+      );
+      queryClient.invalidateQueries({ queryKey: queryKeys.nearbyClients.discoveryRun(run.runId) });
+    },
+    onError: (err, runId) => {
+      toast.error(getApiErrorMessage(err, "Could not cancel the run"));
+      queryClient.invalidateQueries({ queryKey: queryKeys.nearbyClients.discoveryRun(runId) });
     },
   });
 }
@@ -90,6 +113,12 @@ export function useDiscoveryRun(runId: string | null) {
       if (isRunTerminal(run.status)) {
         // The pool is the destination: a finished run may have added prospects to it.
         queryClient.invalidateQueries({ queryKey: queryKeys.nearbyClients.list() });
+
+        // An AI run that stopped for lack of credit has just changed the AI capability server-side;
+        // re-read it so the AI action is no longer offered.
+        if (run.ai?.outcome === "insufficient_credit") {
+          queryClient.invalidateQueries({ queryKey: queryKeys.nearbyClients.discoveryConfig() });
+        }
       }
 
       return run;

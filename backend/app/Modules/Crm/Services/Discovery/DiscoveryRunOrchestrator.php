@@ -81,8 +81,21 @@ class DiscoveryRunOrchestrator
 
                 return;
             }
+            if ($this->aiCreditExhausted($run)) {
+                $this->stopForAiCredit($run);
+
+                return;
+            }
 
             $effective = $this->runTarget($run, $target, $effective, $metricsPath);
+        }
+
+        // The LAST search can be the one that learns the account cannot pay; the run still must not
+        // finish as a normal completion under an AI request.
+        if ($this->aiCreditExhausted($run)) {
+            $this->stopForAiCredit($run);
+
+            return;
         }
 
         $this->finish($run);
@@ -135,6 +148,7 @@ class DiscoveryRunOrchestrator
             $metricsPath,
             null,
             $country,
+            $this->aiFor($run, $provider),
         );
 
         // A present-but-rejected credential is only knowable at this point. Degrade once, record it,
@@ -151,6 +165,7 @@ class DiscoveryRunOrchestrator
                 $metricsPath,
                 null,
                 $country,
+                $this->aiFor($run, $provider),
             );
         }
 
@@ -228,6 +243,81 @@ class DiscoveryRunOrchestrator
             'inserted' => (int) $run->inserted + $result['inserted'],
             'duplicates' => (int) $run->duplicates + $result['duplicates'],
             'rejected' => (int) $run->rejected + $result['rejected'],
+        ])->save();
+
+        $this->recordAiOutcome($run, $result);
+    }
+
+    // ── AI SEARCH PLANNING ───────────────────────────────────────────────────────────────────
+    //
+    // Opt-in per run, and Google-only: the flag travels to the engine only while the run is on Google
+    // Places, so a run that degrades to OpenStreetMap searches exactly as the baseline always has.
+
+    /** Should THIS search open the AI strategy channel? Never on the baseline provider. */
+    private function aiFor(DiscoveryRun $run, NerbyProvider $provider): bool
+    {
+        return (bool) $run->ai_strategy_requested && $provider === NerbyProvider::GOOGLE_PLACES;
+    }
+
+    /**
+     * Fold one search's AI report into the run's outcome.
+     *
+     * RECORDED FROM WHAT THE ENGINE SAID HAPPENED, never from what was asked for. `applied` needs a
+     * search that was actually shaped by a returned plan; a request, or a model that answered with
+     * nothing to add, is not enough. A credit refusal on a run that asked for AI is sticky and
+     * outranks `applied`: once the account cannot pay, the run must not go on reading as AI-planned.
+     *
+     * @param  array{strategyApplied?: ?bool, strategyStatus?: ?string}  $result
+     */
+    private function recordAiOutcome(DiscoveryRun $run, array $result): void
+    {
+        $current = $run->ai_outcome;
+
+        if ($current === DiscoveryRun::AI_INSUFFICIENT_CREDIT) {
+            return;
+        }
+
+        $next = match (true) {
+            $run->ai_strategy_requested
+                && ($result['strategyStatus'] ?? null) === DiscoveryRun::AI_INSUFFICIENT_CREDIT => DiscoveryRun::AI_INSUFFICIENT_CREDIT,
+            ($result['strategyApplied'] ?? null) === true => DiscoveryRun::AI_APPLIED,
+            default => $current ?? DiscoveryRun::AI_NOT_APPLIED,
+        };
+
+        if ($next !== $current) {
+            $run->forceFill(['ai_outcome' => $next])->save();
+        }
+    }
+
+    /** A run that asked for AI and has been told the account cannot pay. */
+    private function aiCreditExhausted(DiscoveryRun $run): bool
+    {
+        return (bool) $run->ai_strategy_requested && $run->ai_outcome === DiscoveryRun::AI_INSUFFICIENT_CREDIT;
+    }
+
+    /**
+     * Stop an AI run whose planning cannot be paid for, rather than let it carry on as plain Google.
+     *
+     * The user asked for AI-planned searches. Continuing without it would spend Google calls on a run
+     * the user did not ask for, and every later search would be a Google-only search under an AI
+     * request. The search that discovered the shortfall has already run, and whatever it found is
+     * saved — the message says so rather than implying nothing happened.
+     */
+    private function stopForAiCredit(DiscoveryRun $run): void
+    {
+        // A run a user already cancelled stays cancelled, and one already stopped is not re-stopped.
+        $run->refresh();
+        if ($run->isTerminal()) {
+            return;
+        }
+
+        $this->skipRemaining($run);
+
+        $run->forceFill([
+            'status' => DiscoveryRun::STATUS_FAILED,
+            'error_message' => 'AI search planning could not run: the AI provider account has no credit remaining. '
+                .'The run was stopped so it would not continue as a plain Google search. '
+                .'Any businesses already found were saved.',
         ])->save();
     }
 
@@ -399,6 +489,9 @@ class DiscoveryRunOrchestrator
         ])->save();
 
         $this->workQueue($run, $queue, $provider, $metricsPath);
+        if ($this->aiCreditExhausted($run)) {
+            $this->stopForAiCredit($run);
+        }
         $this->finishNationwide($run);
     }
 
@@ -430,6 +523,11 @@ class DiscoveryRunOrchestrator
 
                 return;
             }
+            if ($this->aiCreditExhausted($run)) {
+                $this->stopForAiCredit($run);
+
+                return;
+            }
             if ($this->budgetSpent($run)) {
                 return;
             }
@@ -439,7 +537,7 @@ class DiscoveryRunOrchestrator
             $parentForChildren = null;
 
             foreach ($niches as $niche) {
-                if ($this->budgetSpent($run)) {
+                if ($this->budgetSpent($run) || $this->aiCreditExhausted($run)) {
                     break;
                 }
 
@@ -538,6 +636,7 @@ class DiscoveryRunOrchestrator
             $metricsPath,
             $bbox,
             $this->countryOf($run),
+            $this->aiFor($run, $provider),
         );
 
         $this->recordTarget($run, $target, $provider, $result);

@@ -32,6 +32,13 @@ class OpenAiTagExpander implements TagExpander
     /** Hard ceiling on selectors per request. Bounds both the model's output and the Overpass query. */
     public const MAX_SELECTORS = 8;
 
+    /**
+     * Hard ceiling on the completion. The smallest of the three caps because the answer is the
+     * smallest: at most 8 short `key=value` strings. Still sized well above that maximum, so a
+     * complete answer is never truncated into an invalid-JSON failure.
+     */
+    public const MAX_COMPLETION_TOKENS = 400;
+
     /** Cache key prefix. Keyed on CATEGORY ALONE — see the class docblock on why no area appears. */
     private const CACHE_PREFIX = 'crm:discovery:tag-expansion:';
 
@@ -101,6 +108,8 @@ class OpenAiTagExpander implements TagExpander
                     // Deterministic: the same category must not yield different tag sets on two runs,
                     // or a cached answer would differ from the one that produced the measurement.
                     'temperature' => 0,
+                    // Bounds a runaway completion. See MAX_COMPLETION_TOKENS on why it is generous.
+                    'max_tokens' => self::MAX_COMPLETION_TOKENS,
                     'response_format' => ['type' => 'json_object'],
                     'messages' => [
                         ['role' => 'system', 'content' => self::SYSTEM_PROMPT],
@@ -125,11 +134,9 @@ class OpenAiTagExpander implements TagExpander
         }
 
         if ($response->failed()) {
-            $status = match (true) {
-                in_array($response->status(), [401, 403], true) => self::STATUS_AUTH_FAILED,
-                $response->status() === 429 => self::STATUS_RATE_LIMITED,
-                default => self::STATUS_UNREACHABLE,
-            };
+            // ONE mapping for every caller, so a status like 402 is understood identically
+            // wherever it lands. See AiChatEndpoint::classify().
+            $status = AiChatEndpoint::classify($response->status());
             Log::warning('Nearby tag expansion rejected', [
                 'status' => $status,
                 'http' => $response->status(),

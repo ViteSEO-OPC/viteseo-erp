@@ -49,6 +49,19 @@ class NerbyDiscoveryInstructionTest extends TestCase
             'pins the four keys' => ['{"selectors": [], "queries": [], "placeTypes": [], "subAreas": []}'],
             'forbids extra keys' => ['Never add other keys'],
             'forbids tool calls' => ['Never return a tool call'],
+            // Terminology (E3): variation is asked for, and bounded by relevance.
+            'asks for language variation' => ['Vary the LANGUAGE, never the meaning'],
+            'ranks relevance above variety' => ['RELEVANCE OUTRANKS VARIETY'],
+            'forbids invented terms' => ['Do not invent a term you have no reason to believe people use'],
+            'forbids near-duplicates' => ['near-duplicates that differ only by word order'],
+            'ties variation to coverage' => ['vary along a DIFFERENT axis'],
+            // Priority (E4): order is selection, and it ranks searches only.
+            'asks for a ranked order' => ['descending order of expected usefulness'],
+            'explains that order decides execution' => ['ORDER IS SELECTION, NOT PRESENTATION'],
+            'forbids leading with novelty' => ['Never lead with an unusual variant'],
+            // The fence that keeps ranking away from anything the CRM decides deterministically.
+            'ranks searches and not businesses' => ['THIS RANKS SEARCHES AND NOTHING ELSE'],
+            'disclaims judging businesses' => ['their desirability as customers'],
         ];
     }
 
@@ -83,6 +96,16 @@ class NerbyDiscoveryInstructionTest extends TestCase
             'a niche' => ['pharmacy'],
             'another niche' => ['dentist'],
             'a third niche' => ['restaurant'],
+            // E3 asks the model to vary its vocabulary. The risk that creates is a helpful example
+            // creeping into the contract, where it would become a permanent default for every
+            // market. These are the shapes such an example would most likely take.
+            'a fourth niche' => ['bakery'],
+            'a fifth niche' => ['cafe'],
+            'a sixth niche' => ['clinic'],
+            'a trade synonym' => ['drugstore'],
+            'a local trade word' => ['botika'],
+            'another city' => ['iloilo'],
+            'a fifth city' => ['bacolod'],
         ];
     }
 

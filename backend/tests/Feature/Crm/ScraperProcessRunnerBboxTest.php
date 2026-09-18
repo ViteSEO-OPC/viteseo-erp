@@ -43,6 +43,19 @@ class ScraperProcessRunnerBboxTest extends TestCase
         );
     }
 
+    /** The environment the child process WOULD be given. `Process::fake()` spawns nothing. */
+    private function childEnvironment(): array
+    {
+        $env = [];
+        Process::assertRan(function ($process) use (&$env): bool {
+            $env = $process->environment;
+
+            return true;
+        });
+
+        return $env;
+    }
+
     /** The recorded command line, as one string — how a person would read it in a process list. */
     private function commandLine(): string
     {
@@ -189,6 +202,92 @@ class ScraperProcessRunnerBboxTest extends TestCase
         $this->invoke(null, null);
 
         $this->assertStringNotContainsString('--country', $this->commandLine());
+    }
+
+    /*
+     * ── THE AI STRATEGY CHANNEL ────────────────────────────────────────────────────────────────
+     *
+     * The engine has carried a fully built AI strategist for some time, gated on DISCOVERY_AI_STRATEGY
+     * in its own environment. The CRM never passed that variable, so every run the CRM started had the
+     * channel closed no matter how the provider settings were configured — the capability existed and
+     * was unreachable. These tests pin both halves of the fix: it opens when enabled, and it stays
+     * shut, by absence, when not.
+     */
+
+    public function test_an_enabled_deployment_opens_the_ai_strategy_channel(): void
+    {
+        config()->set('discovery.ai_strategy', true);
+        $this->invoke(self::CELL);
+
+        $this->assertSame('1', $this->childEnvironment()['DISCOVERY_AI_STRATEGY'] ?? null);
+    }
+
+    public function test_a_disabled_deployment_passes_no_ai_variable_at_all(): void
+    {
+        config()->set('discovery.ai_strategy', false);
+        $this->invoke(self::CELL);
+
+        // ABSENT, not "0". The engine treats only an explicit truthy value as consent, so omitting
+        // the variable is the fail-closed spelling: a future change to how the engine parses its
+        // environment cannot turn a present-but-false value into permission.
+        $this->assertArrayNotHasKey('DISCOVERY_AI_STRATEGY', $this->childEnvironment());
+    }
+
+    /**
+     * FAIL-CLOSED BY DEFAULT — the property that keeps staging and production unchanged until someone
+     * decides otherwise. Asserted against the real config file rather than a value set by this test,
+     * because the default is the whole safety claim.
+     */
+    public function test_ai_strategy_is_off_unless_an_environment_turns_it_on(): void
+    {
+        $this->refreshApplication();
+        Process::fake();
+
+        $this->assertFalse((bool) config('discovery.ai_strategy'));
+    }
+
+    /**
+     * AI OFF IS TODAY'S RUN, BYTE FOR BYTE. The slice must be invisible to every existing deployment,
+     * so with the flag down the child's environment is exactly the set it has always been given —
+     * asserted as an exact key set, which is what catches an accidental addition.
+     */
+    public function test_with_ai_off_the_child_environment_is_exactly_what_it_has_always_been(): void
+    {
+        config()->set('discovery.ai_strategy', false);
+        config()->set('discovery.allow_remote_commit', false);
+        $this->invoke(self::CELL);
+
+        $this->assertSame(
+            ['CRM_BASE_URL', 'CRM_TOKEN', 'DISCOVERY_METRICS_FILE'],
+            array_keys($this->childEnvironment()),
+        );
+    }
+
+    /**
+     * Turning AI on changes HOW the engine may search, never WHAT the CRM asked it to search. The
+     * command line — area, category, limit, provider, box, country, commit — is the factual half of
+     * the run, and this slice must not have moved any of it.
+     */
+    public function test_enabling_ai_strategy_does_not_alter_the_command_line(): void
+    {
+        config()->set('discovery.ai_strategy', false);
+        $this->invoke(self::CELL, 'PH');
+        $withoutAi = $this->commandLine();
+
+        Process::fake();
+        config()->set('discovery.ai_strategy', true);
+        $this->invoke(self::CELL, 'PH');
+
+        $this->assertSame($withoutAi, $this->commandLine());
+    }
+
+    /** The Google Places provider still executes the search, flag or no flag. */
+    public function test_the_factual_provider_is_unchanged_when_ai_strategy_is_on(): void
+    {
+        config()->set('discovery.ai_strategy', true);
+        $this->invoke(self::CELL);
+
+        $this->assertStringContainsString('--provider google_places', $this->commandLine());
     }
 
     public function test_the_crm_token_is_never_part_of_the_command_line(): void

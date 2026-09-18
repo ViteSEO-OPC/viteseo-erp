@@ -137,6 +137,15 @@ export type DiscoveryRunStopReason =
   | "cancelled"
   | "failed";
 
+/**
+ * What AI search planning actually did for a run — recorded from what the engine reported.
+ *
+ * `applied` only once a search was genuinely shaped by a plan the model returned; `not_applied` when
+ * AI was not requested, or was consulted and changed nothing; `insufficient_credit` when a run that
+ * asked for AI was refused by the AI account and stopped rather than continuing as plain Google.
+ */
+export type DiscoveryRunAiOutcome = "applied" | "not_applied" | "insufficient_credit";
+
 export type DiscoveryRun = {
   runId: string;
   status: DiscoveryRunStatus;
@@ -153,6 +162,11 @@ export type DiscoveryRun = {
     country?: string;
   };
   provider: DiscoveryRunProvider;
+  /** Optional so a response from a backend older than AI Discovery still type-checks as a run. */
+  ai?: {
+    requested: boolean;
+    outcome: DiscoveryRunAiOutcome;
+  };
   progress: DiscoveryRunProgress;
   counters: DiscoveryRunCounters;
   errorMessage: string | null;
@@ -184,6 +198,8 @@ export type StartDiscoveryRunInput =
       country: CountryCode;
       /** Makes a double-click, a refresh and a network retry resolve to the SAME run. */
       idempotencyKey: string;
+      /** AI Discovery. Sent only when true; see `buildStartRunBody`. */
+      aiStrategy?: boolean;
     }
   | {
       scope: "nationwide";
@@ -191,6 +207,7 @@ export type StartDiscoveryRunInput =
       niches: string[];
       country: CountryCode;
       idempotencyKey: string;
+      aiStrategy?: boolean;
     };
 
 export const DISCOVERY_RUN_TERMINAL: readonly DiscoveryRunStatus[] = [

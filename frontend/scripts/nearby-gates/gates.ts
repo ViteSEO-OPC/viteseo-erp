@@ -33,6 +33,31 @@
  * N  ON-DEMAND DISCOVERY IS ADDITIVE — its controls appear only where the capability that backs them
  *    is actually running. On the OpenStreetMap baseline the board stays exactly what it was before
  *    Stage 2, and an unknown or still-loading provider is never read as permission.
+ * P  AN UNPAYABLE CREDENTIAL IS NEVER SHOWN AS HEALTHY — a key whose account has no credit answers
+ *    200 on the zero-cost probe, so "Verified" used to appear beside a credential that fails 402 on
+ *    every real call. The distinct status must survive into the UI, read as a credit problem, and be
+ *    judged BEFORE the "currently running" branch.
+ *
+ * ── AI DISCOVERY (per-run `ai_strategy`) ──
+ *
+ * Q  SUBMISSION — "Discover with AI" sends the same body as the ordinary run plus `ai_strategy: true`,
+ *    for both the scoped and the nationwide shape.
+ * R  THE DEFAULT REQUEST IS BYTE-IDENTICAL — an ordinary run carries no `ai_strategy` key at all, not
+ *    `false`; the legacy key set is pinned exactly.
+ * S  VALIDATION / CAPABILITY — the AI action is offered only on Google Places AND a backend-reported
+ *    `available`; unknown, loading, disabled, no-credit and the OSM baseline all withhold it, and the
+ *    dialog refuses an AI submit the capability would not allow.
+ * T  LOADING AND RUNNING — submitting, queued and running are distinct phases.
+ * U  COMPLETION IS TRUTHFUL — `applied` is described only from the run's recorded outcome; a requested
+ *    run AI did not shape says so; an ordinary run shows no AI line at all.
+ * V  CANCELLATION — `cancelled` is its own phase, and the dialog is wired to the existing cancel API.
+ * W  INSUFFICIENT CREDIT — both sources (a refused start, a run stopped mid-way) read as the credit
+ *    state, and only a 422 keyed on `ai_strategy` counts as an AI refusal.
+ * X  BACKEND FAILURE — an ordinary failure stays `failed`, and is never relabelled as a credit problem.
+ * Y  NO INTERNAL MECHANICS OR CREDENTIALS REACH THE UI — none of the feedback verdicts (barren, no_new,
+ *    productive, abundant, unmeasured) and no key fields in the AI Discovery code.
+ * Z  THE DEFAULT FLOW IS UNCHANGED — Enter and "Run discovery" still start the ordinary run, and the AI
+ *    button exists only behind the capability.
  */
 import { readFileSync } from "node:fs";
 import {
@@ -63,6 +88,15 @@ import {
   canRunNationwide,
   discoveryUnavailableReason,
 } from "@/modules/crm/features/nearby-clients/lib/discovery-capability";
+import {
+  aiOutcomeLabel,
+  aiOutcomeMessage,
+  buildStartRunBody,
+  canRunAiDiscovery,
+  discoveryPhase,
+  isAiStartRefusal,
+} from "@/modules/crm/features/nearby-clients/lib/ai-discovery";
+import type { DiscoveryRun } from "@/modules/crm/features/nearby-clients/types/discovery-run-types";
 
 let failed = 0;
 
@@ -446,6 +480,274 @@ const secure = { isSecureContext: true };
   }
 
   report("O  list keys mirror the identity that produced the row", 3 - bad.length, 3, bad);
+}
+
+// ── P  an unpayable credential is never shown as healthy ─────────────────────────────────────
+//
+// THE STATE THIS EXISTS FOR. OpenRouter answers 200 on its zero-cost `/key` probe for a key whose
+// account holds no credit, so the settings page used to show "Verified" beside a credential that
+// fails 402 on every real call — the most misleading thing this card can say. The server now reports
+// `insufficient_credit`; these gates pin the client half, so the status cannot arrive and be rendered
+// as a generic "Configured", or worse, as "Active".
+//
+// Pinned by reading the source for the same reason as gates G, H and O: `frontend/` has no DOM test
+// runner, and the properties here are structural — which branch exists, and in what ORDER.
+{
+  const bad: string[] = [];
+  const hook = readFileSync(
+    new URL("../../src/modules/crm/features/settings/hooks/use-nerby-integration.ts", import.meta.url),
+    "utf8",
+  );
+  const card = readFileSync(
+    new URL("../../src/modules/crm/features/settings/components/nerby-integration-card.tsx", import.meta.url),
+    "utf8",
+  );
+
+  // The status the server can now send must be a status the client's type admits, or it arrives as
+  // an unhandled value and falls through to "Not tested".
+  if (!/\|\s*"insufficient_credit"/.test(hook)) {
+    bad.push("NerbyTestStatus does not include insufficient_credit");
+  }
+  if (!/case "insufficient_credit":/.test(hook)) {
+    bad.push("testStatusLabel has no case for insufficient_credit");
+  }
+  // A person must read about CREDIT, not a raw code and not a network story.
+  const label = hook.match(/case "insufficient_credit":\s*\n\s*return "([^"]+)"/);
+  if (!label) bad.push("insufficient_credit has no plain-language label");
+  else if (!/credit/i.test(label[1])) bad.push(`insufficient_credit label does not mention credit: "${label[1]}"`);
+  else if (/insufficient_credit/.test(label[1])) bad.push("the label leaks the raw status code");
+
+  // The card gives it a state of its own rather than letting it fall into "Configured".
+  if (!card.includes('provider.lastTestStatus === "insufficient_credit"')) {
+    bad.push("the settings card has no insufficient_credit branch");
+  }
+  if (!/blocked:\s*"/.test(card)) bad.push("the blocked tone has no chip class");
+
+  // THE ORDERING IS THE POINT. A credential known to be unpayable must be judged BEFORE the
+  // "is this the running provider" branch, or a selected-but-broke provider still reads "Active".
+  const creditAt = card.indexOf('provider.lastTestStatus === "insufficient_credit"');
+  const activeAt = card.indexOf("if (isRunning) {");
+  if (creditAt === -1 || activeAt === -1) bad.push("could not locate both branches to compare order");
+  else if (creditAt > activeAt) bad.push("insufficient_credit is checked after Active, so a broke provider still reads Active");
+
+  // And the healthy path is untouched: "ok" still means Verified.
+  if (!/provider\.lastTestStatus === "ok"/.test(card)) {
+    bad.push("the Verified branch no longer keys on ok");
+  }
+
+  report("P  an unpayable credential is never shown as healthy", 8 - bad.length, 8, bad);
+}
+
+// ── AI DISCOVERY ─────────────────────────────────────────────────────────────────────────────
+
+const scopedInput = {
+  scope: "scoped" as const,
+  locations: ["Bacolod City", "Iloilo City"],
+  niches: ["vape shop"],
+  limitPerTask: 20,
+  country: "PH" as const,
+  idempotencyKey: "k-1",
+};
+const nationwideInput = {
+  scope: "nationwide" as const,
+  niches: ["bakery"],
+  country: "PH" as const,
+  idempotencyKey: "k-2",
+};
+
+type AiRun = Pick<DiscoveryRun, "status" | "ai" | "isTerminal">;
+const aiRun = (status: DiscoveryRun["status"], ai: DiscoveryRun["ai"], isTerminal = false): AiRun => ({
+  status,
+  ai,
+  isTerminal,
+});
+
+// ── Q  AI discovery submission ───────────────────────────────────────────────────────────────
+{
+  const bad: string[] = [];
+  const scoped = buildStartRunBody({ ...scopedInput, aiStrategy: true });
+  const plainScoped = buildStartRunBody(scopedInput);
+  if (scoped.ai_strategy !== true) bad.push("scoped AI body lacks ai_strategy: true");
+  const { ai_strategy: _dropped, ...rest } = scoped;
+  void _dropped;
+  if (JSON.stringify(rest) !== JSON.stringify(plainScoped)) bad.push("AI body differs from the ordinary body beyond ai_strategy");
+  // Free text travels exactly as typed — no niche whitelist, no rewriting.
+  if (JSON.stringify(scoped.niches) !== JSON.stringify(["vape shop"])) bad.push("niche was rewritten");
+
+  const nw = buildStartRunBody({ ...nationwideInput, aiStrategy: true });
+  if (nw.ai_strategy !== true) bad.push("nationwide AI body lacks ai_strategy: true");
+  if ("locations" in nw || "limit_per_task" in nw) bad.push("nationwide AI body carries locations/limit_per_task");
+
+  report("Q  AI discovery submits the ordinary body plus ai_strategy", 5 - bad.length, 5, bad);
+}
+
+// ── R  the default request is byte-identical ─────────────────────────────────────────────────
+{
+  const bad: string[] = [];
+  const scopedKeys = Object.keys(buildStartRunBody(scopedInput)).join(",");
+  if (scopedKeys !== "scope,country,locations,niches,limit_per_task,idempotency_key") {
+    bad.push(`scoped keys changed: ${scopedKeys}`);
+  }
+  const nwKeys = Object.keys(buildStartRunBody(nationwideInput)).join(",");
+  if (nwKeys !== "scope,country,niches,idempotency_key") bad.push(`nationwide keys changed: ${nwKeys}`);
+  if ("ai_strategy" in buildStartRunBody({ ...scopedInput, aiStrategy: false })) {
+    bad.push("aiStrategy: false sends an ai_strategy key");
+  }
+  report("R  an ordinary run's request is unchanged", 3 - bad.length, 3, bad);
+}
+
+// ── S  validation: the AI action is offered only when it can work ────────────────────────────
+{
+  const bad: string[] = [];
+  const cases: [string | null | undefined, string | null | undefined, boolean][] = [
+    ["google_places", "available", true],
+    ["openstreetmap", "available", false],
+    ["openai", "available", false],
+    ["google_places", "insufficient_credit", false],
+    ["google_places", "not_configured", false],
+    ["google_places", "disabled", false],
+    ["google_places", "unsupported_provider", false],
+    ["google_places", undefined, false],
+    ["google_places", "something_new", false],
+    [null, null, false],
+  ];
+  for (const [provider, status, want] of cases) {
+    if (canRunAiDiscovery(provider, status) !== want) bad.push(`${provider}/${status} → ${!want}, want ${want}`);
+  }
+
+  const dialog = readFileSync(
+    new URL("../../src/modules/crm/features/nearby-clients/components/advanced-discovery-dialog.tsx", import.meta.url),
+    "utf8",
+  );
+  // The AI submit goes through the SAME readiness check as the ordinary one, plus the capability.
+  if (!dialog.includes("if (!canStart || (ai && !canRunAi)) return;")) {
+    bad.push("the dialog does not guard an AI submit with canStart and canRunAi");
+  }
+  report("S  the AI action is offered and accepted only when available", cases.length + 1 - bad.length, cases.length + 1, bad);
+}
+
+// ── T  loading and running ───────────────────────────────────────────────────────────────────
+{
+  const bad: string[] = [];
+  const requested = { requested: true, outcome: "not_applied" as const };
+  if (discoveryPhase({ submitting: false, run: undefined }) !== "idle") bad.push("fresh form is not idle");
+  if (discoveryPhase({ submitting: true, run: undefined }) !== "submitting") bad.push("in-flight start is not submitting");
+  if (discoveryPhase({ submitting: false, run: aiRun("pending", requested) }) !== "queued") bad.push("pending is not queued");
+  if (discoveryPhase({ submitting: false, run: aiRun("running", requested) }) !== "running") bad.push("running is not running");
+  // While it runs, "not applied" means "not yet" — never a verdict.
+  const live = aiOutcomeLabel(aiRun("running", requested));
+  if (live !== "Requested") bad.push(`a live AI run is labelled "${live}", want "Requested"`);
+  report("T  submitting, queued and running are distinct", 5 - bad.length, 5, bad);
+}
+
+// ── U  successful completion is described truthfully ─────────────────────────────────────────
+{
+  const bad: string[] = [];
+  const applied = aiRun("completed", { requested: true, outcome: "applied" }, true);
+  if (discoveryPhase({ submitting: false, run: applied }) !== "completed") bad.push("completed is not completed");
+  if (aiOutcomeLabel(applied) !== "Applied") bad.push("applied run not labelled Applied");
+  if (!/Google Places/.test(aiOutcomeMessage(applied) ?? "")) bad.push("applied message does not say Google supplied the businesses");
+
+  const unshaped = aiRun("completed", { requested: true, outcome: "not_applied" }, true);
+  if (aiOutcomeLabel(unshaped) !== "Not applied") bad.push("an AI run AI did not shape is not labelled Not applied");
+  if (!/did not change/.test(aiOutcomeMessage(unshaped) ?? "")) bad.push("the unshaped message does not say so");
+
+  const ordinary = aiRun("completed", { requested: false, outcome: "not_applied" }, true);
+  if (aiOutcomeLabel(ordinary) !== null || aiOutcomeMessage(ordinary) !== null) bad.push("an ordinary run shows an AI line");
+  // A backend older than the field: no AI line, no crash.
+  if (aiOutcomeLabel(aiRun("completed", undefined, true)) !== null) bad.push("a run with no ai field shows an AI line");
+  report("U  completion reports what AI actually did", 7 - bad.length, 7, bad);
+}
+
+// ── V  cancellation ──────────────────────────────────────────────────────────────────────────
+{
+  const bad: string[] = [];
+  const cancelled = aiRun("cancelled", { requested: true, outcome: "applied" }, true);
+  if (discoveryPhase({ submitting: false, run: cancelled }) !== "cancelled") bad.push("cancelled is not cancelled");
+
+  const hook = readFileSync(
+    new URL("../../src/modules/crm/features/nearby-clients/hooks/use-discovery-runs.ts", import.meta.url),
+    "utf8",
+  );
+  const dialog = readFileSync(
+    new URL("../../src/modules/crm/features/nearby-clients/components/advanced-discovery-dialog.tsx", import.meta.url),
+    "utf8",
+  );
+  if (!hook.includes("`/discovery/runs/${runId}/cancel`")) bad.push("the cancel hook does not call the existing endpoint");
+  if (!dialog.includes("cancelRun.mutate(runId)")) bad.push("the dialog does not wire Cancel run");
+  // Offered only while there is something to cancel.
+  if (!dialog.includes("runId !== null && run !== undefined && !run.isTerminal")) bad.push("Cancel run is not limited to a live run");
+  report("V  cancellation is wired and reported", 4 - bad.length, 4, bad);
+}
+
+// ── W  insufficient credit ───────────────────────────────────────────────────────────────────
+{
+  const bad: string[] = [];
+  const stopped = aiRun("failed", { requested: true, outcome: "insufficient_credit" }, true);
+  if (discoveryPhase({ submitting: false, run: stopped }) !== "insufficient_credit") bad.push("a credit-stopped run is not the credit state");
+  if (aiOutcomeLabel(stopped) !== "No AI credit") bad.push("credit-stopped run not labelled No AI credit");
+  if (!/no credit/.test(aiOutcomeMessage(stopped) ?? "")) bad.push("credit message does not name credit");
+  if (discoveryPhase({ submitting: false, run: undefined, aiStartRefusedForCredit: true }) !== "insufficient_credit") {
+    bad.push("a start refused for credit is not the credit state");
+  }
+
+  const refusal = { response: { status: 422, data: { message: "no credit", errors: { ai_strategy: ["x"] } } } };
+  const otherInvalid = { response: { status: 422, data: { message: "bad", errors: { locations: ["x"] } } } };
+  const conflict = { response: { status: 409, data: { message: "busy" } } };
+  if (!isAiStartRefusal(refusal)) bad.push("a 422 on ai_strategy is not recognised");
+  if (isAiStartRefusal(otherInvalid)) bad.push("a 422 on locations is read as an AI refusal");
+  if (isAiStartRefusal(conflict) || isAiStartRefusal(undefined)) bad.push("a 409 / no error is read as an AI refusal");
+  report("W  insufficient credit is its own, distinguishable state", 7 - bad.length, 7, bad);
+}
+
+// ── X  backend failure ───────────────────────────────────────────────────────────────────────
+{
+  const bad: string[] = [];
+  const plainFail = aiRun("failed", { requested: false, outcome: "not_applied" }, true);
+  const aiFail = aiRun("failed", { requested: true, outcome: "not_applied" }, true);
+  if (discoveryPhase({ submitting: false, run: plainFail }) !== "failed") bad.push("an ordinary failure is not failed");
+  if (discoveryPhase({ submitting: false, run: aiFail }) !== "failed") bad.push("an AI run's non-credit failure is relabelled");
+  // A failed start that is not an AI refusal returns the form to idle, where the toast has said why.
+  if (discoveryPhase({ submitting: false, run: undefined, aiStartRefusedForCredit: false }) !== "idle") {
+    bad.push("a generic start failure is shown as a credit problem");
+  }
+  report("X  a backend failure stays a failure", 3 - bad.length, 3, bad);
+}
+
+// ── Y  no internal mechanics or credentials reach the UI ─────────────────────────────────────
+{
+  const bad: string[] = [];
+  const sources = [
+    "../../src/modules/crm/features/nearby-clients/lib/ai-discovery.ts",
+    "../../src/modules/crm/features/nearby-clients/components/advanced-discovery-dialog.tsx",
+    "../../src/modules/crm/features/nearby-clients/hooks/use-discovery-runs.ts",
+  ].map((path) => [path, readFileSync(new URL(path, import.meta.url), "utf8")] as const);
+  for (const [path, text] of sources) {
+    for (const word of ["barren", "no_new", "productive", "abundant", "unmeasured", "api_key", "apiKey", "key_last4"]) {
+      if (new RegExp(`\\b${word}\\b`).test(text)) bad.push(`${path.split("/").pop()} mentions ${word}`);
+    }
+  }
+  report("Y  no feedback verdicts or credentials in the AI Discovery UI", 1 - Math.min(1, bad.length), 1, bad);
+}
+
+// ── Z  the existing / default discovery flow is unchanged ────────────────────────────────────
+{
+  const bad: string[] = [];
+  const dialog = readFileSync(
+    new URL("../../src/modules/crm/features/nearby-clients/components/advanced-discovery-dialog.tsx", import.meta.url),
+    "utf8",
+  );
+  // Enter starts the ORDINARY run.
+  const enter = dialog.match(/const submitOnEnter = [\s\S]*?\n {2}};/);
+  if (!enter || !/\bsubmit\(\);/.test(enter[0])) bad.push("Enter no longer starts the ordinary run");
+  // The primary button starts the ORDINARY run and keeps its label.
+  if (!dialog.includes("<Button onClick={() => submit()} disabled={!canStart}>")) bad.push("Run discovery no longer calls submit() without AI");
+  if (!dialog.includes('"Run nationwide discovery"') || !dialog.includes("`Run discovery${")) bad.push("the Run discovery labels changed");
+  // The AI action is drawn only behind the capability.
+  if (!dialog.includes("{runId === null && canRunAi && (")) bad.push("the AI button is not gated on canRunAi");
+  // Nationwide stays Google-only, through the same capability as before.
+  if (!dialog.includes('const nationwide = mode === "nationwide" && canRunNationwide;')) bad.push("nationwide gating changed");
+  report("Z  the default Advanced Lead Discovery flow is unchanged", 5 - bad.length, 5, bad);
 }
 
 console.log(failed === 0 ? "\nAll gates passed." : `\n${failed} gate(s) FAILED.`);

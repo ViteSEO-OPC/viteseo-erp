@@ -23,6 +23,10 @@ import { queryKeys } from "@/modules/crm/lib/query-keys";
 export type NerbyTestStatus =
   | "ok"
   | "auth_failed"
+  // The credential is genuine but the account behind it cannot pay. Distinct from `auth_failed`
+  // (the key is fine) and from `unreachable` (nothing is down) because it is the only one an
+  // operator fixes with a payment rather than a configuration change.
+  | "insufficient_credit"
   | "rate_limited"
   | "unreachable"
   | "not_configured"
@@ -212,6 +216,8 @@ export function testStatusLabel(status: NerbyTestStatus | null): string {
       return "Connected";
     case "auth_failed":
       return "The API key was rejected";
+    case "insufficient_credit":
+      return "The account has no credit remaining — add credit to continue";
     case "rate_limited":
       return "Rate limited — try again shortly";
     case "unreachable":

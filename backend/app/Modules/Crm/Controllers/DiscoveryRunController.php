@@ -86,7 +86,9 @@ class DiscoveryRunController extends Controller
             ], Response::HTTP_CONFLICT);
         }
 
-        $run = DB::transaction(function () use ($pairs, $locations, $niches, $limit, $country, $userId, $key): DiscoveryRun {
+        $ai = $request->wantsAiStrategy();
+
+        $run = DB::transaction(function () use ($pairs, $locations, $niches, $limit, $country, $userId, $key, $ai): DiscoveryRun {
             $run = DiscoveryRun::query()->create([
                 'scope_class' => DiscoveryRun::SCOPE_SCOPED,
                 'status' => DiscoveryRun::STATUS_PENDING,
@@ -101,6 +103,8 @@ class DiscoveryRunController extends Controller
                 'requested_by' => $userId,
                 'idempotency_key' => $key,
                 'targets_total' => count($pairs),
+                // Per-run opt-in, already checked against the live capability by the request.
+                'ai_strategy_requested' => $ai,
             ]);
 
             foreach ($pairs as [$area, $niche]) {
@@ -204,6 +208,7 @@ class DiscoveryRunController extends Controller
             'targets_total' => 0,
             'cells_planned' => 0,
             'budget_total' => $budget,
+            'ai_strategy_requested' => $request->wantsAiStrategy(),
         ]);
 
         RunDiscoveryJob::dispatch($run->uuid, $orgId)->onQueue('discovery');

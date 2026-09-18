@@ -42,7 +42,7 @@ const cardClass = "border border-border bg-card p-6 shadow-card";
  */
 type ProviderState = {
   label: string;
-  tone: "active" | "ready" | "pending" | "idle";
+  tone: "active" | "ready" | "pending" | "blocked" | "idle";
   hint: string;
 };
 
@@ -51,6 +51,19 @@ function providerState(
   integration: NerbyIntegration,
 ): ProviderState {
   const isRunning = provider.provider === integration.effectiveProvider;
+
+  // CHECKED BEFORE "Active", deliberately. A credential we KNOW cannot pay must never be painted as
+  // healthy, and that holds whether or not it is the provider currently selected — this is the same
+  // rule stated at the top of this file ("a provider that is selected but cannot run is Configured
+  // or Verified, never Active"), applied to the one failure that is certain to persist until a
+  // person acts on it. Every other status keeps its existing precedence.
+  if (provider.lastTestStatus === "insufficient_credit") {
+    return {
+      label: "No credit",
+      tone: "blocked",
+      hint: "The key works, but the account has no credit left. Add credit at the provider, then run Test connection again.",
+    };
+  }
 
   if (isRunning) {
     return {
@@ -102,6 +115,9 @@ const STATE_CLASS: Record<ProviderState["tone"], string> = {
   // using the same amber/teal chip pattern as website-intel-badge.tsx.
   ready: "border-teal-600 bg-teal-100 text-teal-800 dark:border-teal-700 dark:bg-teal-950/50 dark:text-teal-300",
   pending: "border-amber-300 bg-amber-100 text-amber-800 dark:border-amber-800 dark:bg-amber-950/50 dark:text-amber-300",
+  // Same chip pattern as `ready`/`pending`, in the destructive hue: this is a blocker an operator
+  // has to act on, not a step that has yet to happen. rose-800 on rose-100 measures 7.4:1.
+  blocked: "border-rose-300 bg-rose-100 text-rose-800 dark:border-rose-800 dark:bg-rose-950/50 dark:text-rose-300",
   idle: "border-border text-muted-foreground",
 };
 

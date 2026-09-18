@@ -72,6 +72,19 @@ def _clean(values: Any, *, cap: int) -> list[str]:
     return out
 
 
+def _error_status(response: httpx.Response) -> str:
+    """The CRM's status word for a refused strategy call, or ``http_<code>`` when it gave none."""
+    try:
+        body: Any = response.json()
+    except ValueError:
+        body = None
+    data = body.get("data") if isinstance(body, dict) else None
+    status = data.get("executionStatus") if isinstance(data, dict) else None
+    if isinstance(status, str) and status.strip():
+        return status.strip()[:64]
+    return f"http_{response.status_code}"
+
+
 def fetch_strategy(
     *,
     crm_base_url: str,
@@ -83,6 +96,7 @@ def fetch_strategy(
     timeout: float = 30.0,
     user_agent: str = "CRM-Enterprise-Scraper/1.0",
     quiet: bool = False,
+    report: Optional[dict[str, Any]] = None,
 ) -> Optional[DiscoveryStrategy]:
     """Ask the CRM how to search. ``None`` whenever the capability is not available.
 
@@ -90,7 +104,16 @@ def fetch_strategy(
     plan is empty" (a real answer — return the empty strategy) and "there was no answer" (return
     None): a caller must be able to tell an AI that had nothing to add from an AI that was never
     reachable, or a disabled capability looks identical to a well-considered no-op forever.
+
+    ``report``, when given, receives ``status``: how the planning call ended, as a status word
+    (``ok``, ``insufficient_credit``, ``not_enabled``, ``unreachable``, ...). Optional and write-only,
+    so every existing caller and the return contract are unchanged; it exists because ``None`` alone
+    cannot tell "the account has no credit" from "AI is switched off".
     """
+    def _report(status: str) -> None:
+        if report is not None:
+            report["status"] = status
+
     if not crm_token:
         return None
 
@@ -122,6 +145,7 @@ def fetch_strategy(
     except httpx.HTTPError as exc:
         if not quiet:
             print(f"  discovery strategy unavailable ({type(exc).__name__}).", file=sys.stderr)
+        _report("unreachable")
         return None
 
     # 409 = AI is not configured/enabled. That is the ordinary "no optional capability" state and it
@@ -129,6 +153,7 @@ def fetch_strategy(
     if response.status_code == 409:
         if not quiet:
             print("  discovery strategy unavailable (AI capability not enabled).", file=sys.stderr)
+        _report("not_enabled")
         return None
 
     if response.status_code >= 400:
@@ -138,20 +163,28 @@ def fetch_strategy(
                 f"  discovery strategy unavailable (HTTP {response.status_code}).",
                 file=sys.stderr,
             )
+        # The CRM's own status word when it sent one (a 402 upstream arrives as a 502 carrying
+        # `insufficient_credit`); read from `data.executionStatus` only, never quoted from the body.
+        _report(_error_status(response))
         return None
 
     try:
         body: Any = response.json()
     except ValueError:
+        _report("invalid_response")
         return None
 
     data = body.get("data") if isinstance(body, dict) else None
     if not isinstance(data, dict):
+        _report("invalid_response")
         return None
 
     plan = data.get("strategy")
     if not isinstance(plan, dict):
+        _report("invalid_response")
         return None
+
+    _report(str(data.get("executionStatus") or "ok"))
 
     return DiscoveryStrategy(
         selectors=_clean(plan.get("selectors"), cap=MAX_SELECTORS),

@@ -154,6 +154,9 @@ class GooglePlacesProvider(DiscoveryProvider):
         self._use_strategy = use_strategy
         self._client = httpx.Client(timeout=timeout)
         self._stats: dict[str, Any] = {}
+        # How THIS task's planning call ended, or None when planning was not consulted. Reported
+        # beside the task's stats so the CRM can tell "no credit" from "AI switched off".
+        self._strategy_status: Optional[str] = None
 
     def discover(
         self,
@@ -163,6 +166,7 @@ class GooglePlacesProvider(DiscoveryProvider):
         limit: int,
         bbox: Optional[tuple[float, float, float, float]] = None,
     ) -> list[RawBusiness]:
+        self._strategy_status = None
         if bbox is not None:
             # Already resolved by the partitioner — this call searches ONE cell, not the scope.
             south, west, north, east = bbox
@@ -277,14 +281,18 @@ class GooglePlacesProvider(DiscoveryProvider):
 
         from scraper.strategy import fetch_strategy
 
-        return fetch_strategy(
+        report: dict[str, Any] = {}
+        plan = fetch_strategy(
             crm_base_url=self.crm_base_url,
             crm_token=self.crm_token,
             category=category,
             scope=area,
             limit=limit,
             timeout=self._timeout,
+            report=report,
         )
+        self._strategy_status = report.get("status")
+        return plan
 
     @staticmethod
     def _to_raw(row: Any) -> Optional[RawBusiness]:
@@ -326,7 +334,12 @@ class GooglePlacesProvider(DiscoveryProvider):
 
     def stats(self) -> dict[str, Any]:
         """Per-run numbers for the metrics record. Read optionally by the CLI, like ``close()``."""
-        return dict(self._stats)
+        out = dict(self._stats)
+        # Only when planning was actually consulted, and on failure paths too: a search that failed
+        # after its planning call was refused for credit must still say so.
+        if self._strategy_status is not None:
+            out["strategy_status"] = self._strategy_status
+        return out
 
     def close(self) -> None:
         self._client.close()

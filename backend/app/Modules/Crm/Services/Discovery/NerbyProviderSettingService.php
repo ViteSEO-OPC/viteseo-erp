@@ -39,6 +39,17 @@ class NerbyProviderSettingService
     public const TEST_OK = 'ok';
     public const TEST_AUTH_FAILED = 'auth_failed';
     public const TEST_RATE_LIMITED = 'rate_limited';
+
+    /**
+     * The credential is genuine but the account behind it cannot pay for a call.
+     *
+     * A DISTINCT OUTCOME BECAUSE IT IS A DISTINCT GREEN-TICK BUG. OpenRouter answers 200 on its
+     * `/key` probe for a key whose balance is spent, so this test used to report TEST_OK beside a
+     * credential that fails 402 on every real request — telling an operator the integration was
+     * verified while nothing worked. It is neither "unreachable" (nothing is down) nor
+     * "auth_failed" (the key is valid), so it gets its own word.
+     */
+    public const TEST_INSUFFICIENT_CREDIT = 'insufficient_credit';
     public const TEST_UNREACHABLE = 'unreachable';
     public const TEST_NOT_CONFIGURED = 'not_configured';
     public const TEST_NOT_APPLICABLE = 'not_applicable';
@@ -320,17 +331,21 @@ class NerbyProviderSettingService
             return app(GooglePlacesTextSearch::class)->probe($apiKey);
         }
 
-        $url = match ($provider) {
-            // OpenAI or OpenRouter, chosen by the stored key — see AiChatEndpoint.
-            NerbyProvider::OPENAI => AiChatEndpoint::for($apiKey, '')->probeUrl(),
+        // OpenAI or OpenRouter, chosen by the stored key — see AiChatEndpoint. Held as an object
+        // rather than just a URL because the RESPONSE BODY has to be judged too, and only the
+        // endpoint knows whether a body is OpenRouter's to interpret.
+        $endpoint = match ($provider) {
+            NerbyProvider::OPENAI => AiChatEndpoint::for($apiKey, ''),
             // Unreachable today: the baseline never requires credentials and is filtered out above,
             // and Google Places returned just above.
             NerbyProvider::OPENSTREETMAP, NerbyProvider::GOOGLE_PLACES => null,
         };
 
-        if ($url === null) {
+        if ($endpoint === null) {
             return self::TEST_NOT_APPLICABLE;
         }
+
+        $url = $endpoint->probeUrl();
 
         try {
             $response = Http::withToken($apiKey)->timeout((float) config('openai.timeout', 8))->get($url);
@@ -348,14 +363,45 @@ class NerbyProviderSettingService
         }
 
         if ($response->successful()) {
-            return self::TEST_OK;
+            // A 200 PROVES THE KEY, NOT THE BALANCE. The probe is deliberately zero-cost, which is
+            // exactly why it cannot discover an empty wallet by failing — so the balance is asked
+            // for explicitly before this is called a working integration. Anything the bodies do not
+            // positively state stays OK; see AiChatEndpoint::creditExhausted().
+            return $endpoint->creditExhausted($response->json(), $this->credits($endpoint, $apiKey))
+                ? self::TEST_INSUFFICIENT_CREDIT
+                : self::TEST_OK;
         }
 
-        return match (true) {
-            in_array($response->status(), [401, 403], true) => self::TEST_AUTH_FAILED,
-            $response->status() === 429 => self::TEST_RATE_LIMITED,
-            default => self::TEST_UNREACHABLE,
-        };
+        // ONE mapping shared with the three discovery services, so 402 cannot mean one thing here
+        // and another there.
+        return AiChatEndpoint::classify($response->status());
+    }
+
+    /**
+     * The account's balance, for a provider that publishes one. Null when there is nothing to ask.
+     *
+     * DELIBERATELY BEST-EFFORT. This is a SECOND opinion on a credential the first request already
+     * accepted, so a balance endpoint that is slow, down or unrecognised must not turn a working
+     * integration into a failure — it returns null and the key is judged on what is known. The only
+     * thing this can do is turn an OK into a reported shortfall, never the reverse.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function credits(AiChatEndpoint $endpoint, string $apiKey): ?array
+    {
+        $url = $endpoint->creditsUrl();
+        if ($url === null) {
+            return null;
+        }
+
+        try {
+            $response = Http::withToken($apiKey)->timeout((float) config('openai.timeout', 8))->get($url);
+        } catch (Throwable) {
+            // Not logged and not fatal: the credential question was already answered above.
+            return null;
+        }
+
+        return $response->successful() ? $response->json() : null;
     }
 
     private function recordTest(

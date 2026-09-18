@@ -37,9 +37,11 @@ class ScraperProcessRunner
      * @param  string  $metricsPath  where the engine appends its JSONL telemetry for this run
      * @param  array{0: float, 1: float, 2: float, 3: float}|null  $bbox  south, west, north, east
      * @param  string|null  $country  ISO 3166-1 alpha-2 the engine must confine its geocoder to
+     * @param  bool  $aiStrategy  this RUN asked for AI search planning; see {@see environment()}
      * @return array{
      *     exitCode: int, executionStatus: ?string, errorReason: ?string,
-     *     discovered: int, inserted: int, duplicates: int, rejected: int, stderrTail: string
+     *     discovered: int, inserted: int, duplicates: int, rejected: int, stderrTail: string,
+     *     strategyApplied: ?bool, strategyStatus: ?string
      * }
      */
     public function run(
@@ -50,12 +52,13 @@ class ScraperProcessRunner
         string $metricsPath,
         ?array $bbox = null,
         ?string $country = null,
+        bool $aiStrategy = false,
     ): array {
         $before = $this->countLines($metricsPath);
 
         try {
             $result = Process::path((string) config('discovery.path', '/scraper'))
-                ->env($this->environment($metricsPath))
+                ->env($this->environment($metricsPath, $aiStrategy))
                 ->timeout((int) config('discovery.task_timeout', 180))
                 ->run([
                     (string) config('discovery.python', '/opt/scraper-venv/bin/python'),
@@ -115,6 +118,11 @@ class ScraperProcessRunner
                     - (int) ($record['valid'] ?? 0)
                     - (int) ($record['duplicates'] ?? 0)),
             'stderrTail' => $this->tail($stderr),
+            // WHAT AI PLANNING DID FOR THIS SEARCH, as the engine reported it. NULL when the engine
+            // said nothing — a provider that never consults AI, or an engine older than the field —
+            // which is read as "not applied", never guessed as applied.
+            'strategyApplied' => isset($record['strategy_applied']) ? (bool) $record['strategy_applied'] : null,
+            'strategyStatus' => $this->stringOrNull($record['strategy_status'] ?? null),
         ];
     }
 
@@ -218,12 +226,13 @@ class ScraperProcessRunner
     /**
      * The child's environment.
      *
-     * Deliberately minimal: where the CRM is, how to authenticate to it, and where to write
-     * telemetry. No provider key, no area list, no category list.
+     * Deliberately minimal: where the CRM is, how to authenticate to it, where to write telemetry,
+     * and which optional capabilities this deployment has switched on. No provider key, no area
+     * list, no category list.
      *
      * @return array<string, string>
      */
-    private function environment(string $metricsPath): array
+    private function environment(string $metricsPath, bool $aiStrategy = false): array
     {
         $env = [
             'CRM_BASE_URL' => (string) config('discovery.crm_base_url'),
@@ -236,6 +245,24 @@ class ScraperProcessRunner
 
         if (config('discovery.allow_remote_commit')) {
             $env['CRM_ALLOW_REMOTE_COMMIT'] = '1';
+        }
+
+        // THE AI STRATEGY CHANNEL, OPENED ONLY ON PURPOSE.
+        //
+        // The engine reads DISCOVERY_AI_STRATEGY and treats anything but an explicit truthy value as
+        // off, so the variable is SET ONLY WHEN ENABLED rather than always set to "0". Both spellings
+        // behave identically today; omitting it keeps the child's environment a statement of what is
+        // switched on, and means a future change to the engine's parsing cannot accidentally read a
+        // present-but-false variable as consent.
+        //
+        // Passing this does not make the model a source of businesses. It only lets the run ask HOW
+        // to search; the factual provider still supplies every record. See config/discovery.php.
+        //
+        // OR A RUN THAT ASKED FOR IT. The deployment-wide flag keeps its exact meaning; a run whose
+        // user explicitly chose AI Discovery opens the same channel for its own searches only. The
+        // enrichment commands never pass it, so they are unaffected either way.
+        if (config('discovery.ai_strategy') || $aiStrategy) {
+            $env['DISCOVERY_AI_STRATEGY'] = '1';
         }
 
         return $env;
@@ -278,7 +305,8 @@ class ScraperProcessRunner
     /**
      * @return array{
      *     exitCode: int, executionStatus: ?string, errorReason: ?string,
-     *     discovered: int, inserted: int, duplicates: int, rejected: int, stderrTail: string
+     *     discovered: int, inserted: int, duplicates: int, rejected: int, stderrTail: string,
+     *     strategyApplied: ?bool, strategyStatus: ?string
      * }
      */
     private function outcome(
@@ -298,6 +326,8 @@ class ScraperProcessRunner
             'duplicates' => 0,
             'rejected' => 0,
             'stderrTail' => $this->tail($stderr),
+            'strategyApplied' => null,
+            'strategyStatus' => null,
         ];
     }
 

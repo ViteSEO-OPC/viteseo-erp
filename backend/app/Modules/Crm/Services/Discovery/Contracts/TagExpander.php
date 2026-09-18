@@ -36,6 +36,16 @@ interface TagExpander
 
     public const STATUS_RATE_LIMITED = 'rate_limited';
 
+    /**
+     * The credential is valid but the account behind it is out of credit.
+     *
+     * Kept separate from {@see STATUS_UNREACHABLE} because the two demand opposite responses: an
+     * unreachable provider is usually transient and worth retrying later, while this one will fail
+     * identically on every future call until a human tops up the account. Collapsing them sends an
+     * operator hunting for a network fault that does not exist.
+     */
+    public const STATUS_INSUFFICIENT_CREDIT = 'insufficient_credit';
+
     /** Timeout, DNS, socket, or any non-2xx that is not auth/rate-limit. */
     public const STATUS_UNREACHABLE = 'unreachable';
 

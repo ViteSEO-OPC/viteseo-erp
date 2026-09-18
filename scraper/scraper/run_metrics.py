@@ -162,6 +162,16 @@ def build_record(
         record["expansion_net_new"] = int(stats.get("expansion_net_new", 0))
         record["expansion_by_selector"] = stats.get("expansion_by_selector") or {}
 
+    # AI SEARCH PLANNING, when the provider consulted it. Absent otherwise — an OSM run or a Google
+    # run with planning off never asked, and a `false` here would claim a plan was sought and unused.
+    # `strategy_applied` is whether a returned plan actually shaped the request; `strategy_status` is
+    # how the planning call itself ended (`ok`, `insufficient_credit`, ...). The CRM reads both to
+    # decide whether a run may be called AI-planned.
+    if "strategy_applied" in stats:
+        record["strategy_applied"] = bool(stats["strategy_applied"])
+    if stats.get("strategy_status"):
+        record["strategy_status"] = str(stats["strategy_status"])
+
     # Cost, when the provider spends money. Absent for OSM rather than zero — "free" and "not
     # measured" are different claims, and a null says which one this is.
     if "prompt_tokens" in stats or "completion_tokens" in stats:

@@ -2,6 +2,7 @@
 
 namespace App\Modules\Crm\Requests;
 
+use App\Modules\Crm\Services\Discovery\AiStrategyCapability;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 
@@ -96,6 +97,10 @@ class StoreDiscoveryRunRequest extends FormRequest
             // Supplied by the client so a double-click, a refresh or a network retry resolves to the
             // SAME run instead of buying a second one.
             'idempotency_key' => ['sometimes', 'string', 'max:64'],
+
+            // OPT-IN AI SEARCH PLANNING FOR THIS RUN ONLY. Absent or false is the pre-existing
+            // behaviour, byte for byte. True is checked against the live capability in `after()`.
+            'ai_strategy' => ['sometimes', 'boolean'],
         ];
     }
 
@@ -125,6 +130,21 @@ class StoreDiscoveryRunRequest extends FormRequest
                         'locations',
                         "That is {$tasks} searches ({$max} is the most one run may schedule). Narrow the locations or niches, or start more than one run.",
                     );
+                }
+            },
+
+            // AN EXPLICIT AI REQUEST IS REFUSED BEFORE ANYTHING IS SPENT when AI cannot run. Never
+            // downgraded to a plain Google run: the user asked for AI, and silently handing them a
+            // search that did not use it is the one outcome this must not produce.
+            function (Validator $validator): void {
+                if (! $this->wantsAiStrategy() || $validator->errors()->has('ai_strategy')) {
+                    return;
+                }
+
+                $status = app(AiStrategyCapability::class)->status();
+
+                if ($status !== AiStrategyCapability::AVAILABLE) {
+                    $validator->errors()->add('ai_strategy', self::aiUnavailableMessage($status));
                 }
             },
 
@@ -158,6 +178,24 @@ class StoreDiscoveryRunRequest extends FormRequest
     public function isNationwide(): bool
     {
         return $this->input('scope') === 'nationwide';
+    }
+
+    /** Did this request explicitly ask for AI search planning? Absent and false both mean no. */
+    public function wantsAiStrategy(): bool
+    {
+        return $this->boolean('ai_strategy');
+    }
+
+    /** One sentence per reason, so "no credit" never reads like "not set up". No credential detail. */
+    private static function aiUnavailableMessage(string $status): string
+    {
+        return match ($status) {
+            AiStrategyCapability::INSUFFICIENT_CREDIT => 'AI Discovery is unavailable: the AI provider account has no credit remaining. No search was started.',
+            AiStrategyCapability::NOT_CONFIGURED => 'AI Discovery is not configured for this workspace. No search was started.',
+            AiStrategyCapability::DISABLED => 'AI Discovery is switched off for this workspace. No search was started.',
+            AiStrategyCapability::UNSUPPORTED_PROVIDER => 'AI Discovery needs Google Places as the discovery provider. No search was started.',
+            default => 'AI Discovery is not available right now. No search was started.',
+        };
     }
 
     /** The country this run is restricted to, already validated against the supported list. */

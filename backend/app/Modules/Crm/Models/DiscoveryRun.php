@@ -28,6 +28,8 @@ use Illuminate\Support\Str;
     'targets_total',
     // Nationwide only; a scoped run leaves both at their default of zero.
     'cells_planned', 'budget_total',
+    // Per-run AI search planning. Absent means false: the run behaves exactly as before.
+    'ai_strategy_requested',
 ])]
 class DiscoveryRun extends Model
 {
@@ -66,6 +68,21 @@ class DiscoveryRun extends Model
      */
     public const SCOPE_NATIONWIDE = 'nationwide';
 
+    /**
+     * WHAT AI SEARCH PLANNING ACTUALLY DID FOR THIS RUN — a closed set, recorded from what the engine
+     * reported, never from what was asked for.
+     *
+     * `applied` requires at least one search to have been shaped by a plan the model returned.
+     * Requesting AI is not enough, and neither is the model answering with nothing to add.
+     */
+    public const AI_APPLIED = 'applied';
+
+    /** AI was not requested, or it was consulted and shaped no search. */
+    public const AI_NOT_APPLIED = 'not_applied';
+
+    /** AI was requested and the provider account could not pay for the call. */
+    public const AI_INSUFFICIENT_CREDIT = 'insufficient_credit';
+
     /** Polling stops here, and so does any further spend. */
     public const TERMINAL = [self::STATUS_COMPLETED, self::STATUS_FAILED, self::STATUS_CANCELLED];
 
@@ -82,6 +99,7 @@ class DiscoveryRun extends Model
     {
         return [
             'scope' => 'array',
+            'ai_strategy_requested' => 'boolean',
             'started_at' => 'datetime',
             'finished_at' => 'datetime',
             'provider_degraded_at' => 'datetime',
@@ -162,6 +180,12 @@ class DiscoveryRun extends Model
     public function isNationwide(): bool
     {
         return $this->scope_class === self::SCOPE_NATIONWIDE;
+    }
+
+    /** The AI outcome as the API reports it. Nothing recorded yet reads as not applied. */
+    public function aiOutcome(): string
+    {
+        return $this->ai_outcome ?? self::AI_NOT_APPLIED;
     }
 
     public function isTerminal(): bool

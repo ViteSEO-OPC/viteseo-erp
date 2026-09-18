@@ -134,6 +134,7 @@ class NationwideDiscoveryRunTest extends TestCase
                 string $metricsPath,
                 ?array $bbox = null,
                 ?string $country = null,
+                bool $aiStrategy = false,
             ): array {
                 return $this->test->recordCall(
                     compact('area', 'category', 'limit', 'provider', 'bbox', 'country'),

@@ -12,6 +12,7 @@ import {
   canRunNationwide,
   discoveryUnavailableReason,
 } from "@/modules/crm/features/nearby-clients/lib/discovery-capability";
+import { canRunAiDiscovery } from "@/modules/crm/features/nearby-clients/lib/ai-discovery";
 
 /**
  * Which discovery provider is actually running, as the Nearby board needs to know it.
@@ -32,6 +33,11 @@ export type DiscoveryConfig = {
   reason: string;
   mode: string;
   isFallback: boolean;
+  /**
+   * Whether a run may ask AI to plan its searches — a status word, nothing else. Optional so a
+   * backend older than AI Discovery reads as "not available" rather than failing to parse.
+   */
+  aiStrategy?: { status: string };
 };
 
 export type MapProviderState = {
@@ -78,6 +84,10 @@ export type DiscoveryCapability = {
   canRunNationwide: boolean;
   /** Why it is unavailable, for an operator — null when it is available. Never names a credential. */
   unavailableReason: string | null;
+  /** May "Discover with AI" be offered? Google Places live AND the backend reports AI available. */
+  canRunAi: boolean;
+  /** The backend's AI status word (`available`, `insufficient_credit`, ...), or null while unknown. */
+  aiStatus: string | null;
   /** True while the lookup is in flight. Capability is withheld until it answers. */
   isLoading: boolean;
 };
@@ -96,6 +106,8 @@ export function useDiscoveryCapability(): DiscoveryCapability {
     canDiscover: canRunDiscovery(effective),
     canRunNationwide: canRunNationwide(effective),
     unavailableReason: discoveryUnavailableReason(effective),
+    canRunAi: canRunAiDiscovery(effective, query.data?.aiStrategy?.status),
+    aiStatus: query.data?.aiStrategy?.status ?? null,
     isLoading: query.isLoading,
   };
 }

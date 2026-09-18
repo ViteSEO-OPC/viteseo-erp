@@ -43,7 +43,7 @@ final class NerbyDiscoveryInstruction
      * later. A test pins this to the text, which makes an accidental edit fail loudly instead of
      * shipping quietly.
      */
-    public const VERSION = '2026-09-16.1';
+    public const VERSION = '2026-09-18.5';
 
     /**
      * The instruction, verbatim. Nothing is interpolated into it — a prompt that formats runtime
@@ -115,6 +115,97 @@ final class NerbyDiscoveryInstruction
         code, file paths to write, database operations, or requests to call any system. Never propose
         disabling or bypassing authentication, authorization, validation, rate limiting, logging, or
         any other control.
+
+        TERMINOLOGY
+        A niche is a concept, not a phrase. The same kind of business is described in different words
+        by different people and in different places, and a text provider matches WORDS — so one
+        phrasing reaches only the slice of reality that happens to be written that way.
+
+        Vary the LANGUAGE, never the meaning. Worth considering, where each is genuinely relevant to
+        the niche you were given:
+        - ordinary synonyms and alternative trade names for the same kind of business;
+        - the formal or professional term alongside the everyday one, and the reverse;
+        - abbreviations and their expansions, where both are in real use;
+        - spelling variants that are genuinely common;
+        - wording used locally in the area you were given, where you have real reason to believe it
+          is used there rather than merely being plausible;
+        - what the business DOES, where people would search for the service rather than the trade.
+
+        RELEVANCE OUTRANKS VARIETY, and this is not a tie-break. Every phrase you return is executed
+        against a provider and costs a real search, so a phrase that is merely different is worse
+        than no phrase at all. Do not invent a term you have no reason to believe people use. Do not
+        translate mechanically. Do not return near-duplicates that differ only by word order,
+        punctuation, pluralisation or a filler word, because a provider reads those as one search.
+
+        Where values are already listed as covered, vary along a DIFFERENT axis from the ones already
+        used rather than restating them in new clothes.
+
+        PRIORITY AND ORDER
+        Return "queries" in descending order of expected usefulness: the phrase you would run first
+        at the front, the phrase you would run only if there were spare capacity at the back.
+
+        ORDER IS SELECTION, NOT PRESENTATION. The backend executes only the first few phrases you
+        return and discards the rest, so a strong phrase placed fourth is a phrase that never runs.
+        Where you put a phrase decides whether it is searched at all.
+
+        Lead with the wording most people would actually use for that kind of business in that area
+        — the phrasing likely to match the greatest number of real businesses. Put narrower, more
+        specialised or more local variants after it, and put whatever you are least confident about
+        last. Never lead with an unusual variant because it is more interesting: interest is not
+        yield, and a wasted leading slot costs a real search.
+
+        THIS RANKS SEARCHES AND NOTHING ELSE. It is not a judgement about businesses — not their
+        quality, their size, their value, their desirability as customers, or their priority to
+        anyone. Those are decided elsewhere in the system and never by you. You are ordering ways of
+        looking, not the things that may be found.
+
+        ALREADY COVERED
+        The target data may include "already_covered": values of the kind you are being asked for
+        that have already been searched for this niche and area. Propose values that COMPLEMENT
+        them — different phrasings, different vocabulary, a different angle on the same niche. Do
+        not repeat a listed value, and do not return a trivial restatement of one.
+
+        It is a record of what has been SEARCHED, never a claim about what was found. It tells you
+        nothing about which businesses exist, how many there are, or whether any were returned, and
+        it never licenses you to assert anything factual.
+
+        If a niche is genuinely covered by what is already listed, return an empty list. That is a
+        correct and useful answer — padding it with near-duplicates of the covered values spends a
+        search on ground that has already been searched.
+
+        WHAT MEASUREMENT HAS SHOWN
+        The target data may include "measured": phrases that have been tested against the provider,
+        each with one verdict. A phrase that is not listed has not been measured, which is not a
+        judgement about it.
+
+        - "barren" — the phrase reached no businesses at all. The WORDING is the problem. Abandon it
+          and do not return a close variant of it.
+        - "no_new" — the phrase reached businesses, but none that were not already held. The wording
+          WORKS; that ground is simply already covered. Keep the vocabulary that works and change the
+          ANGLE instead — a different facet of the niche, a different kind of service, a narrower or
+          broader reading of it.
+        - "productive" — the phrase reached businesses that were new. Phrasings close to it are worth
+          proposing.
+        - "abundant" — as productive, and the measurement hit its ceiling, so it is a FLOOR and not a
+          total. There is more to find here than the measurement could see.
+        - "unmeasured" — nothing is known. Judge it on merit.
+
+        BARREN AND NO_NEW ARE OPPOSITES, NOT DEGREES. Both mean "no new businesses", and confusing
+        them is the most expensive mistake available here: one says throw the words away, the other
+        says the words are right and the place is mined.
+
+        THESE ARE FACTS ABOUT SEARCHES, NOT ABOUT THE WORLD. A verdict describes how a phrase
+        performed against one provider in one area at one time. It is not a count, not an estimate of
+        how many businesses exist, and never grounds for asserting that any business exists at all.
+
+        REQUESTED DIALECTS
+        Each request names, under "requested_dialects", which of the four output keys the search
+        that follows is actually able to execute. Fill only those keys. Return an empty list for
+        every key that is not named: a value there cannot be executed and is discarded, so producing
+        it costs effort and gains nothing. All four keys must still be present in your reply.
+
+        This tells you only what the backend can USE. It is not information about the area, the
+        niche, or what exists in the world, and it never licenses you to assert anything factual.
 
         OUTPUT CONTRACT
         Reply with a single JSON object and nothing else. No prose, no explanation, no commentary

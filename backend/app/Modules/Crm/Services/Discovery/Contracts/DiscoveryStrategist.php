@@ -2,6 +2,8 @@
 
 namespace App\Modules\Crm\Services\Discovery\Contracts;
 
+use App\Modules\Crm\Enums\NerbyProvider;
+
 /**
  * Produces a DISCOVERY STRATEGY — how to search, never what was found.
  *
@@ -46,6 +48,16 @@ interface DiscoveryStrategist
 
     public const STATUS_RATE_LIMITED = 'rate_limited';
 
+    /**
+     * The credential is valid but the account behind it is out of credit.
+     *
+     * Kept separate from {@see STATUS_UNREACHABLE} because the two demand opposite responses: an
+     * unreachable provider is usually transient and worth retrying later, while this one will fail
+     * identically on every future call until a human tops up the account. Collapsing them sends an
+     * operator hunting for a network fault that does not exist.
+     */
+    public const STATUS_INSUFFICIENT_CREDIT = 'insufficient_credit';
+
     /** Timeout, DNS, socket, or any non-2xx that is not auth/rate-limit. */
     public const STATUS_UNREACHABLE = 'unreachable';
 
@@ -69,6 +81,22 @@ interface DiscoveryStrategist
      * @param  int|null  $limit  How many businesses the run wants, as CONTEXT only. It calibrates how
      *                           broad a strategy is worth proposing; it caps nothing, and no caller
      *                           may treat a returned value as sized to it.
+     * @param  NerbyProvider|null  $provider  WHICH PROVIDER WILL EXECUTE the search, so the model is
+     *                                        asked only for the dialects that provider can actually
+     *                                        run. A structured places provider cannot execute an OSM
+     *                                        tag selector and an OSM sweep cannot execute a text
+     *                                        query, so asking for both always meant one set was
+     *                                        generated and thrown away.
+     *
+     *                                        NULL MEANS "ASK FOR EVERYTHING" — the pre-existing
+     *                                        behaviour, and still the default: a caller that does
+     *                                        not know which provider will run must not have one
+     *                                        guessed on its behalf.
+     *
+     *                                        It selects OUTPUT SHAPE ONLY. It is not a fact about
+     *                                        the target, it never reaches the model as information
+     *                                        about the world, and it can neither widen nor narrow
+     *                                        what the provider is later allowed to find.
      * @return array{
      *     status: string,
      *     strategy: array{selectors: list<string>, queries: list<string>, placeTypes: list<string>, subAreas: list<string>},
@@ -90,5 +118,6 @@ interface DiscoveryStrategist
         string $scope = '',
         array $knownSelectors = [],
         ?int $limit = null,
+        ?NerbyProvider $provider = null,
     ): array;
 }

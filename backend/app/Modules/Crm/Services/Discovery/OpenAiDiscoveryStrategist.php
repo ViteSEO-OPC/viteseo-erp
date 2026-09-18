@@ -25,11 +25,14 @@ use Throwable;
  * place name fails to geocode and is discarded before it is searched. There is no wrong answer here
  * that can become a lead.
  *
- * CACHED ON (category, scope), WHICH IS THE COST STORY. Whether a niche maps to `shop=chemist`, or
- * which sub-areas a metro region contains, does not change between runs — so a pair is asked about
- * once and reused indefinitely. Only successful answers are cached, so a failure is never pinned in
- * place. Scope is part of the key because sub-areas depend on it; category-only answers would be
- * wrong the moment a second scope asked.
+ * CACHED ON (instruction version, category, scope), WHICH IS THE COST STORY. Whether a niche maps
+ * to `shop=chemist`, or which sub-areas a metro region contains, does not change between runs — so
+ * a pair is asked about once and reused indefinitely. Only successful answers are cached, so a
+ * failure is never pinned in place. Scope is part of the key because sub-areas depend on it;
+ * category-only answers would be wrong the moment a second scope asked. The INSTRUCTION VERSION
+ * leads the key so that a reviewed prompt change breaks the cache by construction — see
+ * {@see cacheKey()} for why a permanent cache without it would apply an upgrade only to niches
+ * nobody had searched yet.
  *
  * THE LIMIT IS DELIBERATELY NOT IN THE KEY. It is context for how broad a plan is worth proposing,
  * not an input the plan should vary with: HOW to search for a niche in a place does not change
@@ -41,6 +44,29 @@ use Throwable;
  */
 class OpenAiDiscoveryStrategist implements DiscoveryStrategist
 {
+    /*
+     * THE FOUR OUTPUT DIALECTS, named so a caller can reason about them without string literals.
+     *
+     * Each is a way of EXPRESSING A SEARCH, and no provider speaks all of them: a structured places
+     * provider executes queries and place types, an OSM sweep executes tag selectors. Asking for all
+     * four always meant generating a set nobody could run and discarding it.
+     */
+    public const DIALECT_SELECTORS = 'selectors';
+
+    public const DIALECT_QUERIES = 'queries';
+
+    public const DIALECT_PLACE_TYPES = 'placeTypes';
+
+    public const DIALECT_SUB_AREAS = 'subAreas';
+
+    /** Every dialect. The default, and what a caller that names no provider still receives. */
+    public const ALL_DIALECTS = [
+        self::DIALECT_SELECTORS,
+        self::DIALECT_QUERIES,
+        self::DIALECT_PLACE_TYPES,
+        self::DIALECT_SUB_AREAS,
+    ];
+
     /** Per-dialect ceilings. They bound the model's output AND every query built from it. */
     public const MAX_SELECTORS = 8;
 
@@ -56,6 +82,19 @@ class OpenAiDiscoveryStrategist implements DiscoveryStrategist
 
     /** How many "already covered" selectors a caller may send. Advisory input, still bounded. */
     public const MAX_KNOWN_SELECTORS = 32;
+
+    /**
+     * Hard ceiling on the completion, so a runaway generation cannot bill without bound.
+     *
+     * SIZED ABOVE THE SCHEMA'S OWN MAXIMUM, ON PURPOSE. The largest answer this class will accept is
+     * 8 selectors + 8 queries + 8 place types + 16 sub-areas, each at most MAX_VALUE_LENGTH — about
+     * 1,200 tokens of JSON at the absolute worst. The cap sits above that so a well-formed maximal
+     * answer can never be cut off: a truncated completion is invalid JSON, which this class reports
+     * as STATUS_INVALID_RESPONSE, and silently converting "the model answered fully" into "the model
+     * failed" would be a far worse bug than the spend this bounds. It exists to stop a pathological
+     * generation, not to trim a legitimate one.
+     */
+    public const MAX_COMPLETION_TOKENS = 1500;
 
     private const CACHE_PREFIX = 'crm:discovery:strategy:';
 
@@ -78,7 +117,11 @@ class OpenAiDiscoveryStrategist implements DiscoveryStrategist
     /** Place types are a closed, machine vocabulary — validated by shape, not by hope. */
     private const PLACE_TYPE_PATTERN = '/^[a-z][a-z0-9_]{1,59}$/';
 
-    public function __construct(private readonly NerbyProviderSettingService $settings) {}
+    public function __construct(
+        private readonly NerbyProviderSettingService $settings,
+        private readonly ExecutedQueryLedger $ledger,
+        private readonly QueryFeedback $feedback,
+    ) {}
 
     /**
      * @param  list<string>  $knownSelectors
@@ -89,6 +132,7 @@ class OpenAiDiscoveryStrategist implements DiscoveryStrategist
         string $scope = '',
         array $knownSelectors = [],
         ?int $limit = null,
+        ?NerbyProvider $provider = null,
     ): array {
         // SANITISED AT THE DOOR, not just at the form request: this service is reachable directly,
         // and a boundary that only holds for one caller is not a boundary.
@@ -96,14 +140,54 @@ class OpenAiDiscoveryStrategist implements DiscoveryStrategist
         $scope = $this->sanitize($scope, self::MAX_SCOPE_LENGTH);
         $knownSelectors = $this->strings($knownSelectors, self::MAX_KNOWN_SELECTORS);
 
-        $cached = Cache::get($this->cacheKey($category, $scope));
+        // WHICH OUTPUT SHAPES THIS SEARCH CAN ACTUALLY RUN. Resolved before the cache is read
+        // because two providers asking about the same niche are asking DIFFERENT questions, and
+        // their answers must not share an entry.
+        $dialects = $this->dialectsFor($provider);
+
+        // WHAT HAS ALREADY BEEN COVERED, EXPRESSED IN THE DIALECT BEING ASKED FOR.
+        //
+        // The parameter has always carried OSM selectors, which no caller ever populated and which a
+        // places provider is not even asked for any more — so on the live Google path the model was
+        // told nothing about what had been searched, and a cached plan repeated the same phrases on
+        // every run forever. When queries are the dialect, the phrases this CRM actually dispatched
+        // are the honest answer; otherwise the caller's selectors stand, unchanged.
+        //
+        // Sanitised on the way in exactly like every other untrusted value: these phrases originated
+        // from a model, and a value that has been out of this system comes back in as data.
+        $covered = in_array(self::DIALECT_QUERIES, $dialects, true)
+            ? $this->strings($this->ledger->covered($category, $scope), self::MAX_KNOWN_SELECTORS)
+            : $knownSelectors;
+
+        // WHAT MEASUREMENT HAS SHOWN about phrases tried here before. Resolved before the cache,
+        // because a question asked with new measurements is a DIFFERENT question — a permanent cache
+        // that ignored them would keep answering the pre-measurement one forever.
+        //
+        // MEASURED IS NOT COVERED. This informs; it excludes nothing. A probed phrase has not
+        // necessarily been searched in production, and only `$covered` may remove a phrase from a
+        // plan. Empty whenever feedback is switched off, or when queries are not the dialect —
+        // verdicts are about query phrases and nothing else measures them.
+        $measured = in_array(self::DIALECT_QUERIES, $dialects, true)
+            ? $this->feedback->reportFor($category, $scope)
+            : [];
+
+        $cached = Cache::get($this->cacheKey($category, $scope, $dialects, $covered, $measured));
         if (is_array($cached)) {
             return [
                 'status' => self::STATUS_OK,
                 'strategy' => $this->shape($cached),
                 // Zeroed rather than absent: this call really did cost nothing, which is a different
                 // fact from "cost was not measured".
-                'usage' => ['model' => 'cache', 'prompt_tokens' => 0, 'completion_tokens' => 0],
+                'usage' => [
+                    'model' => 'cache',
+                    'prompt_tokens' => 0,
+                    'completion_tokens' => 0,
+                    // Which instruction this plan was produced under. On a hit it is necessarily the
+                    // current one — the version is part of the key, so an older entry cannot be read
+                    // here at all. Reported anyway so a reader never has to know that to trust it.
+                    'prompt_version' => NerbyDiscoveryInstruction::VERSION,
+                    'requested_dialects' => $dialects,
+                ],
                 'error' => null,
             ];
         }
@@ -128,6 +212,8 @@ class OpenAiDiscoveryStrategist implements DiscoveryStrategist
                     // Deterministic: the same question must not yield a different plan on two runs,
                     // or a cached answer would differ from the one that produced the measurement.
                     'temperature' => 0,
+                    // Bounds a runaway completion. See MAX_COMPLETION_TOKENS on why it is generous.
+                    'max_tokens' => self::MAX_COMPLETION_TOKENS,
                     'response_format' => ['type' => 'json_object'],
                     'messages' => [
                         // THE ONLY TRUSTED CONTENT IN THE REQUEST. Nothing is interpolated into it:
@@ -153,8 +239,28 @@ class OpenAiDiscoveryStrategist implements DiscoveryStrategist
                                     'scope' => $scope,
                                     // Context only: how broad a plan is worth proposing. Caps nothing.
                                     'result_target' => $limit,
-                                    'already_covered' => $knownSelectors,
+                                    // Kept inside the UNTRUSTED envelope even though the CRM
+                                    // dispatched these itself: they began as model output, and
+                                    // anything that has been out of this system returns as data.
+                                    'already_covered' => $covered,
+                                    // INSIDE THE UNTRUSTED ENVELOPE, deliberately. The verdicts are
+                                    // computed by this backend, but they are KEYED BY PHRASES that
+                                    // began as model output — and a fact is only as trusted as its
+                                    // least trusted part. The verdict itself is a closed enum, so
+                                    // nothing here can carry injected content.
+                                    //
+                                    // A SEPARATE LIST FROM `already_covered`, never merged into it:
+                                    // measured and executed are different sets, and conflating them
+                                    // would suppress searches that never actually ran.
+                                    'measured' => $measured,
                                 ],
+                                // TRUSTED BACKEND FACT, and deliberately NOT inside
+                                // `untrusted_target_data`: this says what the CRM can execute, it
+                                // never originates outside this system, and it must not be
+                                // confusable with anything the target supplied. It is still only a
+                                // statement about OUTPUT SHAPE — it tells the model nothing about
+                                // the world, which is why it is safe to trust.
+                                'requested_dialects' => $dialects,
                                 'limits' => [
                                     'max_selectors' => self::MAX_SELECTORS,
                                     'max_queries' => self::MAX_QUERIES,
@@ -176,11 +282,9 @@ class OpenAiDiscoveryStrategist implements DiscoveryStrategist
         }
 
         if (! $response->successful()) {
-            $status = match (true) {
-                in_array($response->status(), [401, 403], true) => self::STATUS_AUTH_FAILED,
-                $response->status() === 429 => self::STATUS_RATE_LIMITED,
-                default => self::STATUS_UNREACHABLE,
-            };
+            // ONE mapping for every caller, so a status like 402 is understood identically
+            // wherever it lands. See AiChatEndpoint::classify().
+            $status = AiChatEndpoint::classify($response->status());
 
             Log::warning('Nearby discovery strategy rejected', [
                 'status' => $status,
@@ -196,15 +300,27 @@ class OpenAiDiscoveryStrategist implements DiscoveryStrategist
             return $this->failure(self::STATUS_INVALID_RESPONSE, 'unreadable_body');
         }
 
+        // ENFORCED, NOT REQUESTED. The instruction asks for the named dialects only; a model that
+        // answers in a dialect nobody can execute has its extra values dropped here. The prompt
+        // saves the tokens, this guarantees the shape — the same "ask politely, enforce in code"
+        // split the rest of this class already uses.
         $strategy = $this->shape([
-            'selectors' => $this->strings($decoded['selectors'] ?? null, self::MAX_SELECTORS),
-            'queries' => $this->strings($decoded['queries'] ?? null, self::MAX_QUERIES),
-            'placeTypes' => $this->placeTypes($decoded['placeTypes'] ?? null),
-            'subAreas' => $this->strings($decoded['subAreas'] ?? null, self::MAX_SUB_AREAS),
+            'selectors' => in_array(self::DIALECT_SELECTORS, $dialects, true)
+                ? $this->strings($decoded['selectors'] ?? null, self::MAX_SELECTORS) : [],
+            'queries' => in_array(self::DIALECT_QUERIES, $dialects, true)
+                ? $this->rankedUsable(
+                    $this->strings($decoded['queries'] ?? null, self::MAX_QUERIES),
+                    $covered,
+                )
+                : [],
+            'placeTypes' => in_array(self::DIALECT_PLACE_TYPES, $dialects, true)
+                ? $this->placeTypes($decoded['placeTypes'] ?? null) : [],
+            'subAreas' => in_array(self::DIALECT_SUB_AREAS, $dialects, true)
+                ? $this->strings($decoded['subAreas'] ?? null, self::MAX_SUB_AREAS) : [],
         ]);
 
         // Only successful answers are cached — a failure must never be pinned in place.
-        Cache::forever($this->cacheKey($category, $scope), $strategy);
+        Cache::forever($this->cacheKey($category, $scope, $dialects, $covered, $measured), $strategy);
 
         return [
             'status' => self::STATUS_OK,
@@ -213,20 +329,121 @@ class OpenAiDiscoveryStrategist implements DiscoveryStrategist
                 'model' => $endpoint->model,
                 'prompt_tokens' => (int) $response->json('usage.prompt_tokens', 0),
                 'completion_tokens' => (int) $response->json('usage.completion_tokens', 0),
+                // Pinned beside the model, for the same reason the model is: a plan stays
+                // explainable after the instruction moves on. `model` alone cannot explain an
+                // answer whose wording came from a prompt that no longer exists.
+                'prompt_version' => NerbyDiscoveryInstruction::VERSION,
+                // What was asked for, so a plan with an empty dialect is readable as "not wanted"
+                // rather than as "the model had nothing".
+                'requested_dialects' => $dialects,
             ],
             'error' => null,
         ];
     }
 
-    /** Drop a cached plan so the question is asked again. */
+    /**
+     * Drop a cached plan so the question is asked again.
+     *
+     * Clears the entry for EVERY dialect set, because a plan is now cached per (provider shape,
+     * category, scope): forgetting only one shape would leave the same niche answered from cache
+     * for a different provider, which is the confusing half-state this method exists to avoid.
+     */
     public function forget(string $category, string $scope = ''): void
     {
-        Cache::forget($this->cacheKey(trim($category), trim($scope)));
+        $category = trim($category);
+        $scope = trim($scope);
+
+        // Both the untouched state and the coverage this target actually has: those are the two
+        // fingerprints a live entry can be under, and clearing only one would leave a plan cached.
+        $coverages = [[], $this->ledger->covered($category, $scope)];
+
+        foreach ([self::ALL_DIALECTS, ...array_map(
+            fn (NerbyProvider $provider): array => $this->dialectsFor($provider),
+            NerbyProvider::cases(),
+        )] as $dialects) {
+            foreach ($coverages as $covered) {
+                // Both the no-feedback state and whatever feedback this target currently has: the
+                // two identities a live entry can be under.
+                foreach ([[], $this->feedback->reportFor($category, $scope)] as $measured) {
+                    Cache::forget($this->cacheKey($category, $scope, $dialects, $covered, $measured));
+                }
+            }
+        }
     }
 
-    private function cacheKey(string $category, string $scope): string
+    /**
+     * THE INSTRUCTION VERSION IS PART OF THE KEY, and that is the whole point of this method.
+     *
+     * Plans are cached with `Cache::forever`, so without the version every answer produced by an
+     * older instruction would outlive it indefinitely: the prompt could be rewritten, reviewed and
+     * deployed, and a (category, scope) that had already been asked would keep returning the OLD
+     * model's plan for the life of the cache — with nothing anywhere recording which text produced
+     * it. A prompt upgrade would silently apply only to niches nobody had searched yet, which is the
+     * worst possible half-state for a change that is reviewed as a security contract.
+     *
+     * Including it makes a version bump a clean, automatic cache break: new keys miss, are asked
+     * again under the new instruction, and the old entries simply age out of use. No migration, no
+     * manual flush, and no window in which two instructions are both in force without a way to tell
+     * which one answered.
+     */
+    private function cacheKey(
+        string $category,
+        string $scope,
+        array $dialects,
+        array $covered,
+        array $measured = [],
+    ): string {
+        return self::CACHE_PREFIX
+            .NerbyDiscoveryInstruction::VERSION.'|'
+            .implode(',', $dialects).'|'
+            // COVERAGE IS PART OF THE QUESTION. "What else should I search for this niche, given I
+            // have already tried these three phrases" is a different question from the one asked on
+            // a fresh target, and a permanent cache that ignored the difference would answer the
+            // first question forever — which is exactly the repetition this is meant to end.
+            .$this->ledger->fingerprint($covered).'|'
+            // FEEDBACK IS PART OF THE QUESTION TOO. Measurements change what a good answer looks
+            // like, so a plan formed before them must not be replayed after them.
+            .$this->feedback->fingerprint($measured).'|'
+            .mb_strtolower($category).'|'
+            .mb_strtolower($scope);
+    }
+
+    /**
+     * Which dialects the provider that will execute this search can actually run.
+     *
+     * NULL ASKS FOR EVERYTHING, and that is the pre-existing behaviour preserved exactly: a caller
+     * that does not know which provider will run must not have one guessed on its behalf, and every
+     * caller that existed before this parameter keeps the answer it always got.
+     *
+     * SUB-AREAS ARE ALWAYS REQUESTED, whatever the provider. They are not a provider dialect at all
+     * — they are advice for PARTITIONING a scope that is too large to search in one request, which
+     * is a question about geography rather than about query syntax, and the partitioner that uses
+     * them sits upstream of every provider. Dropping them for a specific provider would silently
+     * disable partitioning for that provider's runs.
+     *
+     * AN UNRECOGNISED PROVIDER FALLS BACK TO EVERYTHING rather than to nothing. A new provider added
+     * to the enum without being taught here must lose a token saving, never lose its strategy.
+     *
+     * @return list<string>
+     */
+    private function dialectsFor(?NerbyProvider $provider): array
     {
-        return self::CACHE_PREFIX.mb_strtolower($category).'|'.mb_strtolower($scope);
+        return match ($provider) {
+            // A structured places provider takes free text and its own type vocabulary. It cannot
+            // execute an OSM tag selector, and `selectors` is consumed by nothing on this path.
+            NerbyProvider::GOOGLE_PLACES => [
+                self::DIALECT_QUERIES,
+                self::DIALECT_PLACE_TYPES,
+                self::DIALECT_SUB_AREAS,
+            ],
+            // Both OSM lanes sweep Overpass by tag. A text query has nothing to execute it, and the
+            // AI-assisted lane still resolves everything it proposes against OSM.
+            NerbyProvider::OPENSTREETMAP, NerbyProvider::OPENAI => [
+                self::DIALECT_SELECTORS,
+                self::DIALECT_SUB_AREAS,
+            ],
+            null => self::ALL_DIALECTS,
+        };
     }
 
     /**
@@ -271,6 +488,82 @@ class OpenAiDiscoveryStrategist implements DiscoveryStrategist
         }
 
         return $out;
+    }
+
+    /**
+     * The phrases worth spending a slot on, IN THE ORDER THE MODEL RANKED THEM.
+     *
+     * WHY ORDER IS THE WHOLE POINT. The provider executes only its first few phrases and discards
+     * the rest, so position decides which searches actually happen. The instruction asks for
+     * descending expected usefulness; this method's job is to make sure nothing downstream disturbs
+     * that ranking, and that a leading slot is never spent on a search that cannot pay for itself.
+     *
+     * IT DOES NOT RE-RANK. Judging which phrasing will find more businesses is exactly the judgement
+     * the model is better placed to make, and a backend heuristic would only fight it. Order is
+     * preserved untouched; entries are removed, never moved.
+     *
+     * TWO KINDS OF ENTRY ARE REMOVED, both because they would waste a slot rather than because they
+     * are wrong:
+     *
+     *   - ALREADY SEARCHED. A phrase in the E2 ledger has run for this target, so running it again
+     *     is a paid request guaranteed to return ground already covered.
+     *   - A NEAR-DUPLICATE OF SOMETHING ALREADY KEPT. Two phrases that a text provider reads as the
+     *     same search spend two of three slots on one search. The instruction asks the model not to
+     *     produce them; this is what happens when it does anyway.
+     *
+     * FIRST OCCURRENCE WINS, which is what makes removal safe: when two phrases collapse, the one
+     * the model ranked higher is the one that survives.
+     *
+     * QUERIES ONLY. The selector lane's covered list is the caller's own advisory input, and its
+     * contract has always said the caller de-duplicates — filtering it here would change how the
+     * OpenStreetMap path behaves, which this is not allowed to do.
+     *
+     * @param  list<string>  $values  the model's answer, in its ranked order
+     * @param  list<string>  $covered  phrases already searched for this target
+     * @return list<string>
+     */
+    private function rankedUsable(array $values, array $covered): array
+    {
+        $spent = [];
+        foreach ($covered as $phrase) {
+            $spent[$this->canonical($phrase)] = true;
+        }
+
+        $out = [];
+        foreach ($values as $value) {
+            $key = $this->canonical($value);
+
+            // A phrase with no letters or digits is not a search term at all.
+            if ($key === '' || isset($spent[$key])) {
+                continue;
+            }
+
+            $spent[$key] = true;
+            $out[] = $value;
+        }
+
+        return $out;
+    }
+
+    /**
+     * The form in which two phrases are THE SAME SEARCH.
+     *
+     * Lower-cased, stripped of everything that is not a letter or a digit, and with the remaining
+     * words sorted — so case, punctuation, spacing and word order stop distinguishing phrases that
+     * a text provider would answer identically.
+     *
+     * DELIBERATELY NOT A STEMMER. Nothing is truncated to a root and no suffix is stripped, because
+     * that is language-specific: a rule that folds an English plural also mangles words in the local
+     * vocabulary this system is meant to search in, and wrongly collapsing two genuinely different
+     * phrasings costs a real search that would have found real businesses. Requiring the same words
+     * is conservative on purpose — it catches the restatements, and leaves anything arguable alone.
+     */
+    private function canonical(string $value): string
+    {
+        $words = preg_split('/[^\p{L}\p{N}]+/u', mb_strtolower($value), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        sort($words);
+
+        return implode(' ', $words);
     }
 
     /**

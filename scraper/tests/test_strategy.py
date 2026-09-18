@@ -209,3 +209,43 @@ def test_nothing_in_the_answer_can_describe_a_business(monkeypatch):
 
     for forbidden in ("provider_id", "place_id", "latitude", "longitude", "phone", "website", "name"):
         assert not hasattr(plan, forbidden)
+
+
+# --- the optional status report (per-run AI Discovery) ---------------------------------------------
+#
+# `None` cannot say WHY there is no plan, and the CRM must tell "the account has no credit" from "AI
+# is switched off" to label a run truthfully. `report` carries that word without changing what
+# `fetch_strategy` returns to any existing caller.
+
+
+def test_report_carries_ok_on_a_real_answer(monkeypatch):
+    report = {}
+    assert call(monkeypatch, FakeClient(ok()), report=report) is not None
+    assert report == {"status": "ok"}
+
+
+def test_report_carries_the_crms_insufficient_credit_word(monkeypatch):
+    report = {}
+    body = {"message": "no credit", "data": {"available": True, "executionStatus": "insufficient_credit"}}
+    assert call(monkeypatch, FakeClient(response(body, status=502)), report=report) is None
+    assert report == {"status": "insufficient_credit"}
+
+
+def test_report_distinguishes_a_disabled_capability_and_an_unreachable_crm(monkeypatch):
+    disabled = {}
+    call(monkeypatch, FakeClient(response({"message": "no"}, status=409)), report=disabled)
+    assert disabled == {"status": "not_enabled"}
+
+    down = {}
+    call(monkeypatch, FakeClient(raises=httpx.ConnectError("down")), report=down)
+    assert down == {"status": "unreachable"}
+
+    bare = {}
+    call(monkeypatch, FakeClient(response({"message": "no"}, status=500)), report=bare)
+    assert bare == {"status": "http_500"}
+
+
+def test_omitting_report_changes_nothing(monkeypatch):
+    # The pre-existing call shape still works and still returns None on refusal.
+    body = {"data": {"executionStatus": "insufficient_credit"}}
+    assert call(monkeypatch, FakeClient(response(body, status=502))) is None
