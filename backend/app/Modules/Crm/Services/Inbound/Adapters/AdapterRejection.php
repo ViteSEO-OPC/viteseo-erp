@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Modules\Crm\Services\Inbound\Adapters;
 
+use App\Modules\Crm\Services\Inbound\SafeIdentifier;
+
 /**
  * One envelope item that did not become a CRM message, described safely.
  *
@@ -33,7 +35,7 @@ final class AdapterRejection
         ?string $externalEventId = null,
         ?bool $recoverable = null,
     ) {
-        $this->externalEventId = SafeIdentifier::for($externalEventId, SafeIdentifier::EVENT_ID);
+        $this->externalEventId = SafeIdentifier::for($externalEventId, SafeIdentifier::EXTERNAL_ID);
         // The code decides recoverability; the override exists for the rare case where a caller
         // knows better (a persistence failure it has already established is permanent).
         $this->recoverable = $recoverable ?? $code->isRecoverable();

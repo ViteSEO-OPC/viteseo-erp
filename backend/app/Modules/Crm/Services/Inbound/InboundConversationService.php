@@ -269,7 +269,8 @@ final class InboundConversationService
         string $key,
     ): InboundConversationPersistenceException {
         $diagnostics = $this->diagnostics($orgId, $message, $key, [
-            'sqlstate' => (string) $exception->getCode(),
+            // Five characters by the SQL standard, but it is the driver's string and not ours.
+            'sqlstate' => SafeIdentifier::for((string) $exception->getCode(), SafeIdentifier::CODE),
             'result' => 'persistence_failed',
         ]);
 
@@ -298,6 +299,24 @@ final class InboundConversationService
     /**
      * Safe diagnostics only: identifiers a support engineer can act on, and nothing a person wrote.
      *
+     * THE IDENTIFIERS ARE SANITIZED HERE, AND ONLY HERE. Four of them originate outside this
+     * system — provider and channel come from whichever adapter normalized the event, and the two
+     * external ids come straight from the provider's payload. In structured log context a newline
+     * does not mangle a field, it forges a RECORD: a fabricated line that a dashboard cannot tell
+     * from one this application emitted. {@see SafeIdentifier} strips control and format
+     * characters, repairs invalid UTF-8 and bounds each value to its column width.
+     *
+     * This array feeds the three log calls AND the message of
+     * {@see InboundConversationPersistenceException}, so one boundary covers both.
+     *
+     * NOTHING FUNCTIONAL READS THIS. Sanitization is lossy — two different providers could
+     * sanitize to one string — so it must never touch what identifies a conversation, derives the
+     * idempotency key or gets persisted. Those paths use `$message` directly and are untouched:
+     * this method's output is written to a log and to an exception message, and nowhere else.
+     *
+     * `idempotency_key` is left alone deliberately: it is this system's own SHA-256 hex digest,
+     * bounded and character-safe by construction, and passing it through would be redundant.
+     *
      * @param  array<string, scalar|null>  $extra
      * @return array<string, scalar|null>
      */
@@ -305,10 +324,10 @@ final class InboundConversationService
     {
         return [
             'org_id' => $orgId,
-            'provider' => $message->provider,
-            'channel' => $message->channel,
-            'external_conversation_id' => $message->externalConversationId,
-            'external_message_id' => $this->trimmedOrNull($message->externalMessageId),
+            'provider' => SafeIdentifier::for($message->provider, SafeIdentifier::PROVIDER),
+            'channel' => SafeIdentifier::for($message->channel, SafeIdentifier::CHANNEL),
+            'external_conversation_id' => SafeIdentifier::for($message->externalConversationId, SafeIdentifier::EXTERNAL_ID),
+            'external_message_id' => SafeIdentifier::for($message->externalMessageId, SafeIdentifier::EXTERNAL_ID),
             'idempotency_key' => $key,
             ...$extra,
         ];

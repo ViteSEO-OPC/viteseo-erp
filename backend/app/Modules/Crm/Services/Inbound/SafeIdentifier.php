@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace App\Modules\Crm\Services\Inbound\Adapters;
+namespace App\Modules\Crm\Services\Inbound;
 
 /**
  * Makes an identifier safe to put in a log line — and nothing else.
@@ -20,8 +20,13 @@ namespace App\Modules\Crm\Services\Inbound\Adapters;
  * tenant's conversations landing in another's thread. Callers sanitize the COPY they log and pass
  * the original everywhere it means something.
  *
+ * WHY IT SITS IN THE INBOUND ROOT AND NOT UNDER Adapters/. It began there, serving the adapter
+ * layer alone. The conversation engine needs the same rule for its own diagnostics, and a core
+ * service reaching into an adapter namespace would invert the dependency — the engine would depend
+ * on a layer built on top of it. One sanitizer, in the neutral place both sides already depend on.
+ *
  * Deliberately not a logging framework, not a facade, not a global helper: one class, two static
- * methods, used by the four Phase 3C call sites that had duplicated this logic.
+ * methods, and every inbound call site that would otherwise reimplement this.
  */
 final class SafeIdentifier
 {
@@ -34,8 +39,14 @@ final class SafeIdentifier
     /** No column backs an adapter name; 128 is small, deterministic and far above any real one. */
     public const ADAPTER = 128;
 
-    /** Matches `external_message_id` / `external_event_id` (varchar 191). */
-    public const EVENT_ID = 191;
+    /**
+     * Matches every external identifier column (varchar 191): conversation id, message id, event
+     * id, and the sender/recipient ids should they ever be logged.
+     */
+    public const EXTERNAL_ID = 191;
+
+    /** A driver's SQLSTATE: five characters by the standard, bounded here because it is not ours. */
+    public const CODE = 32;
 
     /** Null in, null out — and an empty result is null rather than an empty string. */
     public static function for(?string $value, int $max): ?string

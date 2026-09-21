@@ -10,9 +10,9 @@ use App\Modules\Crm\Models\ConversationMessage;
 use App\Modules\Crm\Models\Lead;
 use App\Modules\Crm\Services\Inbound\Adapters\AdapterRejection;
 use App\Modules\Crm\Services\Inbound\Adapters\RejectionCode;
-use App\Modules\Crm\Services\Inbound\Adapters\SafeIdentifier;
 use App\Modules\Crm\Services\Inbound\InboundConversationMessage;
 use App\Modules\Crm\Services\Inbound\InboundNormalizationPipeline;
+use App\Modules\Crm\Services\Inbound\SafeIdentifier;
 use App\Support\CurrentOrg;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Facade;
@@ -285,7 +285,7 @@ class InboundAdapterSafetyTest extends TestCase
         $this->assertSame(64, SafeIdentifier::PROVIDER);
         $this->assertSame(64, SafeIdentifier::CHANNEL);
         $this->assertSame(128, SafeIdentifier::ADAPTER);
-        $this->assertSame(191, SafeIdentifier::EVENT_ID);
+        $this->assertSame(191, SafeIdentifier::EXTERNAL_ID);
 
         $provider = str_repeat('p', 64).'PROVIDER_CANARY';
         $channel = str_repeat('c', 64).'CHANNEL_CANARY';

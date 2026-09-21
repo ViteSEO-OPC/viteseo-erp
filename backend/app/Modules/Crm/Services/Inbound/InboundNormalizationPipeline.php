@@ -10,7 +10,6 @@ use App\Modules\Crm\Services\Inbound\Adapters\AmbiguousAdapterException;
 use App\Modules\Crm\Services\Inbound\Adapters\InboundAdapterException;
 use App\Modules\Crm\Services\Inbound\Adapters\InboundAdapterRegistry;
 use App\Modules\Crm\Services\Inbound\Adapters\RejectionCode;
-use App\Modules\Crm\Services\Inbound\Adapters\SafeIdentifier;
 use App\Modules\Crm\Services\Inbound\Adapters\UnsupportedProviderChannelException;
 use App\Modules\Crm\Services\Inbound\Contracts\InboundProviderAdapter;
 use Illuminate\Support\Facades\Log;

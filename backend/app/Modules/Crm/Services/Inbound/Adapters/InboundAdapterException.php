@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Modules\Crm\Services\Inbound\Adapters;
 
 use App\Modules\Crm\Services\Inbound\InboundConversationPersistenceException;
+use App\Modules\Crm\Services\Inbound\SafeIdentifier;
 use RuntimeException;
 
 /**

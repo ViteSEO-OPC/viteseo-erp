@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Modules\Crm\Services\Inbound;
 
 use App\Modules\Crm\Services\Inbound\Adapters\AdapterRejection;
-use App\Modules\Crm\Services\Inbound\Adapters\SafeIdentifier;
 
 /**
  * What one provider envelope did to the CRM, as a whole.
