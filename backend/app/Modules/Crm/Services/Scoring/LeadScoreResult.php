@@ -25,14 +25,4 @@ final readonly class LeadScoreResult
         public int $scoreMax,
         public array $signals,
     ) {}
-
-    /**
-     * Only the signals whose condition fired (the ones that moved the score).
-     *
-     * @return list<ScoreSignal>
-     */
-    public function appliedSignals(): array
-    {
-        return array_values(array_filter($this->signals, fn (ScoreSignal $s): bool => $s->applied));
-    }
 }

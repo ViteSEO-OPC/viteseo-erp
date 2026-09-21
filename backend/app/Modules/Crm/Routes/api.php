@@ -42,6 +42,8 @@ use App\Modules\Crm\Controllers\UserController;
 use App\Modules\Crm\Controllers\WebsiteEnrichmentController;
 use App\Modules\Crm\Controllers\WebsiteEvidenceController;
 use App\Modules\Crm\Http\Middleware\EnsureCrmAccessIsActive;
+use App\Modules\Crm\Http\Middleware\EnsureNerbyServiceCaller;
+use App\Modules\Crm\Http\Middleware\ThrottleDiscoveryCallbacks;
 use App\Modules\Crm\Http\Middleware\EnsurePerformanceManagement;
 use App\Modules\Crm\Models\Lead;
 use App\Modules\Crm\Models\PlannerEvent;
@@ -139,12 +141,19 @@ Route::middleware(['auth:sanctum', 'set-current-org', 'subscription-active', 'fe
             ->can('import', Lead::class);
         // Programmatic enrichment ingest — a discovery provider (Python Scraper) submits normalized
         // discovered businesses as JSON. Same `import` permission; lands fit-data only, assigns no owner.
-        Route::post('/leads/discovered', [LeadController::class, 'ingestDiscovered'])->can('import', Lead::class);
+        //
+        // MACHINE-ONLY (EnsureNerbyServiceCaller): `crm.leads.import` alone let every BD post invented
+        // prospects and forge Website Intelligence findings. These are the scraper's write callbacks;
+        // no screen calls them, and human imports keep their own routes above.
+        Route::post('/leads/discovered', [LeadController::class, 'ingestDiscovered'])->can('import', Lead::class)
+            ->middleware(EnsureNerbyServiceCaller::class);
         // Website Intelligence — audit provider (Scrapy). `queue` lists businesses with a website to
         // audit; `website-enrichment` records the audit findings (1:1) + derives website_status. Strict
         // data provider (same `import` permission); never touches Lead Status / score / ownership.
-        Route::get('/website-enrichment/queue', [WebsiteEnrichmentController::class, 'queue'])->can('import', Lead::class);
-        Route::put('/leads/{lead}/website-enrichment', [WebsiteEnrichmentController::class, 'update'])->can('import', Lead::class);
+        Route::get('/website-enrichment/queue', [WebsiteEnrichmentController::class, 'queue'])->can('import', Lead::class)
+            ->middleware(EnsureNerbyServiceCaller::class);
+        Route::put('/leads/{lead}/website-enrichment', [WebsiteEnrichmentController::class, 'update'])->can('import', Lead::class)
+            ->middleware(EnsureNerbyServiceCaller::class);
 
         // Nearby discovery provider — the scraper's window onto the configuration an admin chose in
         // Settings → Integrations. Same `import` permission as the two providers above, because it is
@@ -180,9 +189,12 @@ Route::middleware(['auth:sanctum', 'set-current-org', 'subscription-active', 'fe
         // still cannot produce it and is untouched. Guarded by the lead policy rather than a role, so
         // a BD acts on leads they can already see; `confirmAbsence` additionally requires `update`,
         // since it changes a field on the lead.
-        Route::get('/website-evidence/queue', [WebsiteEvidenceController::class, 'queue'])->can('import', Lead::class);
-        Route::post('/leads/{lead}/website-candidates', [WebsiteEvidenceController::class, 'storeCandidates'])->can('import', Lead::class);
-        Route::put('/leads/{lead}/website-candidates/{candidate}', [WebsiteEvidenceController::class, 'verifyCandidate'])->can('import', Lead::class);
+        Route::get('/website-evidence/queue', [WebsiteEvidenceController::class, 'queue'])->can('import', Lead::class)
+            ->middleware(EnsureNerbyServiceCaller::class);
+        Route::post('/leads/{lead}/website-candidates', [WebsiteEvidenceController::class, 'storeCandidates'])->can('import', Lead::class)
+            ->middleware(EnsureNerbyServiceCaller::class);
+        Route::put('/leads/{lead}/website-candidates/{candidate}', [WebsiteEvidenceController::class, 'verifyCandidate'])->can('import', Lead::class)
+            ->middleware(EnsureNerbyServiceCaller::class);
         Route::get('/leads/{lead}/website-evidence', [WebsiteEvidenceController::class, 'show'])->can('viewWebsiteEvidence', 'lead');
         Route::post('/leads/{lead}/website-absence', [WebsiteEvidenceController::class, 'confirmAbsence'])->can('confirmWebsiteAbsence', 'lead');
 
@@ -192,28 +204,32 @@ Route::middleware(['auth:sanctum', 'set-current-org', 'subscription-active', 'fe
         // the paid endpoints' 30/min — this one is expected to be called by every BD viewing the board.
         Route::get('/discovery/config', [DiscoveryConfigController::class, 'config'])
             ->can('import', Lead::class)
-            ->middleware('throttle:60,1');
+            ->middleware(ThrottleDiscoveryCallbacks::class.':60,1');
+        // `nerby_service` below: the scraper's least-privilege service identity (org-bound, short-lived
+        // tokens confined to these callbacks — see NerbyServiceIdentity). Human access is unchanged.
+        // ThrottleDiscoveryCallbacks is `throttle:N,1` for humans, byte for byte; the service identity is
+        // counted per RUN TOKEN instead, so concurrent runs and tenants never share one counter (H-4).
         Route::post('/discovery/proposals', [DiscoveryConfigController::class, 'proposals'])
             ->can('import', Lead::class)
-            ->middleware(['role:super_admin|crm_admin', 'throttle:30,1']);
+            ->middleware(['role:super_admin|crm_admin|nerby_service', ThrottleDiscoveryCallbacks::class.':30,1']);
         // Search STRATEGY, not business records: which OSM tags a category can hide under. Same
         // guard and throttle as `proposals` because it reaches the same paid provider — though the
         // answer is cached per category forever, so a healthy deployment calls it a handful of times
         // in total.
         Route::post('/discovery/tag-expansions', [DiscoveryConfigController::class, 'tagExpansions'])
             ->can('import', Lead::class)
-            ->middleware(['role:super_admin|crm_admin', 'throttle:30,1']);
+            ->middleware(['role:super_admin|crm_admin|nerby_service', ThrottleDiscoveryCallbacks::class.':30,1']);
         // Google Places (API New) Text Search, made server-side with the encrypted key. Same guard and
         // throttle as `proposals`, because it reaches a paid provider.
         Route::post('/discovery/places', [DiscoveryConfigController::class, 'places'])
             ->can('import', Lead::class)
-            ->middleware(['role:super_admin|crm_admin', 'throttle:30,1']);
+            ->middleware(['role:super_admin|crm_admin|nerby_service', ThrottleDiscoveryCallbacks::class.':30,1']);
         // HOW to search, for whichever provider is executing — selectors, query phrases, place types
         // and sub-areas. Same guard and throttle as the other paid capabilities; unlike them it is
         // NOT gated on the effective provider, because strategy is useful to all of them.
         Route::post('/discovery/strategy', [DiscoveryConfigController::class, 'strategy'])
             ->can('import', Lead::class)
-            ->middleware(['role:super_admin|crm_admin', 'throttle:30,1']);
+            ->middleware(['role:super_admin|crm_admin|nerby_service', ThrottleDiscoveryCallbacks::class.':30,1']);
 
         // ── On-demand discovery runs ────────────────────────────────────────────────────────────
         // ADDITIVE. The prospect pool (`GET /nearby-clients` below) and the curated rotation

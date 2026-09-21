@@ -193,6 +193,7 @@ class StoreDiscoveryRunRequest extends FormRequest
             AiStrategyCapability::INSUFFICIENT_CREDIT => 'AI Discovery is unavailable: the AI provider account has no credit remaining. No search was started.',
             AiStrategyCapability::NOT_CONFIGURED => 'AI Discovery is not configured for this workspace. No search was started.',
             AiStrategyCapability::DISABLED => 'AI Discovery is switched off for this workspace. No search was started.',
+            AiStrategyCapability::UNVERIFIED => 'AI Discovery is unavailable until the AI provider passes its connection test in Settings. No search was started.',
             AiStrategyCapability::UNSUPPORTED_PROVIDER => 'AI Discovery needs Google Places as the discovery provider. No search was started.',
             default => 'AI Discovery is not available right now. No search was started.',
         };

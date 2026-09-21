@@ -13,7 +13,6 @@ use App\Modules\Crm\Services\Calling\CallCorrelation;
 use App\Modules\Crm\Services\Calling\TwilioCallProvider;
 use Database\Seeders\RolesAndPermissionsSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\Config;
 use Laravel\Sanctum\Sanctum;
 use Tests\Feature\Crm\Concerns\ConfiguresCentralTwilio;
 use Tests\TestCase;

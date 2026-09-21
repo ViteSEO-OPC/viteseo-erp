@@ -1,8 +1,6 @@
 import type { JSONContent } from "@tiptap/react";
-import type { LeadRow, PriorityLevel, LeadStatus, ActivityType } from "@/modules/crm/features/dashboard/types/dashboard-types";
+import type { LeadRow, ActivityType } from "@/modules/crm/features/dashboard/types/dashboard-types";
 import type { LeadOutcome } from "@/modules/crm/features/leads/components/lead-score-ring";
-
-export type { PriorityLevel, LeadStatus };
 
 /**
  * The lead's Won conversion, projected read-only from its Deal (GET /leads/{id}). The Deal remains

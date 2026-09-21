@@ -46,10 +46,4 @@ class PlannerEventFactory extends Factory
     {
         return $this->state(fn () => ['assigned_to' => $user->id]);
     }
-
-    /** A dateless backlog item — appears only on the Board, not the calendar. */
-    public function backlog(): static
-    {
-        return $this->state(fn () => ['starts_at' => null, 'status' => 'todo']);
-    }
 }

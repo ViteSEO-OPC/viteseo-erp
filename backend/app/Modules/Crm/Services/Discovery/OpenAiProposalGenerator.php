@@ -4,6 +4,7 @@ namespace App\Modules\Crm\Services\Discovery;
 
 use App\Modules\Crm\Enums\NerbyProvider;
 use App\Modules\Crm\Services\Discovery\Contracts\ProposalGenerator;
+use App\Modules\Crm\Services\Discovery\Prompts\NerbyTrustBoundary;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -59,7 +60,15 @@ class OpenAiProposalGenerator implements ProposalGenerator
       invented names cost accuracy and gain nothing.
 
     Reply with JSON only: {"businesses": ["Name One", "Name Two"]}
-    PROMPT;
+    PROMPT.NerbyTrustBoundary::TEXT;
+
+    /** A storefront name is never longer than this; a longer "name" is not one and is discarded. */
+    public const MAX_NAME_LENGTH = 120;
+
+    /** Bounds on the untrusted inputs, matching DiscoveryProposalRequest. */
+    private const MAX_AREA_LENGTH = 255;
+
+    private const MAX_CATEGORY_LENGTH = 120;
 
     public function __construct(private readonly NerbyProviderSettingService $settings) {}
 
@@ -82,6 +91,14 @@ class OpenAiProposalGenerator implements ProposalGenerator
         $endpoint = AiChatEndpoint::for((string) $row->api_key, $model);
         $ask = max(1, min($count, self::MAX_PROPOSALS));
 
+        // INBOUND: the only runtime values the model sees, cleaned of control/invisible characters
+        // and bounded. Nothing else — no provider result, no business record, no credential.
+        $area = UntrustedText::clean($area, self::MAX_AREA_LENGTH);
+        $category = UntrustedText::clean($category, self::MAX_CATEGORY_LENGTH);
+        if ($area === '' || $category === '') {
+            return $this->failure(self::STATUS_INVALID_RESPONSE, 'empty_target');
+        }
+
         try {
             $response = Http::withToken((string) $row->api_key)
                 ->timeout((float) config('openai.timeout', 30))
@@ -97,10 +114,12 @@ class OpenAiProposalGenerator implements ProposalGenerator
                         ['role' => 'system', 'content' => self::SYSTEM_PROMPT],
                         [
                             'role' => 'user',
-                            'content' => json_encode(
-                                ['area' => $area, 'category' => $category, 'max_results' => $ask],
-                                JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
-                            ) ?: '{}',
+                            // TRUSTED limits beside, never inside, the untrusted target data — the
+                            // same envelope the strategist uses.
+                            'content' => json_encode([
+                                'untrusted_target_data' => ['area' => $area, 'category' => $category],
+                                'limits' => ['max_results' => $ask],
+                            ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?: '{}',
                         ],
                     ],
                 ]);
@@ -132,7 +151,8 @@ class OpenAiProposalGenerator implements ProposalGenerator
         }
 
         $content = $response->json('choices.0.message.content');
-        if (! is_string($content) || $this->parseNames($content) === null) {
+        $names = is_string($content) ? $this->parseNames($content, $ask) : null;
+        if ($names === null) {
             // A 2xx we could not read is a real failure. Returning "0 candidates" here would let a
             // broken response shape masquerade as an honest empty result indefinitely.
             Log::warning('Nearby proposal response was unreadable');
@@ -140,14 +160,12 @@ class OpenAiProposalGenerator implements ProposalGenerator
             return $this->failure(self::STATUS_INVALID_RESPONSE, 'unreadable_body');
         }
 
-        $names = $this->parseNames($content) ?? [];
-
         return [
             'status' => self::STATUS_OK,
             'error' => null,
-            // Truncated here as well as asked for above: a model that over-delivers must not widen
-            // what reaches the resolver.
-            'proposals' => array_slice($names, 0, $ask),
+            // Capped in parseNames() as well as asked for above: a model that over-delivers must not
+            // widen what reaches the resolver.
+            'proposals' => $names,
             'usage' => [
                 'model' => $endpoint->model,
                 'prompt_tokens' => (int) $response->json('usage.prompt_tokens', 0),
@@ -167,30 +185,45 @@ class OpenAiProposalGenerator implements ProposalGenerator
     }
 
     /**
-     * Names out of the model's JSON, or NULL when the body could not be understood.
+     * STRICT SCHEMA: `{"businesses": [string, ...]}`. Any other key is ignored; a non-object, or a
+     * missing or non-list `businesses`, is unreadable. Each name is cleaned, and discarded — not
+     * truncated — when empty, over MAX_NAME_LENGTH, or shaped like a URL. De-duplicated
+     * case-insensitively, first occurrence kept, capped at what was asked for.
      *
-     * Null and empty-list are deliberately different returns: an unreadable body is a failure, while
-     * `{"businesses": []}` is a model legitimately saying it found nothing. Collapsing them would
-     * reintroduce exactly the ambiguity this class exists to remove.
+     * A name is only ever a LOOKUP KEY: the engine escapes it into an OpenStreetMap name search and
+     * only a real OSM element can become a business. Nothing here can carry an id, a coordinate or a
+     * record, because the schema has no field for one.
      *
      * @return list<string>|null
      */
-    private function parseNames(string $content): ?array
+    private function parseNames(string $content, int $cap): ?array
     {
         $data = json_decode($content, true);
-        if (! is_array($data) || ! isset($data['businesses']) || ! is_array($data['businesses'])) {
+        if (! is_array($data) || array_is_list($data) || ! isset($data['businesses'])
+            || ! is_array($data['businesses']) || ! array_is_list($data['businesses'])) {
             return null;
         }
 
         $names = [];
+        $seen = [];
         foreach ($data['businesses'] as $item) {
-            // Take only usable strings. A model that returns objects, nulls or numbers among the
-            // names loses those entries rather than the whole batch.
-            if (is_string($item) && trim($item) !== '') {
-                $names[] = trim($item);
+            $name = UntrustedText::output($item, self::MAX_NAME_LENGTH);
+            if ($name === null) {
+                continue;
+            }
+
+            $key = mb_strtolower($name);
+            if (isset($seen[$key])) {
+                continue;
+            }
+            $seen[$key] = true;
+            $names[] = $name;
+
+            if (count($names) >= min($cap, self::MAX_PROPOSALS)) {
+                break;
             }
         }
 
-        return array_values(array_unique($names));
+        return $names;
     }
 }

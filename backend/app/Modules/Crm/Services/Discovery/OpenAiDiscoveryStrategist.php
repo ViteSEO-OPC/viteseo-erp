@@ -5,6 +5,7 @@ namespace App\Modules\Crm\Services\Discovery;
 use App\Modules\Crm\Enums\NerbyProvider;
 use App\Modules\Crm\Services\Discovery\Contracts\DiscoveryStrategist;
 use App\Modules\Crm\Services\Discovery\Prompts\NerbyDiscoveryInstruction;
+use App\Support\CurrentOrg;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
@@ -395,6 +396,11 @@ class OpenAiDiscoveryStrategist implements DiscoveryStrategist
     ): string {
         return self::CACHE_PREFIX
             .NerbyDiscoveryInstruction::VERSION.'|'
+            // THE TENANT IS PART OF THE KEY. Plans are cached forever, and without it one org's cached
+            // answer was replayed to another (and `usage.model: cache` told the second tenant that
+            // the first had already planned this niche and area). Coverage and feedback were already
+            // org-scoped; now the plan itself is.
+            .'org:'.(CurrentOrg::id() ?? 'none').'|'
             .implode(',', $dialects).'|'
             // COVERAGE IS PART OF THE QUESTION. "What else should I search for this niche, given I
             // have already tried these three phrases" is a different question from the one asked on
@@ -577,9 +583,14 @@ class OpenAiDiscoveryStrategist implements DiscoveryStrategist
      */
     private function placeTypes(mixed $values): array
     {
+        // SHAPE, THEN VOCABULARY. A well-formed invention ("artisan_bakery") is still not a type the
+        // provider accepts, and one sent as `includedType` made Google refuse the whole request —
+        // which used to push the rest of a scoped run onto OpenStreetMap. Only Google's own Table A
+        // survives; everything else is dropped and the search runs on text.
         return array_values(array_filter(
             $this->strings($values, self::MAX_PLACE_TYPES),
-            fn (string $type): bool => preg_match(self::PLACE_TYPE_PATTERN, $type) === 1,
+            fn (string $type): bool => preg_match(self::PLACE_TYPE_PATTERN, $type) === 1
+                && GooglePlaceTypes::isIncludedType($type),
         ));
     }
 

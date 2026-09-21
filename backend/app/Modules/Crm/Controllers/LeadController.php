@@ -2,6 +2,8 @@
 
 namespace App\Modules\Crm\Controllers;
 
+use App\Modules\Crm\Services\Discovery\GooglePlacesAttestation;
+use App\Support\ServiceTokens;
 use App\Http\Controllers\Controller;
 
 use App\Modules\Crm\Requests\AssignLeadRequest;
@@ -33,8 +35,6 @@ use App\Modules\Crm\Services\LeadAssignmentService;
 use App\Modules\Crm\Services\LeadImportService;
 use Illuminate\Http\UploadedFile;
 use App\Modules\Crm\Services\LeadPdfExporter;
-use App\Modules\Crm\Services\Planner\FollowUpScheduler;
-use App\Modules\Crm\Services\Planner\PlannerOwnershipTransfer;
 use App\Modules\Crm\Services\Scoring\LeadScorer;
 use App\Modules\Crm\Services\Scoring\ScoreSignal;
 use Illuminate\Contracts\Database\Eloquent\Builder;
@@ -830,10 +830,19 @@ class LeadController extends Controller
      */
     public function ingestDiscovered(IngestDiscoveredLeadsRequest $request, LeadImportService $service): JsonResponse
     {
+        // The route admits the NERBY service only (EnsureNerbyServiceCaller), so the caller always
+        // holds a real, org-bound service token: every row's provider identity is checked against
+        // what the CRM itself handed that token (GooglePlacesAttestation).
+        $token = ServiceTokens::token($request->user());
+        $attestation = app(GooglePlacesAttestation::class);
+
         $result = $service->ingestDiscovered(
             $request->validated('businesses'),
             $request->user()->id,
             $request->boolean('dry_run'),
+            $token === null
+                ? static fn (array $row): bool => false
+                : static fn (array $row): bool => $attestation->check((int) $token->getKey(), $row),
         );
 
         return response()->json(['data' => $result]);

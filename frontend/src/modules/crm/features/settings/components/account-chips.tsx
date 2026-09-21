@@ -4,11 +4,11 @@ import type { TeamUserStatus } from "@/modules/crm/features/settings/types/user-
 /**
  * There is deliberately no RoleChip here any more.
  *
- * It mapped a role slug through ROLE_SHORT_LABELS and fell back to an em dash,
- * so every member on one of the org's OWN roles rendered as "—" — a person with
- * real access shown as having none. Team & Roles now resolves the name against
- * the presets AND the custom role the member actually holds, and passes the
- * resulting label in.
+ * It mapped a role slug through a fixed table of preset short labels and fell
+ * back to an em dash, so every member on one of the org's OWN roles rendered as
+ * "—" — a person with real access shown as having none. Team & Roles now resolves
+ * the name against the presets AND the custom role the member actually holds, and
+ * passes the resulting label in.
  */
 
 export function StatusPill({ status }: { status: TeamUserStatus }) {

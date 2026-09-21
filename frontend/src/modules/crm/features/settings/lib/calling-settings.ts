@@ -49,9 +49,6 @@ export const CLIENT_CREDENTIAL_FIELDS = [
 
 export type CredentialFormField = (typeof CLIENT_CREDENTIAL_FIELDS)[number];
 
-/** The two write-only fields. Never pre-filled, never read back; blank means "keep what is stored". */
-export const SECRET_FIELDS: readonly CredentialFormField[] = ["auth_token", "api_secret"];
-
 /**
  * Required fields only the deployment can supply. When the server reports one missing, no admin on
  * this screen can fix it — ViteSEO has to.

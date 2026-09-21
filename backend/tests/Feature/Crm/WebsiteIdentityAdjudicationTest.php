@@ -10,7 +10,7 @@ use Database\Seeders\RolesAndPermissionsSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request as ClientRequest;
 use Illuminate\Support\Facades\Http;
-use Laravel\Sanctum\Sanctum;
+use Tests\Concerns\ActsAsNerbyService;
 use Tests\TestCase;
 
 /**
@@ -31,6 +31,7 @@ use Tests\TestCase;
  */
 class WebsiteIdentityAdjudicationTest extends TestCase
 {
+    use ActsAsNerbyService;
     use RefreshDatabase;
 
     private const ENDPOINT = 'https://api.openai.com/v1/chat/completions';
@@ -106,7 +107,7 @@ class WebsiteIdentityAdjudicationTest extends TestCase
 
     private function submit(Lead $lead, array $overrides = []): array
     {
-        Sanctum::actingAs($this->admin());
+        $this->actingAsNerbyService();
 
         $response = $this->putJson(
             "/api/v1/crm/leads/{$lead->id}/website-enrichment",

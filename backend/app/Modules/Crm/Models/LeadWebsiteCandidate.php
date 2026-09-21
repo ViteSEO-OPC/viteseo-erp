@@ -83,10 +83,4 @@ class LeadWebsiteCandidate extends Model
     {
         return $this->belongsTo(Lead::class, 'lead_id');
     }
-
-    /** Checked and refused — distinct from never checked. */
-    public function wasRefused(): bool
-    {
-        return $this->checked_at !== null && $this->verified === false;
-    }
 }

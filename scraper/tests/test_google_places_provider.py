@@ -573,3 +573,56 @@ def test_the_planning_status_travels_with_the_stats_only_when_planning_was_consu
     plain, _, _ = build(monkeypatch, respond=ok([row()]), use_strategy=False)
     plain.discover(area="Anywhere", category="pharmacy", limit=10)
     assert "strategy_status" not in plain.stats()
+
+
+# ── H-4: a rate refusal is never an empty area ──────────────────────────────────────────────────
+#
+# The CRM's own callback throttle answers a bare HTTP 429 with no discovery body. It used to be
+# labelled `crm_unreachable`, and downstream a search that returned nothing was counted as an
+# exhausted map cell — so a throttled nationwide run reported ground it never searched as "nothing
+# left to find". Both 429 sources now read `rate_limited`, with the server's suggested wait.
+
+
+def status_response(code, body=None, headers=None):
+    return lambda url, kw: httpx.Response(
+        code, json=body if body is not None else {"message": "Too Many Attempts."}, headers=headers or {},
+        request=httpx.Request("POST", url),
+    )
+
+
+def test_the_crms_own_throttle_is_a_rate_refusal_not_an_outage(monkeypatch):
+    provider, _, _ = build(monkeypatch, respond=status_response(429, headers={"Retry-After": "42"}))
+    assert provider.discover(area="Makati", category="pharmacy", limit=10) == []
+    stats = provider.stats()
+    assert stats["execution_status"] == "rate_limited"
+    assert stats["error_reason"] == "http_429"
+    assert stats["retry_after"] == 42
+
+
+def test_a_google_rate_limit_relayed_by_the_crm_keeps_its_word(monkeypatch):
+    body = {"data": {"executionStatus": "rate_limited", "errorReason": "RESOURCE_EXHAUSTED", "businesses": []}}
+    provider, _, _ = build(monkeypatch, respond=status_response(502, body=body, headers={"Retry-After": "7"}))
+    provider.discover(area="Makati", category="pharmacy", limit=10)
+    assert provider.stats()["execution_status"] == "rate_limited"
+    assert provider.stats()["retry_after"] == 7
+
+
+def test_an_absurd_or_malformed_retry_after_is_clamped_or_ignored(monkeypatch):
+    provider, _, _ = build(monkeypatch, respond=status_response(429, headers={"Retry-After": "999999"}))
+    provider.discover(area="Makati", category="pharmacy", limit=10)
+    assert provider.stats()["retry_after"] == 300
+
+    provider2, _, _ = build(monkeypatch, respond=status_response(429, headers={"Retry-After": "Wed, 21 Oct 2026 07:28:00 GMT"}))
+    provider2.discover(area="Makati", category="pharmacy", limit=10)
+    assert "retry_after" not in provider2.stats()
+
+
+def test_other_failures_keep_their_existing_labels(monkeypatch):
+    provider, _, _ = build(monkeypatch, respond=status_response(500, body={"message": "boom"}))
+    provider.discover(area="Makati", category="pharmacy", limit=10)
+    assert provider.stats()["execution_status"] == "crm_unreachable"
+    assert "retry_after" not in provider.stats()
+
+    provider2, _, _ = build(monkeypatch, respond=status_response(409, body={"message": "no"}))
+    provider2.discover(area="Makati", category="pharmacy", limit=10)
+    assert provider2.stats()["execution_status"] == "not_effective_provider"

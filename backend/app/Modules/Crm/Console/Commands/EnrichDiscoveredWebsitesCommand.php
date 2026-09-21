@@ -2,7 +2,12 @@
 
 namespace App\Modules\Crm\Console\Commands;
 
+use App\Models\Org;
+use App\Models\Subscription;
+use App\Modules\Crm\Services\Discovery\NerbyServiceIdentity;
 use App\Modules\Crm\Services\Discovery\ScraperProcessRunner;
+use App\Services\SubscriptionService;
+use App\Support\Entitlements;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Cache;
 
@@ -50,8 +55,11 @@ class EnrichDiscoveredWebsitesCommand extends Command
      */
     private const LOCK_SECONDS = 2700;
 
-    public function handle(ScraperProcessRunner $runner): int
-    {
+    public function handle(
+        ScraperProcessRunner $runner,
+        NerbyServiceIdentity $service,
+        SubscriptionService $subscriptions,
+    ): int {
         // THE GUARD TRAVELS WITH THE COMMAND, not with one caller.
         //
         // `withoutOverlapping()` protects the SCHEDULE ENTRY, so it protects exactly one trigger. It
@@ -81,13 +89,55 @@ class EnrichDiscoveredWebsitesCommand extends Command
         }
 
         try {
-            return $this->tick($runner);
+            return $this->tickEachOrg($runner, $service, $subscriptions);
         } finally {
             $lock->release();
         }
     }
 
-    private function tick(ScraperProcessRunner $runner): int
+    /**
+     * ONE PASS PER TENANT, EACH WITH ITS OWN ORG-BOUND TOKEN.
+     *
+     * The engine reads its queue from, and writes its findings to, whatever org its token acts for.
+     * With the old global identity that was always the provider org, so every other tenant's leads
+     * were never enriched and the provider org was the only one ever written. Now each org that has
+     * CRM and a live subscription gets its own short-lived token, revoked when its pass ends, and the
+     * limits apply per org.
+     */
+    private function tickEachOrg(
+        ScraperProcessRunner $runner,
+        NerbyServiceIdentity $service,
+        SubscriptionService $subscriptions,
+    ): int {
+        $failed = false;
+
+        foreach (Org::query()->orderBy('id')->pluck('id') as $orgId) {
+            $orgId = (int) $orgId;
+            if (! Entitlements::has($orgId, 'crm')) {
+                continue;
+            }
+            $subscription = Subscription::query()->where('org_id', $orgId)->first();
+            if ($subscription === null || ! $subscriptions->hasAccess($subscription)) {
+                continue;
+            }
+
+            $issued = $service->issue(
+                $orgId,
+                'enrichment',
+                now()->addSeconds(max(60, (int) config('discovery.enrichment_timeout', 900) * 2 + 60)),
+            );
+
+            try {
+                $failed = $this->tick($runner, $issued->plainTextToken, $orgId) === self::FAILURE || $failed;
+            } finally {
+                $service->revoke($issued);
+            }
+        }
+
+        return $failed ? self::FAILURE : self::SUCCESS;
+    }
+
+    private function tick(ScraperProcessRunner $runner, string $crmToken, int $orgId): int
     {
         $auditLimit = (int) ($this->option('audit') ?? config('discovery.enrichment.audit_limit', 25));
         $searchLimit = (int) ($this->option('search') ?? config('discovery.enrichment.search_limit', 25));
@@ -95,14 +145,14 @@ class EnrichDiscoveredWebsitesCommand extends Command
         $failed = false;
 
         if ($auditLimit > 0) {
-            $result = $runner->audit($auditLimit);
-            $this->report('audit', $auditLimit, $result);
+            $result = $runner->audit($auditLimit, $crmToken);
+            $this->report("audit (org {$orgId})", $auditLimit, $result);
             $failed = $failed || $result['exitCode'] !== 0;
         }
 
         if ($searchLimit > 0) {
-            $result = $runner->findWebsites($searchLimit);
-            $this->report('find-websites', $searchLimit, $result);
+            $result = $runner->findWebsites($searchLimit, $crmToken);
+            $this->report("find-websites (org {$orgId})", $searchLimit, $result);
             $failed = $failed || $result['exitCode'] !== 0;
         }
 

@@ -9,6 +9,7 @@ use App\Modules\Crm\Services\Discovery\ExecutedQueryLedger;
 use App\Modules\Crm\Services\Discovery\GooglePlacesTextSearch;
 use App\Modules\Crm\Services\Discovery\OpenAiDiscoveryStrategist;
 use App\Modules\Crm\Services\Discovery\Prompts\NerbyDiscoveryInstruction;
+use App\Support\CurrentOrg;
 use Database\Seeders\RolesAndPermissionsSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
@@ -271,8 +272,9 @@ class DiscoveryStrategyTest extends TestCase
             OpenAiDiscoveryStrategist::DIALECT_SUB_AREAS,
         ]);
         // Two `none` fingerprints: nothing searched for this target yet, and no measurements.
+        // The tenant is part of the key: a cached plan is never replayed to another org.
         $versioned = 'crm:discovery:strategy:'
-            .NerbyDiscoveryInstruction::VERSION.'|'.$dialects.'|none|none|pharmacy|';
+            .NerbyDiscoveryInstruction::VERSION.'|org:'.CurrentOrg::id().'|'.$dialects.'|none|none|pharmacy|';
         $this->assertTrue(Cache::has($versioned), 'the plan is not stored under a versioned key');
 
         // And NOT under the unversioned key this used to use — the regression that would let an old

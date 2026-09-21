@@ -3,6 +3,7 @@
 namespace App\Modules\Crm\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Models\User;
 use App\Modules\Crm\Enums\NerbyProvider;
 use App\Modules\Crm\Jobs\ProbeQueryYieldJob;
 use App\Modules\Crm\Requests\DiscoveryPlacesRequest;
@@ -15,10 +16,13 @@ use App\Modules\Crm\Services\Discovery\Contracts\DiscoveryStrategist;
 use App\Modules\Crm\Services\Discovery\Contracts\ProposalGenerator;
 use App\Modules\Crm\Services\Discovery\Contracts\TagExpander;
 use App\Modules\Crm\Services\Discovery\ExecutedQueryLedger;
+use App\Modules\Crm\Services\Discovery\GooglePlacesAttestation;
 use App\Modules\Crm\Services\Discovery\GooglePlacesTextSearch;
 use App\Modules\Crm\Services\Discovery\NerbyProviderSettingService;
+use App\Modules\Crm\Services\Discovery\NerbyServiceIdentity;
 use App\Modules\Crm\Services\Discovery\QueryYieldLog;
 use App\Support\CurrentOrg;
+use App\Support\ServiceTokens;
 use Illuminate\Http\JsonResponse;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -221,13 +225,14 @@ class DiscoveryConfigController extends Controller
             ], Response::HTTP_CONFLICT);
         }
 
-        $includedType = $request->validated('includedType');
+        // Allowlisted against Google's own filter vocabulary (DiscoveryPlacesRequest::includedType).
+        $includedType = $request->includedType();
 
         $result = $places->search(
             (string) $request->validated('area'),
             (string) $request->validated('category'),
             (int) ($request->validated('limit') ?? GooglePlacesTextSearch::PAGE_SIZE),
-            is_string($includedType) ? $includedType : null,
+            $includedType,
             $request->boundingBox(),
             $request->plannedQueries(),
         );
@@ -278,6 +283,15 @@ class DiscoveryConfigController extends Controller
             count($result['places']),
             (int) ($result['pages'] ?? 0),
         );
+
+        // Remember exactly which places Google returned to THIS service token, so the ingest can
+        // refuse a Google identity the CRM never handed out. Only for the machine caller — it is the
+        // only one that may ingest — and after the response is built, so the answer is unchanged.
+        $caller = $request->user();
+        if ($caller instanceof User && $caller->hasRole(NerbyServiceIdentity::ROLE)
+            && ($token = ServiceTokens::token($caller)) !== null) {
+            app(GooglePlacesAttestation::class)->record((int) $token->getKey(), $result['places']);
+        }
 
         return response()->json(['data' => $payload]);
     }

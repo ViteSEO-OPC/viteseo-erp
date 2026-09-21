@@ -16,17 +16,6 @@ import type {
 } from "@/modules/crm/features/nearby-clients/types/discovery-run-types";
 
 /**
- * `GET /discovery/config` → `aiStrategy.status`. A status word only: the payload carries no key, no
- * model and no balance. Anything unrecognised is treated as unavailable, never assumed.
- */
-export type AiStrategyStatus =
-  | "available"
-  | "not_configured"
-  | "disabled"
-  | "insufficient_credit"
-  | "unsupported_provider";
-
-/**
  * May the "Discover with AI" action be offered?
  *
  * BOTH conditions, matching the server's own gate: Google Places must be the provider actually

@@ -3,10 +3,14 @@
 namespace App\Modules\Crm\Services\Discovery;
 
 use App\Modules\Crm\Enums\NerbyProvider;
+use App\Modules\Crm\Jobs\RunDiscoveryJob;
 use App\Modules\Crm\Models\DiscoveryRun;
 use App\Modules\Crm\Models\DiscoveryRunTarget;
 use App\Modules\Crm\Services\Discovery\Geo\NationwidePlanner;
+use Carbon\CarbonInterface;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Sleep;
 
 /**
  * Executes one discovery run: task by task, provider-honestly, without touching anything frozen.
@@ -39,38 +43,97 @@ class DiscoveryRunOrchestrator
         private readonly NerbyProviderSettingService $settings,
         private readonly ScraperProcessRunner $runner,
         private readonly NationwidePlanner $planner,
+        private readonly NerbyServiceIdentity $service,
     ) {}
+
+    /**
+     * The org-bound service token this run's engine calls back with. Set for the duration of
+     * {@see execute()} only; see NerbyServiceIdentity.
+     */
+    private ?string $crmToken = null;
 
     public function execute(string $runUuid): void
     {
         $run = DiscoveryRun::query()->where('uuid', $runUuid)->first();
 
         // Already finished, already cancelled, or gone. Re-entry must be harmless: a worker restart
-        // must never re-spend at a paid provider.
-        if ($run === null || $run->isTerminal()) {
+        // must never re-spend at a paid provider. A run cancelled BETWEEN nationwide slices arrives
+        // here too, and leaves no checkpoint behind.
+        if ($run === null) {
+            return;
+        }
+        if ($run->isTerminal()) {
+            $this->clearCheckpoint($run);
+
             return;
         }
 
-        $token = (string) config('discovery.crm_token', '');
-        if ($token === '') {
-            // Fail fast and say exactly why. Without this the engine would run, discover real
-            // businesses, and then discard every one of them at the ingest step.
-            $this->fail($run, 'Discovery is not configured: the engine has no CRM token to submit results with.');
-
+        // ONE SLICE OF A RUN AT A TIME. A duplicated or retried job must never search the same run
+        // concurrently — it would double-spend and race the checkpoint. The holder continues the run;
+        // a second job simply stands down. The TTL outlives a job so a crashed slice cannot wedge it.
+        $lock = Cache::lock('crm:discovery-run:'.$run->uuid, max(60, (int) config('discovery.nationwide.lock_seconds', 1200)));
+        if (! $lock->get()) {
             return;
+        }
+
+        $continue = false;
+        try {
+            $continue = $this->executeWithToken($run);
+        } finally {
+            $lock->release();
+        }
+
+        if ($continue) {
+            // Dispatched only AFTER the lock is released, so the next slice can never find it held
+            // by the slice that queued it.
+            $run->increment('continuations');
+            RunDiscoveryJob::dispatch($run->uuid, (int) $run->org_id)->onQueue('discovery');
+        }
+    }
+
+    /** @return bool true when a nationwide run stopped at its slice deadline and must continue */
+    private function executeWithToken(DiscoveryRun $run): bool
+    {
+        // ONE SHORT-LIVED TOKEN PER RUN, BOUND TO THE RUN'S OWN ORG. Every callback the engine makes
+        // for this run — strategy, places, ingest — therefore lands in the tenant that started it,
+        // never in whichever org a global identity happens to fall back to. Revoked in `finally`, so
+        // a crashed run leaves no live credential behind; its expiry is the backstop.
+        $issued = $this->service->issue(
+            (int) $run->org_id,
+            'run:'.$run->uuid,
+            now()->addSeconds(max(60, (int) config('discovery.service_account.run_token_ttl', 7200))),
+        );
+        $this->crmToken = $issued->plainTextToken;
+
+        try {
+            return $this->executeRun($run);
+        } finally {
+            $this->crmToken = null;
+            $this->service->revoke($issued);
+        }
+    }
+
+    private function executeRun(DiscoveryRun $run): bool
+    {
+        $metricsPath = $this->metricsPath($run);
+
+        // A NATIONWIDE CONTINUATION RESUMES; IT DOES NOT RESTART. The provider snapshot, start time
+        // and counters were set by the first slice and are kept exactly — re-running beginRun() would
+        // re-resolve the provider mid-sweep and reset what the user is watching.
+        if ($run->isNationwide() && $this->hasCheckpoint($run)) {
+            $provider = NerbyProvider::tryFrom((string) $run->provider_effective) ?? NerbyProvider::default();
+
+            return $this->executeNationwide($run, $provider, $metricsPath);
         }
 
         $effective = $this->beginRun($run);
-        $metricsPath = $this->metricsPath($run);
 
         // NATIONWIDE IS A DIFFERENT SHAPE OF RUN, not a longer one. A scoped run knows every search
         // it will make before it makes any of them; a nationwide run discovers its own work as it
         // goes, because whether a cell needs subdividing is only knowable once that cell has
         // answered. Branching here keeps the scoped loop below byte-for-byte what it was.
         if ($run->isNationwide()) {
-            $this->executeNationwide($run, $effective, $metricsPath);
-
-            return;
+            return $this->executeNationwide($run, $effective, $metricsPath);
         }
 
         foreach ($run->targets()->orderBy('id')->get() as $target) {
@@ -79,12 +142,12 @@ class DiscoveryRunOrchestrator
             if ($this->isCancelled($run)) {
                 $this->skipRemaining($run);
 
-                return;
+                return false;
             }
             if ($this->aiCreditExhausted($run)) {
                 $this->stopForAiCredit($run);
 
-                return;
+                return false;
             }
 
             $effective = $this->runTarget($run, $target, $effective, $metricsPath);
@@ -95,10 +158,12 @@ class DiscoveryRunOrchestrator
         if ($this->aiCreditExhausted($run)) {
             $this->stopForAiCredit($run);
 
-            return;
+            return false;
         }
 
         $this->finish($run);
+
+        return false;
     }
 
     /** Snapshot which provider will run, and why, before anything is spent. */
@@ -140,7 +205,7 @@ class DiscoveryRunOrchestrator
         // request — the refusal happens before anything is spent, not after results are discarded.
         $country = $this->countryOf($run);
 
-        $result = $this->runner->run(
+        $result = $this->withRateLimitRetry($run, fn (): array => $this->runner->run(
             $target->area,
             $target->category,
             (int) $target->limit_per_task,
@@ -149,7 +214,8 @@ class DiscoveryRunOrchestrator
             null,
             $country,
             $this->aiFor($run, $provider),
-        );
+            $this->crmToken,
+        ));
 
         // A present-but-rejected credential is only knowable at this point. Degrade once, record it,
         // and give this task a second chance on the baseline so the work is not simply lost.
@@ -157,7 +223,7 @@ class DiscoveryRunOrchestrator
             $this->degrade($run, (string) ($result['executionStatus'] ?? 'auth_failed'));
             $provider = NerbyProvider::default();
 
-            $result = $this->runner->run(
+            $result = $this->withRateLimitRetry($run, fn (): array => $this->runner->run(
                 $target->area,
                 $target->category,
                 (int) $target->limit_per_task,
@@ -166,7 +232,8 @@ class DiscoveryRunOrchestrator
                 null,
                 $country,
                 $this->aiFor($run, $provider),
-            );
+                $this->crmToken,
+            ));
         }
 
         $this->recordTarget($run, $target, $provider, $result);
@@ -427,8 +494,16 @@ class DiscoveryRunOrchestrator
      * someone else's infrastructure, not a graceful fallback. The scoped path's degrade-and-carry-on
      * is right for a handful of user-named searches and wrong at this scale.
      */
-    private function executeNationwide(DiscoveryRun $run, NerbyProvider $provider, string $metricsPath): void
+    private function executeNationwide(DiscoveryRun $run, NerbyProvider $provider, string $metricsPath): bool
     {
+        // Every slice gets the same deadline, well inside RunDiscoveryJob's timeout: the margin is
+        // for the one search (and its rate-limit retries) that may already be in flight when it passes.
+        $deadline = now()->addSeconds(max(1, (int) config('discovery.nationwide.slice_seconds', 540)));
+
+        if ($this->hasCheckpoint($run)) {
+            return $this->continueNationwide($run, (array) $run->work_queue, $provider, $metricsPath, $deadline);
+        }
+
         if ($provider !== NerbyProvider::GOOGLE_PLACES) {
             $this->fail(
                 $run,
@@ -438,7 +513,7 @@ class DiscoveryRunOrchestrator
                 .'the run again.',
             );
 
-            return;
+            return false;
         }
 
         $run->forceFill(['phase' => 'planning'])->save();
@@ -480,7 +555,7 @@ class DiscoveryRunOrchestrator
         if ($queue === []) {
             $this->fail($run, 'The national boundary produced no searchable cells. Nationwide discovery cannot run.');
 
-            return;
+            return false;
         }
 
         $run->forceFill([
@@ -488,11 +563,51 @@ class DiscoveryRunOrchestrator
             'cells_planned' => count($queue),
         ])->save();
 
-        $this->workQueue($run, $queue, $provider, $metricsPath);
+        return $this->continueNationwide($run, $queue, $provider, $metricsPath, $deadline);
+    }
+
+    /**
+     * Work the queue for one slice; checkpoint and ask to continue if the deadline came first.
+     *
+     * @param  list<array<string, mixed>>  $queue
+     * @return bool true when the run must continue in another slice
+     */
+    private function continueNationwide(
+        DiscoveryRun $run,
+        array $queue,
+        NerbyProvider $provider,
+        string $metricsPath,
+        CarbonInterface $deadline,
+    ): bool {
+        $remaining = $this->workQueue($run, $queue, $provider, $metricsPath, $deadline);
+
+        if ($remaining !== null) {
+            // THE CHECKPOINT: exactly the cells not yet concluded, including a cell interrupted
+            // between two of its niches. Everything already searched is on the run and its targets.
+            $run->forceFill(['work_queue' => $remaining])->save();
+
+            return true;
+        }
+
         if ($this->aiCreditExhausted($run)) {
             $this->stopForAiCredit($run);
         }
         $this->finishNationwide($run);
+        $this->clearCheckpoint($run);
+
+        return false;
+    }
+
+    private function hasCheckpoint(DiscoveryRun $run): bool
+    {
+        return is_array($run->work_queue) && $run->work_queue !== [];
+    }
+
+    private function clearCheckpoint(DiscoveryRun $run): void
+    {
+        if ($run->work_queue !== null) {
+            $run->forceFill(['work_queue' => null])->save();
+        }
     }
 
     /**
@@ -509,36 +624,78 @@ class DiscoveryRunOrchestrator
      * a full cell, so it still subdivides — the ingest deduplicates, and coverage is about ground
      * searched, not rows inserted. Nothing here invents a business when the provider has no more.
      *
-     * @param  list<array{bbox: array{0: float, 1: float, 2: float, 3: float}, group: string, label: string, depth: int, parent: ?int}>  $queue
+     * SLICED (H-5). Stops at `$deadline` — between searches, never inside one — and hands back the
+     * queue still to do, including the cell it was in the middle of and how far through that cell's
+     * niches it got. Null means the queue is finished (done, cancelled, budget spent, or stopped for
+     * AI credit); a list means "checkpoint this and continue in the next slice". At least one search
+     * is made per slice, so a run always progresses whatever the deadline.
+     *
+     * @param  list<array<string, mixed>>  $queue  cells: bbox, group, label, depth, parent, and for an
+     *                                             interrupted cell nichesDone / truncated / searchFailed /
+     *                                             parentForChildren
+     * @return list<array<string, mixed>>|null
      */
-    private function workQueue(DiscoveryRun $run, array $queue, NerbyProvider $provider, string $metricsPath): void
-    {
+    private function workQueue(
+        DiscoveryRun $run,
+        array $queue,
+        NerbyProvider $provider,
+        string $metricsPath,
+        CarbonInterface $deadline,
+    ): ?array {
         $niches = $this->nichesOf($run);
         $maxDepth = max(0, (int) config('discovery.nationwide.max_depth', 2));
         $limit = (int) (($run->scope)['limitPerTask'] ?? config('discovery.nationwide.limit_per_task', 20));
+        $searchesThisSlice = 0;
 
         while ($queue !== []) {
             if ($this->isCancelled($run)) {
                 $this->skipRemaining($run);
 
-                return;
+                return null;
             }
             if ($this->aiCreditExhausted($run)) {
                 $this->stopForAiCredit($run);
 
-                return;
+                return null;
             }
             if ($this->budgetSpent($run)) {
-                return;
+                return null;
+            }
+            if ($searchesThisSlice > 0 && now()->greaterThanOrEqualTo($deadline)) {
+                return array_values($queue);
             }
 
             $cell = array_shift($queue);
-            $truncated = false;
-            $parentForChildren = null;
+            // A cell interrupted by the previous slice's deadline resumes exactly where it stopped:
+            // same niches already done, same observations so far, same parent for any children.
+            $truncated = (bool) ($cell['truncated'] ?? false);
+            // A search in this cell that did not run to completion. Its zero is not a fact about the
+            // ground, so the cell may not be recorded as exhausted on its strength (H-4).
+            $searchFailed = (bool) ($cell['searchFailed'] ?? false);
+            $parentForChildren = isset($cell['parentForChildren']) ? (int) $cell['parentForChildren'] : null;
+            $startAt = max(0, (int) ($cell['nichesDone'] ?? 0));
 
-            foreach ($niches as $niche) {
+            foreach ($niches as $index => $niche) {
+                if ($index < $startAt) {
+                    continue;
+                }
                 if ($this->budgetSpent($run) || $this->aiCreditExhausted($run)) {
                     break;
+                }
+                if ($searchesThisSlice > 0 && now()->greaterThanOrEqualTo($deadline)) {
+                    array_unshift($queue, [
+                        'bbox' => $cell['bbox'],
+                        'group' => $cell['group'],
+                        'label' => $cell['label'],
+                        'depth' => $cell['depth'],
+                        'parent' => $cell['parent'],
+                        'nichesDone' => $index,
+                        'truncated' => $truncated,
+                        'searchFailed' => $searchFailed,
+                        'parentForChildren' => $parentForChildren,
+                    ]);
+
+                    return array_values($queue);
                 }
 
                 $target = $run->targets()->create([
@@ -558,6 +715,11 @@ class DiscoveryRunOrchestrator
                 $run->increment('budget_used');
 
                 $result = $this->runBoundedTarget($run, $target, $provider, $metricsPath, $cell['bbox']);
+                $searchesThisSlice++;
+
+                if (! $result['ok']) {
+                    $searchFailed = true;
+                }
 
                 // The provider filled the page: there is more in this box than it was willing to say.
                 if ($result['discovered'] >= $limit) {
@@ -569,6 +731,15 @@ class DiscoveryRunOrchestrator
             $run->increment('cells_searched');
             if ($cell['depth'] === 0) {
                 $run->increment('cells_first_pass_done');
+            }
+
+            if (! $truncated && $searchFailed) {
+                // NEITHER EXHAUSTED NOR CAPPED: UNKNOWN. A search here was refused (most often for
+                // rate) or failed, so "fewer results than allowed" was never observed — it was never
+                // asked. Counting it exhausted is how a throttled sweep used to report hundreds of
+                // unsearched cells as "the provider had nothing new left". The failed search is on
+                // the run's own `targets_failed`, and the cell is simply not concluded.
+                continue;
             }
 
             if (! $truncated) {
@@ -602,6 +773,8 @@ class DiscoveryRunOrchestrator
                 ]);
             }
         }
+
+        return null;
     }
 
     /**
@@ -614,7 +787,7 @@ class DiscoveryRunOrchestrator
      * it never silently continues on a different provider.
      *
      * @param  array{0: float, 1: float, 2: float, 3: float}  $bbox
-     * @return array{discovered: int, inserted: int, duplicates: int, rejected: int}
+     * @return array{ok: bool, discovered: int, inserted: int, duplicates: int, rejected: int}
      */
     private function runBoundedTarget(
         DiscoveryRun $run,
@@ -628,7 +801,7 @@ class DiscoveryRunOrchestrator
             'started_at' => now(),
         ])->save();
 
-        $result = $this->runner->run(
+        $result = $this->withRateLimitRetry($run, fn (): array => $this->runner->run(
             $target->area,
             $target->category,
             (int) $target->limit_per_task,
@@ -637,16 +810,75 @@ class DiscoveryRunOrchestrator
             $bbox,
             $this->countryOf($run),
             $this->aiFor($run, $provider),
-        );
+            $this->crmToken,
+        ));
 
         $this->recordTarget($run, $target, $provider, $result);
 
         return [
+            // Did this search actually run? A failed one (rate-limited after its retries, provider
+            // error, engine refusal) returned zero businesses without looking — see workQueue().
+            'ok' => $result['exitCode'] === 0,
             'discovered' => $result['discovered'],
             'inserted' => $result['inserted'],
             'duplicates' => $result['duplicates'],
             'rejected' => $result['rejected'],
         ];
+    }
+
+    // ── RATE REFUSALS ────────────────────────────────────────────────────────────────────────
+    //
+    // A `rate_limited` search (Google's own quota, or the CRM's callback throttle) found nothing
+    // because it was never allowed to look. It is retried a bounded number of times with a growing
+    // pause, honouring the refusing server's Retry-After when it is longer. Deliberately NOT a
+    // provider degradation (a quota is not a bad credential, and OpenStreetMap is not a substitute),
+    // and no extra budget is taken: the task was already counted once, and a refusal made no search.
+
+    /**
+     * @param  callable(): array<string, mixed>  $attempt
+     * @return array<string, mixed>
+     */
+    private function withRateLimitRetry(DiscoveryRun $run, callable $attempt): array
+    {
+        $result = $attempt();
+        $retries = max(0, (int) config('discovery.rate_limit.max_retries', 3));
+
+        for ($i = 0; $i < $retries && $this->wasRateLimited($result); $i++) {
+            // A user who cancels during a backoff must not wait it out, nor be charged a retry.
+            if ($this->isCancelled($run)) {
+                break;
+            }
+
+            Sleep::for($this->backoffSeconds($i, $result['retryAfter'] ?? null))->seconds();
+
+            if ($this->isCancelled($run)) {
+                break;
+            }
+
+            $result = $attempt();
+        }
+
+        return $result;
+    }
+
+    /** @param  array<string, mixed>  $result */
+    private function wasRateLimited(array $result): bool
+    {
+        return ($result['executionStatus'] ?? null) === GooglePlacesTextSearch::STATUS_RATE_LIMITED;
+    }
+
+    /** Exponential from `base_seconds`, at least the server's Retry-After, never above `max_seconds`. */
+    private function backoffSeconds(int $retry, ?int $retryAfter): int
+    {
+        $base = max(1, (int) config('discovery.rate_limit.base_seconds', 10));
+        $cap = max($base, (int) config('discovery.rate_limit.max_seconds', 60));
+        $wait = $base * (2 ** $retry);
+
+        if ($retryAfter !== null) {
+            $wait = max($wait, $retryAfter);
+        }
+
+        return min($wait, $cap);
     }
 
     /** Has this run spent the calls it was allowed? Read from the database, never from a local tally. */

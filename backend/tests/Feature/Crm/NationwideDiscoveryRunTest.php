@@ -65,7 +65,6 @@ class NationwideDiscoveryRunTest extends TestCase
         // A stray outbound request is a failed test, not a surprise invoice.
         Http::preventStrayRequests();
 
-        config()->set('discovery.crm_token', 'test-token');
         // Coarse tiling and a small budget, so a test covers the country in a handful of searches
         // rather than the hundreds a real run makes. Neither number narrows WHERE it may look.
         config()->set('discovery.nationwide.cell_degrees', 1.0);
@@ -135,6 +134,7 @@ class NationwideDiscoveryRunTest extends TestCase
                 ?array $bbox = null,
                 ?string $country = null,
                 bool $aiStrategy = false,
+                ?string $crmToken = null,
             ): array {
                 return $this->test->recordCall(
                     compact('area', 'category', 'limit', 'provider', 'bbox', 'country'),

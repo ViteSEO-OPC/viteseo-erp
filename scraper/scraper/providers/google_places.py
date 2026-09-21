@@ -42,6 +42,15 @@ EXECUTION_NOT_EFFECTIVE = "not_effective_provider"
 EXECUTION_INVALID_RESPONSE = "invalid_response"
 #: The area could not be geocoded, so there is no bounding box to restrict the search to.
 EXECUTION_AREA_UNRESOLVED = "area_unresolved"
+#: The search was refused for RATE, not for any fact about the area — by Google (the CRM relays its
+#: own ``rate_limited``) or by the CRM's own callback throttle (a bare HTTP 429). It says nothing about
+#: whether businesses exist there, so it must never be read as an empty or exhausted area; the caller
+#: may retry later. Same word the CRM uses, so both sources read identically downstream.
+EXECUTION_RATE_LIMITED = "rate_limited"
+
+#: Upper bound on a server-supplied Retry-After we will pass on. A larger value is clamped rather than
+#: trusted, so a misbehaving header cannot stall a run.
+MAX_RETRY_AFTER_SECONDS = 300
 
 #: Nearby category -> Places API (New) type, sent as ``includedType`` with strict type filtering.
 #: Only categories with ONE exact Places type are listed. ``salon`` (hairdresser OR beauty) and
@@ -120,6 +129,17 @@ def category_for(primary_type: Optional[str], types: list[str] | None) -> Option
             return _humanize(place_type)
 
     return None
+
+
+def _retry_after_seconds(value: Optional[str]) -> Optional[int]:
+    """A Retry-After header in whole seconds, clamped; None when absent or not a delay in seconds."""
+    if value is None:
+        return None
+    text = value.strip()
+    if not text.isdigit():
+        # The HTTP-date form is legal but neither the CRM nor Google sends it; ignore rather than parse.
+        return None
+    return min(int(text), MAX_RETRY_AFTER_SECONDS)
 
 
 class GooglePlacesProvider(DiscoveryProvider):
@@ -235,8 +255,21 @@ class GooglePlacesProvider(DiscoveryProvider):
         if response.status_code >= 400:
             status = str(data.get("executionStatus") or "")
             if not status:
-                status = EXECUTION_NOT_EFFECTIVE if response.status_code == 409 else EXECUTION_CRM_UNREACHABLE
-            return self._failed(status, str(data.get("errorReason") or f"http_{response.status_code}"))
+                if response.status_code == 429:
+                    # The CRM's own throttle answers with no discovery body. It was mislabelled
+                    # `crm_unreachable`, which read as an outage and — worse — as a cell with nothing
+                    # in it. It is a rate refusal: nothing was searched.
+                    status = EXECUTION_RATE_LIMITED
+                elif response.status_code == 409:
+                    status = EXECUTION_NOT_EFFECTIVE
+                else:
+                    status = EXECUTION_CRM_UNREACHABLE
+            failed = self._failed(status, str(data.get("errorReason") or f"http_{response.status_code}"))
+            if status == EXECUTION_RATE_LIMITED:
+                retry_after = _retry_after_seconds(response.headers.get("Retry-After"))
+                if retry_after is not None:
+                    self._stats["retry_after"] = retry_after
+            return failed
 
         status = str(data.get("executionStatus") or EXECUTION_OK)
         if status != EXECUTION_OK:

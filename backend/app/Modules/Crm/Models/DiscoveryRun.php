@@ -100,6 +100,8 @@ class DiscoveryRun extends Model
         return [
             'scope' => 'array',
             'ai_strategy_requested' => 'boolean',
+            // H-5: a nationwide run's checkpointed queue between slices; NULL otherwise.
+            'work_queue' => 'array',
             'started_at' => 'datetime',
             'finished_at' => 'datetime',
             'provider_degraded_at' => 'datetime',
@@ -170,6 +172,14 @@ class DiscoveryRun extends Model
 
         if ((int) $this->budget_used >= (int) $this->budget_total && $moreToDo) {
             return 'budget_limited';
+        }
+
+        // A FAILED SEARCH LICENSES NO CLAIM ABOUT THE GROUND. "Exhausted" says the provider had
+        // nothing more to give; a search refused for rate (or that errored) never asked, so a run
+        // with any failed search is reported as a plain completion — its failures are stated by
+        // `targetsFailed`, never folded into a statement about the country (H-4).
+        if ((int) $this->targets_failed > 0) {
+            return 'completed';
         }
 
         // Every planned cell was asked and none was still full: exhausted AT THIS RESOLUTION and for

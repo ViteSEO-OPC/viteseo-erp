@@ -22,9 +22,10 @@ use Throwable;
  *   3. Each invocation carries its own `--limit`, so the engine's "divide the limit across cells,
  *      never multiply it" rule is respected rather than worked around.
  *
- * CREDENTIALS. `CRM_TOKEN` is read from config at execution time inside the worker and passed as an
- * environment variable to the child process. It is never part of a queue payload, never logged, and
- * never included in the stderr excerpt this class returns. The Google Places key is not handled here
+ * CREDENTIALS. `CRM_TOKEN` is a short-lived, org-bound service token minted by the caller for this
+ * work (NerbyServiceIdentity) and passed as an environment variable to the child process. It is
+ * never part of a queue payload, never logged, and never included in the stderr excerpt this class
+ * returns. The Google Places key is not handled here
  * at all — the engine asks this same CRM for places over HTTP, and the key stays server-side in
  * `crm_nerby_provider_settings`.
  */
@@ -38,10 +39,11 @@ class ScraperProcessRunner
      * @param  array{0: float, 1: float, 2: float, 3: float}|null  $bbox  south, west, north, east
      * @param  string|null  $country  ISO 3166-1 alpha-2 the engine must confine its geocoder to
      * @param  bool  $aiStrategy  this RUN asked for AI search planning; see {@see environment()}
+     * @param  string|null  $crmToken  the run's org-bound service token (NerbyServiceIdentity)
      * @return array{
      *     exitCode: int, executionStatus: ?string, errorReason: ?string,
      *     discovered: int, inserted: int, duplicates: int, rejected: int, stderrTail: string,
-     *     strategyApplied: ?bool, strategyStatus: ?string
+     *     strategyApplied: ?bool, strategyStatus: ?string, retryAfter: ?int
      * }
      */
     public function run(
@@ -53,12 +55,13 @@ class ScraperProcessRunner
         ?array $bbox = null,
         ?string $country = null,
         bool $aiStrategy = false,
+        ?string $crmToken = null,
     ): array {
         $before = $this->countLines($metricsPath);
 
         try {
             $result = Process::path((string) config('discovery.path', '/scraper'))
-                ->env($this->environment($metricsPath, $aiStrategy))
+                ->env($this->environment($metricsPath, $aiStrategy, $crmToken))
                 ->timeout((int) config('discovery.task_timeout', 180))
                 ->run([
                     (string) config('discovery.python', '/opt/scraper-venv/bin/python'),
@@ -123,6 +126,11 @@ class ScraperProcessRunner
             // which is read as "not applied", never guessed as applied.
             'strategyApplied' => isset($record['strategy_applied']) ? (bool) $record['strategy_applied'] : null,
             'strategyStatus' => $this->stringOrNull($record['strategy_status'] ?? null),
+            // A rate refusal's suggested wait, when the refusing server sent one. Used only to pace
+            // a retry; never a reason to treat the search as having found nothing.
+            'retryAfter' => isset($record['retry_after']) && is_numeric($record['retry_after'])
+                ? max(0, (int) $record['retry_after'])
+                : null,
         ];
     }
 
@@ -140,9 +148,9 @@ class ScraperProcessRunner
      *
      * @return array{exitCode: int, stderrTail: string}
      */
-    public function audit(int $limit): array
+    public function audit(int $limit, ?string $crmToken = null): array
     {
-        return $this->runCommand(['audit', '--limit', (string) $limit, '--commit']);
+        return $this->runCommand(['audit', '--limit', (string) $limit, '--commit'], $crmToken);
     }
 
     /**
@@ -154,9 +162,9 @@ class ScraperProcessRunner
      *
      * @return array{exitCode: int, stderrTail: string}
      */
-    public function findWebsites(int $limit): array
+    public function findWebsites(int $limit, ?string $crmToken = null): array
     {
-        return $this->runCommand(['find-websites', '--limit', (string) $limit, '--commit']);
+        return $this->runCommand(['find-websites', '--limit', (string) $limit, '--commit'], $crmToken);
     }
 
     /**
@@ -171,11 +179,11 @@ class ScraperProcessRunner
      * @param  list<string>  $arguments
      * @return array{exitCode: int, stderrTail: string}
      */
-    private function runCommand(array $arguments): array
+    private function runCommand(array $arguments, ?string $crmToken = null): array
     {
         try {
             $result = Process::path((string) config('discovery.path', '/scraper'))
-                ->env($this->environment($this->metricsPath()))
+                ->env($this->environment($this->metricsPath(), false, $crmToken))
                 ->timeout((int) config('discovery.enrichment_timeout', 900))
                 ->run([
                     (string) config('discovery.python', '/opt/scraper-venv/bin/python'),
@@ -232,11 +240,15 @@ class ScraperProcessRunner
      *
      * @return array<string, string>
      */
-    private function environment(string $metricsPath, bool $aiStrategy = false): array
+    private function environment(string $metricsPath, bool $aiStrategy = false, ?string $crmToken = null): array
     {
         $env = [
             'CRM_BASE_URL' => (string) config('discovery.crm_base_url'),
-            'CRM_TOKEN' => (string) config('discovery.crm_token'),
+            // THE CALLER'S SHORT-LIVED, ORG-BOUND SERVICE TOKEN — never a long-lived global one. It
+            // is minted for this run (or enrichment pass) and revoked when it ends, so the child's
+            // environment carries a credential that can reach the scraper callbacks for ONE org and
+            // nothing else. Absent means the engine refuses to write, which is the safe failure.
+            'CRM_TOKEN' => (string) ($crmToken ?? ''),
             // `/scraper` is mounted READ-ONLY, so telemetry cannot live beside the engine. Each run
             // gets its own file under storage, which also keeps a Stage 2 run from ever appending to
             // the curated path's shared `.discovery-metrics.jsonl`.
@@ -306,7 +318,7 @@ class ScraperProcessRunner
      * @return array{
      *     exitCode: int, executionStatus: ?string, errorReason: ?string,
      *     discovered: int, inserted: int, duplicates: int, rejected: int, stderrTail: string,
-     *     strategyApplied: ?bool, strategyStatus: ?string
+     *     strategyApplied: ?bool, strategyStatus: ?string, retryAfter: ?int
      * }
      */
     private function outcome(
@@ -328,6 +340,7 @@ class ScraperProcessRunner
             'stderrTail' => $this->tail($stderr),
             'strategyApplied' => null,
             'strategyStatus' => null,
+            'retryAfter' => null,
         ];
     }
 

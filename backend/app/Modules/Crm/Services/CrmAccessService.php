@@ -117,12 +117,6 @@ class CrmAccessService
         return $best;
     }
 
-    /** Whether the user can already enter Zerem (holds any CRM-relevant role). */
-    public function hasCrmAccess(User $user): bool
-    {
-        return $this->primaryCrmRole($user) !== null;
-    }
-
     // --- CRM access suspension ----------------------------------------------
     //
     // Suspension is ACCESS CONTROL ONLY. Nothing below reads or writes a role, a lead, a Planner

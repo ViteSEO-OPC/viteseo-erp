@@ -7,6 +7,7 @@ use App\Modules\Crm\Models\Lead;
 use Database\Seeders\RolesAndPermissionsSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
+use Tests\Concerns\ActsAsNerbyService;
 use Tests\TestCase;
 
 /**
@@ -31,6 +32,7 @@ use Tests\TestCase;
  */
 class DiscoveredWebsiteLengthTest extends TestCase
 {
+    use ActsAsNerbyService;
     use RefreshDatabase;
 
     protected function setUp(): void
@@ -80,7 +82,7 @@ class DiscoveredWebsiteLengthTest extends TestCase
         $url = $this->longUrl(290);
         $this->assertSame(290, strlen($url), 'the fixture must reproduce the reported length');
 
-        $this->postJson('/api/v1/crm/leads/discovered', [
+        $this->ingestDiscovered([
             'businesses' => [$this->business('places/OVERSIZED', $url)],
         ])->assertOk();
 
@@ -96,7 +98,7 @@ class DiscoveredWebsiteLengthTest extends TestCase
         // batch transaction, so NONE of the three businesses landed.
         $absurd = $this->longUrl(5000);
 
-        $this->postJson('/api/v1/crm/leads/discovered', [
+        $this->ingestDiscovered([
             'businesses' => [
                 $this->business('places/GOOD-1', 'https://goodbakery.example.ph'),
                 $this->business('places/BAD', $absurd),
@@ -123,7 +125,7 @@ class DiscoveredWebsiteLengthTest extends TestCase
 
     public function test_an_oversized_url_never_reaches_the_database_as_a_truncated_link(): void
     {
-        $this->postJson('/api/v1/crm/leads/discovered', [
+        $this->ingestDiscovered([
             'businesses' => [$this->business('places/NO-STUMP', $this->longUrl(5000))],
         ])->assertOk();
 
