@@ -10,11 +10,11 @@ namespace App\Modules\Crm\Enums;
  * selected — or when nothing is configured — Nearby behaves exactly as it always has.
  *
  * ADDING A PROVIDER IS A CASE HERE AND NOTHING ELSE. The settings table is keyed by provider with a
- * generic credential column and a JSON options bag, so a third engine needs no migration, no new
- * columns, and no change to the resolver. That is deliberate: a structured Places provider (Google
- * Places or similar) is a live evaluation target, gated on Philippine coverage, pricing, quotas and —
- * the real blocker — caching/redisplay licensing, since the CRM persists discovered records as leads
- * indefinitely. It is NOT added here yet, because adding the case is what makes it selectable.
+ * generic credential column and a JSON options bag, so a further engine needs no migration, no new
+ * columns, and no change to the resolver. That is deliberate: adding the case is what makes a
+ * provider selectable, which is how Google Places came in — subject, as any structured Places
+ * provider is, to caching/redisplay licensing, since the CRM persists discovered records as leads
+ * indefinitely.
  *
  * Whatever gets added, the contract is the same for all of them: a provider may change WHICH
  * candidates are discovered. It may never touch how a qualified lead is scored.
@@ -24,10 +24,6 @@ enum NerbyProvider: string
     case OPENSTREETMAP = 'openstreetmap';
     case OPENAI = 'openai';
     case GOOGLE_PLACES = 'google_places';
-
-    // Future, pending evaluation — see the class docblock. Adding it here is the ONLY code change
-    // the configuration layer needs; the credential column, options bag and resolver already fit it.
-    // case GOOGLE_PLACES = 'google_places';
 
     public static function default(): self
     {

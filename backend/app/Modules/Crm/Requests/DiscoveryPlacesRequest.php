@@ -3,6 +3,7 @@
 namespace App\Modules\Crm\Requests;
 
 use App\Modules\Crm\Services\Discovery\GooglePlacesTextSearch;
+use App\Modules\Crm\Services\Discovery\GooglePlaceTypes;
 use Illuminate\Foundation\Http\FormRequest;
 
 class DiscoveryPlacesRequest extends FormRequest
@@ -62,6 +63,21 @@ class DiscoveryPlacesRequest extends FormRequest
     }
 
     /** @return array{0: float, 1: float, 2: float, 3: float}|null south, west, north, east */
+    /**
+     * The `includedType` to send, or null. ONLY A TYPE GOOGLE ACCEPTS AS A FILTER IS EVER SENT.
+     *
+     * The shape check above cannot tell a real type from a plausible invention, and an invented one —
+     * most often an AI-planned type for a niche the static table does not cover — made Google refuse
+     * the whole request. A type outside Table A is dropped, not refused: the search still runs on its
+     * text query, which is what it would have done with no type at all.
+     */
+    public function includedType(): ?string
+    {
+        $type = $this->validated('includedType');
+
+        return GooglePlaceTypes::isIncludedType(is_string($type) ? $type : null) ? $type : null;
+    }
+
     public function boundingBox(): ?array
     {
         $bbox = $this->validated('bbox');

@@ -8,7 +8,7 @@ use App\Modules\Crm\Services\WebsiteIdentityVerifier;
 use App\Modules\Crm\Services\WebsiteStatusDeriver;
 use Database\Seeders\RolesAndPermissionsSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Laravel\Sanctum\Sanctum;
+use Tests\Concerns\ActsAsNerbyService;
 use Tests\TestCase;
 
 /**
@@ -25,6 +25,7 @@ use Tests\TestCase;
  */
 class WebsiteIdentityVerificationTest extends TestCase
 {
+    use ActsAsNerbyService;
     use RefreshDatabase;
 
     protected function setUp(): void
@@ -60,7 +61,7 @@ class WebsiteIdentityVerificationTest extends TestCase
 
     private function submit(Lead $lead, array $overrides = []): string
     {
-        Sanctum::actingAs($this->admin());
+        $this->actingAsNerbyService();
 
         return $this->putJson("/api/v1/crm/leads/{$lead->id}/website-enrichment", $this->findings($overrides))
             ->assertOk()
@@ -96,20 +97,20 @@ class WebsiteIdentityVerificationTest extends TestCase
      */
     public function test_a_discovered_business_with_no_provider_url_is_unknown_not_no_website(): void
     {
-        Sanctum::actingAs($this->admin());
+        // Machine-only ingest: the discovery service, as in production.
 
-        $this->postJson('/api/v1/crm/leads/discovered', [
+        $this->ingestDiscovered([
             'dry_run' => false,
             'businesses' => [[
                 'business_name' => 'Mercury Drug Vigan',
                 'industry' => 'pharmacy',
                 'source' => 'openstreetmap',
-                'place_id' => 'osm-node-mercury-1',
+                'place_id' => 'node/90001',
                 'city' => 'Vigan',
             ]],
         ])->assertSuccessful();
 
-        $lead = Lead::query()->where('place_id', 'osm-node-mercury-1')->firstOrFail();
+        $lead = Lead::query()->where('place_id', 'node/90001')->firstOrFail();
 
         $this->assertNull($lead->website);
         $this->assertSame('website-unknown', $lead->website_status);
@@ -122,20 +123,20 @@ class WebsiteIdentityVerificationTest extends TestCase
      */
     public function test_the_ingest_refuses_a_website_claim_from_the_provider(): void
     {
-        Sanctum::actingAs($this->admin());
+        // Machine-only ingest: the discovery service, as in production.
 
-        $this->postJson('/api/v1/crm/leads/discovered', [
+        $this->ingestDiscovered([
             'dry_run' => false,
             'businesses' => [[
                 'business_name' => 'Legacy Scraper Co',
                 'source' => 'openstreetmap',
-                'place_id' => 'osm-node-legacy-1',
+                'place_id' => 'node/90002',
                 'website' => 'https://legacyscraper.example',
                 'website_status' => 'has-website', // what the CURRENTLY DEPLOYED scraper sends
             ]],
         ])->assertSuccessful();
 
-        $lead = Lead::query()->where('place_id', 'osm-node-legacy-1')->firstOrFail();
+        $lead = Lead::query()->where('place_id', 'node/90002')->firstOrFail();
 
         $this->assertSame('https://legacyscraper.example', $lead->website, 'the URL is still captured');
         $this->assertSame('website-unknown', $lead->website_status, 'but the claim is not');

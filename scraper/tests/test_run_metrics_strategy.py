@@ -38,3 +38,14 @@ def test_a_provider_that_never_consulted_planning_adds_no_keys():
     record = _record({"execution_status": "ok"})
     assert "strategy_applied" not in record
     assert "strategy_status" not in record
+
+
+def test_a_rate_refusals_suggested_wait_travels_with_the_record():
+    record = _record({"execution_status": "rate_limited", "retry_after": 30})
+    assert record["provider_execution_status"] == "rate_limited"
+    assert record["succeeded"] is False
+    assert record["retry_after"] == 30
+
+
+def test_no_retry_after_key_when_none_was_given():
+    assert "retry_after" not in _record({"execution_status": "ok"})

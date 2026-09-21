@@ -22,6 +22,16 @@ class WebsiteAuditSpider(scrapy.Spider):
         "CONCURRENT_REQUESTS": 4,
         "COOKIES_ENABLED": False,
         "REDIRECT_ENABLED": True,
+        # SSRF POLICY (see scraper/net_guard.py). The URLs audited here come from data — a lead's
+        # `website`, provider tags, and wherever a server redirects — so every request, and every
+        # redirect hop (a redirect re-enters this chain as a new Request), is checked before any
+        # connection. The process-level resolver in runner.py closes DNS rebinding.
+        "DOWNLOADER_MIDDLEWARES": {"scraper.net_guard.SafeUrlDownloaderMiddleware": 50},
+        "REDIRECT_MAX_TIMES": 5,
+        "DOWNLOAD_MAXSIZE": 2 * 1024 * 1024,
+        "DOWNLOAD_WARNSIZE": 1024 * 1024,
+        # An HTTP(S)_PROXY in the environment would resolve names on our behalf, past the resolver.
+        "HTTPPROXY_ENABLED": False,
     }
 
     def __init__(self, queue: list[dict] | None = None, user_agent: str = "", **kwargs):

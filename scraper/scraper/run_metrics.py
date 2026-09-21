@@ -172,6 +172,11 @@ def build_record(
     if stats.get("strategy_status"):
         record["strategy_status"] = str(stats["strategy_status"])
 
+    # A RATE REFUSAL'S SUGGESTED WAIT, when the refusing server gave one. Absent otherwise; the CRM's
+    # orchestrator uses it to pace a retry instead of guessing.
+    if isinstance(stats.get("retry_after"), int):
+        record["retry_after"] = int(stats["retry_after"])
+
     # Cost, when the provider spends money. Absent for OSM rather than zero — "free" and "not
     # measured" are different claims, and a null says which one this is.
     if "prompt_tokens" in stats or "completion_tokens" in stats:

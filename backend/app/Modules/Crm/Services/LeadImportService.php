@@ -6,6 +6,8 @@ use App\Models\User;
 use App\Modules\Crm\Models\Lead;
 use App\Modules\Crm\Requests\StoreLeadRequest;
 use App\Modules\Crm\Services\Discovery\Geo\PhilippinesBoundary;
+use App\Modules\Crm\Models\LeadWebsiteCandidate;
+use App\Modules\Crm\Services\Website\WebsiteEvidenceService;
 use App\Modules\Crm\Services\Website\WebsiteUrlClassifier;
 use App\Modules\Crm\Services\Import\LeadImportInProgressException;
 use App\Modules\Crm\Services\Import\XlsConverter;
@@ -474,9 +476,25 @@ class LeadImportService
      *   importedCount: int
      * }
      */
-    public function ingestDiscovered(array $businesses, int $userId, bool $dryRun): array
+    public function ingestDiscovered(array $businesses, int $userId, bool $dryRun, ?\Closure $identityCheck = null): array
     {
         $total = count($businesses);
+
+        // IDENTITY BEFORE ANYTHING ELSE. A row whose provider identity cannot be vouched for — a
+        // Google place the CRM never returned to this caller, fields that differ from what Google
+        // said, an identity shape no provider produces — is refused here, counted, and never
+        // normalised, deduplicated or stored. See GooglePlacesAttestation.
+        $unverified = 0;
+        if ($identityCheck !== null) {
+            $businesses = array_values(array_filter($businesses, function (array $b) use ($identityCheck, &$unverified): bool {
+                if ($identityCheck($b) === true) {
+                    return true;
+                }
+                $unverified++;
+
+                return false;
+            }));
+        }
 
         /** @var list<array<string, mixed>> $rows */
         $rows = array_map(fn (array $b): array => $this->normalizeDiscovered($b), $businesses);
@@ -508,8 +526,8 @@ class LeadImportService
 
         /** @var list<array<string, mixed>> $valid */
         $valid = [];
-        /** @var array<int, string> $websiteBackfills  lead id => website */
-        $websiteBackfills = [];
+        /** @var array<int, array{website: string, source: string}> $websiteCandidates  lead id => proposal */
+        $websiteCandidates = [];
         $duplicates = 0;
         $seenPlaceIds = [];
         $seenEmails = [];
@@ -520,10 +538,16 @@ class LeadImportService
             $website = isset($row['website']) && $row['website'] !== '' ? (string) $row['website'] : null;
 
             if ($placeId !== null && (isset($existingByPlaceId[$placeId]) || isset($seenPlaceIds[$placeId]))) {
-                // Existing business — backfill the website URL if the provider now has one and it changed.
+                // Existing business with a different provider URL. NEVER written to `website`
+                // directly: that bypassed Website Intelligence and could replace an audited URL or a
+                // confirmed absence. It is proposed as a candidate instead, and only the identity
+                // verifier can promote it (WebsiteEvidenceService).
                 $existing = $existingByPlaceId[$placeId] ?? null;
                 if ($existing !== null && $website !== null && $existing->website !== $website) {
-                    $websiteBackfills[(int) $existing->id] = $website;
+                    $websiteCandidates[(int) $existing->id] = [
+                        'website' => $website,
+                        'source' => (string) ($row['source'] ?? 'discovery'),
+                    ];
                 }
                 $duplicates++;
 
@@ -546,15 +570,24 @@ class LeadImportService
 
         $importedCount = 0;
         if (! $dryRun) {
-            DB::transaction(function () use ($valid, $userId, $websiteBackfills, &$importedCount): void {
+            DB::transaction(function () use ($valid, $userId, &$importedCount): void {
                 if ($valid !== []) {
                     // assigned_to = null: enrichment never assigns ownership (fit-data provider only).
                     $importedCount = $this->persist($valid, $userId, null);
                 }
-                foreach ($websiteBackfills as $leadId => $website) {
-                    Lead::query()->whereKey($leadId)->update(['website' => $website]);
-                }
             });
+
+            $evidence = app(WebsiteEvidenceService::class);
+            foreach ($websiteCandidates as $leadId => $proposal) {
+                $lead = Lead::query()->find($leadId);
+                if ($lead !== null) {
+                    $evidence->recordCandidates($lead, [[
+                        'url' => $proposal['website'],
+                        'source' => LeadWebsiteCandidate::SOURCE_SEARCH,
+                        'source_detail' => mb_substr('discovery:'.$proposal['source'], 0, 255),
+                    ]], []);
+                }
+            }
         }
 
         return [
@@ -563,11 +596,16 @@ class LeadImportService
                 'total' => $total,
                 'valid' => count($valid),
                 'duplicates' => $duplicates,
-                'updated' => count($websiteBackfills),
+                // Existing leads are no longer written by discovery; kept for response-shape stability.
+                'updated' => 0,
+                // Different provider URLs for existing leads, proposed to Website Intelligence.
+                'websiteCandidates' => count($websiteCandidates),
+                // Rows refused because their provider identity could not be vouched for.
+                'unverified' => $unverified,
                 // Businesses refused by the national boundary. Surfaced so a run can report honestly
                 // that a provider returned results the CRM would not accept, rather than showing an
                 // unexplained shortfall between "found" and "added".
-                'rejected' => $rejected,
+                'rejected' => $rejected + $unverified,
             ],
             'importedCount' => $importedCount,
         ];

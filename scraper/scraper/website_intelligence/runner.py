@@ -14,6 +14,7 @@ from scrapy.crawler import CrawlerProcess
 from scraper.config import Config
 from scraper.safety import describe_target
 from scraper.ingest import CrmIngestClient
+from scraper.net_guard import PUBLIC_ONLY_RESOLVER
 from scraper.website_intelligence.spider import WebsiteAuditSpider
 from scraper.website_intelligence.urls import normalize_website_url
 
@@ -79,6 +80,10 @@ def run_audit(config: Config, limit: int, *, commit: bool = False) -> int:
             "CRM_COMMIT": commit,
             "TELNETCONSOLE_ENABLED": False,
             "LOG_LEVEL": "ERROR",
+            # SSRF: the resolver the connection itself uses refuses non-public answers, so a name
+            # that re-resolves to a private address after the middleware's check still cannot be
+            # reached (DNS rebinding). Process-level, because Scrapy installs it on the reactor.
+            "TWISTED_DNS_RESOLVER": PUBLIC_ONLY_RESOLVER,
         }
     )
     process.crawl(WebsiteAuditSpider, queue=queue, user_agent=config.user_agent)

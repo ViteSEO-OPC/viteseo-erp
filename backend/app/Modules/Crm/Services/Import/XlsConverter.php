@@ -3,7 +3,6 @@
 namespace App\Modules\Crm\Services\Import;
 
 use App\Modules\Crm\Services\LeadImportService;
-use Illuminate\Http\UploadedFile;
 use Illuminate\Validation\ValidationException;
 use PhpOffice\PhpSpreadsheet\Reader\Xls as XlsReader;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx as XlsxWriter;
@@ -134,12 +133,6 @@ class XlsConverter
                 @set_time_limit($previousTime);
             }
         }
-    }
-
-    /** Convenience for the synchronous path, which starts from the uploaded file. */
-    public function convertUploaded(UploadedFile $file, ?string $targetPath = null): string
-    {
-        return $this->convert((string) $file->getRealPath(), $targetPath);
     }
 
     /** A unique `.xlsx` path in the system temp dir. Extension matters — the writer keys off it. */

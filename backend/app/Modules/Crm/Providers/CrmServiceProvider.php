@@ -9,6 +9,7 @@ use App\Modules\Crm\Console\Commands\CallingDoctorCommand;
 use App\Modules\Crm\Console\Commands\EnrichDiscoveredWebsitesCommand;
 use App\Modules\Crm\Console\Commands\SyncMailboxesCommand;
 use App\Modules\Crm\Console\Commands\N8nTokenCommand;
+use App\Modules\Crm\Console\Commands\NerbyServiceTokenCommand;
 use App\Modules\Crm\Console\Commands\PruneReadNotifications;
 use App\Modules\Crm\Console\Commands\PruneXlsImportsCommand;
 use App\Modules\Crm\Console\Commands\RecomputeLeadScoresCommand;
@@ -71,6 +72,8 @@ use Illuminate\Notifications\Events\NotificationSent;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Auth\Events\Login;
 use Illuminate\Support\Facades\Event;
+use App\Modules\Crm\Services\Discovery\NerbyServiceIdentity;
+use App\Support\ServiceTokens;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
@@ -180,6 +183,10 @@ class CrmServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
+        // The NERBY scraper's service identity may reach its callback routes and nothing else.
+        // See App\Support\ServiceTokens and NerbyServiceIdentity.
+        ServiceTokens::register(NerbyServiceIdentity::ROLE, NerbyServiceIdentity::callbackRoutes());
+
         // The module route file declares its own `v1/crm` prefix + `auth:sanctum`;
         // here we add the shared `api` prefix/middleware → /api/v1/crm/*.
         Route::prefix('api')
@@ -266,6 +273,7 @@ class CrmServiceProvider extends ServiceProvider
                 SyncMailboxesCommand::class,
                 RecomputeLeadScoresCommand::class,
                 N8nTokenCommand::class,
+                NerbyServiceTokenCommand::class,
                 PruneReadNotifications::class,
                 // One-shot Business Niche registry backfill. Not scheduled — run manually once the
                 // canonical built-in list is approved and NicheSeeder has been run.

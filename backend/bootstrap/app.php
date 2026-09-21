@@ -46,6 +46,8 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->api(append: [
             \App\Http\Middleware\EnsureAccountIsActive::class,
             \App\Http\Middleware\EndSessionsPastTheirCeiling::class,
+            // Confines org-bound service tokens (the NERBY scraper) to their callback routes.
+            \App\Http\Middleware\RestrictServiceTokens::class,
         ]);
 
         // ── Rich-text documents must not be whitespace-trimmed ──

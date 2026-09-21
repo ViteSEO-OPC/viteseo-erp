@@ -69,6 +69,8 @@ class RunDiscoveryJob implements ShouldQueue
                 'phase' => null,
                 'finished_at' => now(),
                 'error_message' => 'The discovery run stopped unexpectedly. Any businesses already found have been saved.',
+                // A dead slice leaves no checkpoint for a successor that will never come (H-5).
+                'work_queue' => null,
             ])->save();
         });
     }

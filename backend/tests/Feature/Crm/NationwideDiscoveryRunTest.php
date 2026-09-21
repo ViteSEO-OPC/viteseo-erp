@@ -14,6 +14,7 @@ use Database\Seeders\RolesAndPermissionsSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Testing\TestResponse;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -65,7 +66,6 @@ class NationwideDiscoveryRunTest extends TestCase
         // A stray outbound request is a failed test, not a surprise invoice.
         Http::preventStrayRequests();
 
-        config()->set('discovery.crm_token', 'test-token');
         // Coarse tiling and a small budget, so a test covers the country in a handful of searches
         // rather than the hundreds a real run makes. Neither number narrows WHERE it may look.
         config()->set('discovery.nationwide.cell_degrees', 1.0);
@@ -135,6 +135,7 @@ class NationwideDiscoveryRunTest extends TestCase
                 ?array $bbox = null,
                 ?string $country = null,
                 bool $aiStrategy = false,
+                ?string $crmToken = null,
             ): array {
                 return $this->test->recordCall(
                     compact('area', 'category', 'limit', 'provider', 'bbox', 'country'),
@@ -160,7 +161,7 @@ class NationwideDiscoveryRunTest extends TestCase
         return $run->refresh();
     }
 
-    private function startNationwide(array $overrides = []): \Illuminate\Testing\TestResponse
+    private function startNationwide(array $overrides = []): TestResponse
     {
         return $this->postJson(self::ENDPOINT, ['scope' => 'nationwide', 'niches' => ['bakery'], ...$overrides]);
     }
@@ -251,7 +252,6 @@ class NationwideDiscoveryRunTest extends TestCase
 
     // ── execution: coverage, boxes and the boundary ──────────────────────────────────────────
 
-
     public function test_every_search_is_handed_a_box_inside_the_philippines(): void
     {
         Queue::fake();
@@ -261,7 +261,7 @@ class NationwideDiscoveryRunTest extends TestCase
         $this->startNationwide();
         $this->executeNationwide();
 
-        $boundary = new PhilippinesBoundary();
+        $boundary = new PhilippinesBoundary;
         [$south, $west, $north, $east] = $boundary->bbox();
 
         $this->assertNotEmpty($this->calls);
@@ -325,10 +325,6 @@ class NationwideDiscoveryRunTest extends TestCase
 
     // ── the 40-per-area contract ─────────────────────────────────────────────────────────────
 
-
-
-
-
     public function test_a_subdivided_cell_stays_inside_its_parent_and_inside_the_country(): void
     {
         Queue::fake();
@@ -339,7 +335,7 @@ class NationwideDiscoveryRunTest extends TestCase
         $this->startNationwide();
         $this->executeNationwide();
 
-        $boundary = new PhilippinesBoundary();
+        $boundary = new PhilippinesBoundary;
         foreach (DiscoveryRunTarget::query()->where('depth', '>', 0)->get() as $child) {
             [$s, $w, $n, $e] = $child->bbox();
             $parent = DiscoveryRunTarget::query()->findOrFail($child->parent_id);
@@ -373,7 +369,6 @@ class NationwideDiscoveryRunTest extends TestCase
         $this->assertSame(4, (int) $run->budget_used);
     }
 
-
     public function test_cancelling_stops_the_next_search(): void
     {
         Queue::fake();
@@ -404,10 +399,6 @@ class NationwideDiscoveryRunTest extends TestCase
             'no search may be left pending on a cancelled run',
         );
     }
-
-
-
-
 
     // ── WHAT MAKES IT STOP ───────────────────────────────────────────────────────────────────
     //

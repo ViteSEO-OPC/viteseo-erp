@@ -82,6 +82,8 @@ def _error_status(response: httpx.Response) -> str:
     status = data.get("executionStatus") if isinstance(data, dict) else None
     if isinstance(status, str) and status.strip():
         return status.strip()[:64]
+    if response.status_code == 429:
+        return "rate_limited"
     return f"http_{response.status_code}"
 
 

@@ -1,5 +1,7 @@
 <?php
 
+use App\Modules\Crm\Services\Discovery\NerbyProviderSettingService;
+
 /**
  * Stage 2 on-demand discovery — EXECUTION settings for invoking the canonical Python engine.
  *
@@ -7,16 +9,19 @@
  * lives, how long a task may take). It deliberately contains:
  *
  *   - NO API credential of any kind. The Google Places key lives in `crm_nerby_provider_settings`
- *     and is read through {@see \App\Modules\Crm\Services\Discovery\NerbyProviderSettingService}.
+ *     and is read through {@see NerbyProviderSettingService}.
  *     There is exactly one Google credential store in this system and this is not it.
  *   - NO area list, NO city list, NO niche list. Market settings live in `config/nerby.php`, which
  *     already explains why pinning geography or categories in config recreates the hardcoding the
  *     product exists to avoid. Scope arrives per request.
+ *   - NO STANDING CREDENTIAL for calling back into this CRM. This file once named a `crm_token`,
+ *     the long-lived Sanctum bearer the engine used for `POST /leads/discovered`. That key is gone:
+ *     the engine's identity is now a short-lived, org-bound token minted per run and revoked when
+ *     the work ends. Only its settings live here, under `service_account` below — never a token.
  *
- * `crm_token` is the one secret named here, and it is NOT a provider credential: it is the Sanctum
- * bearer token the engine uses to call BACK into this CRM (`POST /leads/discovered`). It is read at
- * execution time inside the worker and passed to the subprocess as an environment variable — never
- * placed in a queue payload, never logged, never returned to the browser.
+ * The minted token is still handed to the subprocess as an environment variable, read at execution
+ * time inside the worker: never placed in a queue payload, never logged, never returned to the
+ * browser.
  */
 return [
     /*
@@ -34,7 +39,44 @@ return [
      * production guard, not an obstacle — leave it on unless an operator has decided otherwise.
      */
     'crm_base_url' => env('DISCOVERY_CRM_BASE_URL', 'http://localhost:8001/api/v1/crm'),
-    'crm_token' => env('DISCOVERY_CRM_TOKEN', ''),
+
+    /*
+     * The engine's identity when it calls back into the CRM — a dedicated, least-privilege service
+     * account (NerbyServiceIdentity), NOT a standing token.
+     *
+     * There is deliberately no `crm_token` any more. The engine used to run with one long-lived
+     * wildcard token owned by an orgless super_admin, which made every callback land in the first
+     * org and put full platform administrator in the child's environment. Now each discovery run and
+     * each enrichment pass mints its own token — bound to ONE org, confined to the scraper callback
+     * routes, revoked when the work ends — and `run_token_ttl` is only the backstop expiry for a run
+     * that dies without cleaning up. Operators who run the scraper CLI by hand issue a token with
+     * `php artisan crm:nerby-service-token <org>`.
+     */
+    'service_account' => [
+        'email' => env('NERBY_SERVICE_EMAIL', 'nerby-service@crm.local'),
+        'name' => env('NERBY_SERVICE_NAME', 'NERBY Discovery Service'),
+        'run_token_ttl' => (int) env('NERBY_SERVICE_RUN_TOKEN_TTL', 7200),
+    ],
+
+    /*
+     * RATE REFUSALS (H-4). A search refused for rate — Google's quota, or the CRM's own callback
+     * throttle — is retried at most `max_retries` times, waiting `base_seconds` × 2^n (at least the
+     * server's Retry-After), never more than `max_seconds` per wait. Never a provider degradation, and
+     * never counted as an empty or exhausted area. Worst added wait per search with the defaults:
+     * 10 + 20 + 40 = 70s.
+     */
+    'rate_limit' => [
+        'max_retries' => (int) env('DISCOVERY_RATE_LIMIT_RETRIES', 3),
+        'base_seconds' => (int) env('DISCOVERY_RATE_LIMIT_BASE_SECONDS', 10),
+        'max_seconds' => (int) env('DISCOVERY_RATE_LIMIT_MAX_SECONDS', 60),
+    ],
+
+    /*
+     * How long the CRM remembers which Google places it returned to a service token, so the ingest
+     * can refuse a `places/...` identity the CRM never handed out (GooglePlacesAttestation).
+     */
+    'attestation_ttl' => (int) env('NERBY_ATTESTATION_TTL', 21600),
+
     'allow_remote_commit' => (bool) env('DISCOVERY_ALLOW_REMOTE_COMMIT', false),
 
     /*
@@ -252,6 +294,17 @@ return [
          * can spend without limit.
          */
         'max_tasks_ceiling' => (int) env('DISCOVERY_NATIONWIDE_MAX_TASKS_CEILING', 25000),
+
+        /*
+         * SLICED EXECUTION (H-5). A nationwide sweep outlives any single queued job, so each job works
+         * the queue for `slice_seconds`, checkpoints what is left on the run and queues its successor.
+         * Must stay well under RunDiscoveryJob::$timeout (900s) and the worker's --timeout: the margin
+         * is for the one search already in flight at the deadline — `task_timeout` plus the worst
+         * rate-limit waits (`rate_limit.*`). `lock_seconds` guards one-slice-at-a-time per run and must
+         * outlive a job, so a crashed slice cannot leave the run locked forever.
+         */
+        'slice_seconds' => (int) env('DISCOVERY_NATIONWIDE_SLICE_SECONDS', 540),
+        'lock_seconds' => (int) env('DISCOVERY_NATIONWIDE_LOCK_SECONDS', 1200),
 
         /*
          * How many times one cell may be subdivided when it comes back FULL. 2 means a first-pass

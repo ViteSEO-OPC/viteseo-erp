@@ -19,13 +19,6 @@ export const ROLE_LABELS: Record<Role, string> = {
   "crm_bd": "Business Development Manager",
 };
 
-/** Short label used in compact chips (e.g. the Team Accounts role column). */
-export const ROLE_SHORT_LABELS: Record<Role, string> = {
-  "super_admin": "Super Admin",
-  crm_admin: "Admin",
-  "crm_bd": "BD",
-};
-
 export function isRole(value: string): value is Role {
   return value in ROLE_RANK;
 }

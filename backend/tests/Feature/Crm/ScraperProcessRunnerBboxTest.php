@@ -27,10 +27,9 @@ class ScraperProcessRunnerBboxTest extends TestCase
     {
         parent::setUp();
         Process::fake();
-        config()->set('discovery.crm_token', 'test-token');
     }
 
-    private function invoke(?array $bbox, ?string $country = null): void
+    private function invoke(?array $bbox, ?string $country = null, ?string $crmToken = null): void
     {
         $this->app->make(ScraperProcessRunner::class)->run(
             'Cebu',
@@ -40,6 +39,7 @@ class ScraperProcessRunnerBboxTest extends TestCase
             storage_path('app/discovery/test.jsonl'),
             $bbox,
             $country,
+            crmToken: $crmToken,
         );
     }
 
@@ -292,11 +292,17 @@ class ScraperProcessRunnerBboxTest extends TestCase
 
     public function test_the_crm_token_is_never_part_of_the_command_line(): void
     {
-        config()->set('discovery.crm_token', 'super-secret-token-value');
-        $this->invoke(self::CELL);
+        // A REAL token has to be in play for this to assert anything. The removed
+        // `discovery.crm_token` config key is read by nothing, so setting it — as this test used to —
+        // left the runner with no credential at all and the assertion below could not fail.
+        $this->invoke(self::CELL, crmToken: 'super-secret-token-value');
 
         // It travels in the child's ENVIRONMENT, not its arguments: a process list is readable by
         // anything on the host.
         $this->assertStringNotContainsString('super-secret-token-value', $this->commandLine());
+
+        // And it must genuinely REACH the child that way — otherwise the assertion above would pass
+        // just as well for a runner that silently dropped the credential.
+        $this->assertSame('super-secret-token-value', $this->childEnvironment()['CRM_TOKEN'] ?? null);
     }
 }

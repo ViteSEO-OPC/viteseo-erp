@@ -10,6 +10,7 @@ use Database\Seeders\RolesAndPermissionsSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Laravel\Sanctum\Sanctum;
+use Tests\Concerns\ActsAsNerbyService;
 use Tests\TestCase;
 
 /**
@@ -27,6 +28,7 @@ use Tests\TestCase;
  */
 class NearbyClientsNicheTest extends TestCase
 {
+    use ActsAsNerbyService;
     use RefreshDatabase;
 
     protected function setUp(): void
@@ -215,17 +217,17 @@ class NearbyClientsNicheTest extends TestCase
         $admin->assignRole('crm_admin');
 
         Sanctum::actingAs($admin);
-        $this->postJson('/api/v1/crm/leads/discovered', [
+        $this->ingestDiscovered([
             'dry_run' => false,
             'businesses' => [[
                 'business_name' => 'Some Drugstore',
                 'industry' => 'pharmacy',
                 'source' => 'openstreetmap',
-                'place_id' => 'osm-node-1',
+                'place_id' => 'node/1',
             ]],
         ])->assertSuccessful();
 
-        $lead = Lead::query()->where('place_id', 'osm-node-1')->firstOrFail();
+        $lead = Lead::query()->where('place_id', 'node/1')->firstOrFail();
 
         $this->assertSame('pharmacy', $lead->industry, 'the ingest contract is unchanged');
         $this->assertSame('Pharmacy', app(NicheCanonicalizer::class)->canonical($lead->industry));

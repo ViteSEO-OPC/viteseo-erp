@@ -79,9 +79,6 @@ export const queryKeys = {
   },
   followUps: {
     all: ["follow-ups"] as const,
-    lists: () => [...queryKeys.followUps.all, "list"] as const,
-    list: (filters: Record<string, unknown>) =>
-      [...queryKeys.followUps.lists(), filters] as const,
   },
   activityLogs: {
     all: ["activity-logs"] as const,
@@ -156,8 +153,6 @@ export const queryKeys = {
     lists: () => [...queryKeys.users.all, "list"] as const,
     list: (filters: Record<string, unknown>) =>
       [...queryKeys.users.lists(), filters] as const,
-    details: () => [...queryKeys.users.all, "detail"] as const,
-    detail: (id: string) => [...queryKeys.users.details(), id] as const,
     // Email-first Create Account: "does this address already belong to a centralized user?"
     // Keyed by email so re-typing an address the admin already checked is served from cache.
     lookup: (email: string) => [...queryKeys.users.all, "lookup", email] as const,

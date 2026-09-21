@@ -34,6 +34,13 @@ class AiStrategyCapability
     public const INSUFFICIENT_CREDIT = 'insufficient_credit';
 
     /**
+     * A credential is stored but has not passed the Settings connection test: never tested, changed
+     * since (saving a key clears the result), or last tested as rejected, unreachable or throttled.
+     * An untested key is not offered, so "Discover with AI" can never quietly run as plain Google.
+     */
+    public const UNVERIFIED = 'unverified';
+
+    /**
      * AI planning is offered only on the Google Places Stage 2 flow. On the OpenStreetMap baseline
      * it would not be a Google search at all, and the default Nearby behaviour must stay untouched.
      */
@@ -57,16 +64,17 @@ class AiStrategyCapability
             return self::INSUFFICIENT_CREDIT;
         }
 
+        // ONLY A PASSED TEST MAKES AI AVAILABLE. The connection test checks both the key and the
+        // account balance; nothing short of its `ok` is evidence that a planning call can succeed.
+        if ($ai->last_test_status !== NerbyProviderSettingService::TEST_OK) {
+            return self::UNVERIFIED;
+        }
+
         if ($this->settings->resolveQuietly()->provider !== NerbyProvider::GOOGLE_PLACES) {
             return self::UNSUPPORTED_PROVIDER;
         }
 
         return self::AVAILABLE;
-    }
-
-    public function available(): bool
-    {
-        return $this->status() === self::AVAILABLE;
     }
 
     /**

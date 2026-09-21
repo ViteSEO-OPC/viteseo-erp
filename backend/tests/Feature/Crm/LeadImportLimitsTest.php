@@ -17,6 +17,7 @@ use Laravel\Sanctum\Sanctum;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xls as XlsWriter;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx as XlsxWriter;
+use Tests\Concerns\ActsAsNerbyService;
 use Tests\TestCase;
 
 /**
@@ -33,6 +34,7 @@ use Tests\TestCase;
  */
 class LeadImportLimitsTest extends TestCase
 {
+    use ActsAsNerbyService;
     use RefreshDatabase;
 
     private const OVER_CAP_MESSAGE = 'This file has more than 5,000 rows. Split it into smaller files.';
@@ -315,10 +317,13 @@ class LeadImportLimitsTest extends TestCase
         $this->startImports($bd, 10);
         $this->import($bd, ['file' => $this->tinyCsv('Blocked'), 'dry_run' => 'true'])->assertStatus(429);
 
-        Sanctum::actingAs($bd);
+        // The ingest is the discovery service's (machine-only); what matters here is that the
+        // import throttle a BD exhausted is not a bucket the service shares.
+        $this->actingAsNerbyService();
         for ($i = 0; $i < 15; $i++) {
             // An empty payload is refused by validation (422) — never by a throttle.
             $status = $this->postJson('/api/v1/crm/leads/discovered', ['dry_run' => true])->status();
+            $this->assertSame(422, $status, "discovered-lead ingest request {$i} was not validated");
             $this->assertNotSame(429, $status, "discovered-lead ingest request {$i} was throttled");
         }
     }

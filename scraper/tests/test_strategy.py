@@ -249,3 +249,9 @@ def test_omitting_report_changes_nothing(monkeypatch):
     # The pre-existing call shape still works and still returns None on refusal.
     body = {"data": {"executionStatus": "insufficient_credit"}}
     assert call(monkeypatch, FakeClient(response(body, status=502))) is None
+
+
+def test_a_throttled_strategy_call_reports_rate_limited(monkeypatch):
+    report = {}
+    assert call(monkeypatch, FakeClient(response({"message": "Too Many Attempts."}, status=429)), report=report) is None
+    assert report == {"status": "rate_limited"}

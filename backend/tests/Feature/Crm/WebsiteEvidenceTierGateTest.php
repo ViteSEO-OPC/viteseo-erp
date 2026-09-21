@@ -10,6 +10,7 @@ use App\Modules\Crm\Services\Website\WebsiteEvidenceService;
 use Database\Seeders\RolesAndPermissionsSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
+use Tests\Concerns\ActsAsNerbyService;
 use Tests\TestCase;
 
 /**
@@ -31,6 +32,7 @@ use Tests\TestCase;
  */
 class WebsiteEvidenceTierGateTest extends TestCase
 {
+    use ActsAsNerbyService;
     use RefreshDatabase;
 
     protected function setUp(): void
@@ -364,7 +366,7 @@ class WebsiteEvidenceTierGateTest extends TestCase
 
     public function test_a_probe_candidate_is_accepted_and_keeps_its_provenance(): void
     {
-        Sanctum::actingAs($this->user('crm_admin'));
+        $this->actingAsNerbyService();
         $lead = $this->discoveredLead();
 
         $this->postJson("/api/v1/crm/leads/{$lead->id}/website-candidates", [

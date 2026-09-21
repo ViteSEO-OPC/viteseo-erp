@@ -3,11 +3,12 @@
 namespace Tests\Feature\Crm;
 
 use App\Modules\Crm\Console\Commands\EnrichDiscoveredWebsitesCommand;
-use App\Modules\Crm\Services\Discovery\ScraperProcessRunner;
 use Illuminate\Console\Scheduling\Event;
 use Illuminate\Console\Scheduling\Schedule;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Process;
+use Laravel\Sanctum\PersonalAccessToken;
 use Tests\TestCase;
 
 /**
@@ -21,6 +22,8 @@ use Tests\TestCase;
  */
 class WebsiteEnrichmentScheduleTest extends TestCase
 {
+    use RefreshDatabase;
+
     private function scheduledEvent(): ?Event
     {
         foreach (app(Schedule::class)->events() as $event) {
@@ -76,7 +79,6 @@ class WebsiteEnrichmentScheduleTest extends TestCase
     public function test_it_invokes_the_existing_engine_commands_with_a_bounded_limit_and_commit(): void
     {
         Process::fake();
-        config()->set('discovery.crm_token', 'test-token');
 
         $this->artisan(EnrichDiscoveredWebsitesCommand::class, ['--audit' => 7, '--search' => 4])
             ->assertSuccessful();
@@ -97,7 +99,6 @@ class WebsiteEnrichmentScheduleTest extends TestCase
     public function test_the_limit_is_always_present_so_one_tick_cannot_drain_the_whole_backlog(): void
     {
         Process::fake();
-        config()->set('discovery.crm_token', 'test-token');
         config()->set('discovery.enrichment.audit_limit', 25);
         config()->set('discovery.enrichment.search_limit', 25);
 
@@ -109,7 +110,6 @@ class WebsiteEnrichmentScheduleTest extends TestCase
     public function test_a_step_can_be_switched_off_without_touching_the_other(): void
     {
         Process::fake();
-        config()->set('discovery.crm_token', 'test-token');
 
         $this->artisan(EnrichDiscoveredWebsitesCommand::class, ['--audit' => 0, '--search' => 3])
             ->assertSuccessful();
@@ -131,7 +131,6 @@ class WebsiteEnrichmentScheduleTest extends TestCase
         // The queues are ordered never-checked-first, so the next tick resumes where this one
         // stopped. Retrying here would only re-crawl the same sites sooner.
         Process::fake(['*' => Process::result(output: '', errorOutput: 'boom', exitCode: 3)]);
-        config()->set('discovery.crm_token', 'test-token');
 
         $this->artisan(EnrichDiscoveredWebsitesCommand::class, ['--audit' => 1, '--search' => 0])
             ->assertFailed();
@@ -139,16 +138,27 @@ class WebsiteEnrichmentScheduleTest extends TestCase
 
     public function test_the_crm_token_never_reaches_the_command_line(): void
     {
+        // The token is no longer configuration: each org's pass mints its own short-lived,
+        // org-bound service token. It travels in the child's ENVIRONMENT only, and is revoked when
+        // the pass ends.
         Process::fake();
-        config()->set('discovery.crm_token', 'super-secret-token-value');
 
         $this->artisan(EnrichDiscoveredWebsitesCommand::class, ['--audit' => 1, '--search' => 0])
             ->assertSuccessful();
 
-        Process::assertRan(fn ($process): bool => ! str_contains(
-            implode(' ', (array) $process->command),
-            'super-secret-token-value',
-        ));
+        $seen = [];
+        Process::assertRan(function ($process) use (&$seen): bool {
+            $seen[] = [(string) ($process->environment['CRM_TOKEN'] ?? ''), implode(' ', (array) $process->command)];
+
+            return true;
+        });
+
+        $this->assertNotEmpty($seen);
+        foreach ($seen as [$token, $command]) {
+            $this->assertNotSame('', $token, 'the engine was started without a credential');
+            $this->assertStringNotContainsString($token, $command);
+        }
+        $this->assertSame(0, PersonalAccessToken::query()->where('name', 'nerby:enrichment')->count(), 'the pass token must be revoked');
     }
 
     public function test_a_second_tick_is_refused_while_one_is_running(): void
@@ -159,7 +169,6 @@ class WebsiteEnrichmentScheduleTest extends TestCase
         // The trigger therefore invokes the command directly — and a direct invocation inherits no
         // protection from a schedule entry it never went through.
         Process::fake();
-        config()->set('discovery.crm_token', 'test-token');
 
         $held = Cache::lock('crm:enrich-websites', 60);
         $this->assertTrue($held->get(), 'precondition: the lock is free');
@@ -183,7 +192,6 @@ class WebsiteEnrichmentScheduleTest extends TestCase
         // A lock that outlived its tick would silence enrichment until it expired, which is the
         // failure mode the bounded expiry exists for — but the ordinary path must not rely on it.
         Process::fake();
-        config()->set('discovery.crm_token', 'test-token');
 
         $this->artisan(EnrichDiscoveredWebsitesCommand::class)->assertSuccessful();
 

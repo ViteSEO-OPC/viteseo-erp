@@ -3,7 +3,6 @@
 namespace Tests\Feature\Crm;
 
 use App\Models\User;
-use App\Modules\Crm\Enums\NotificationType;
 use App\Modules\Crm\Notifications\InboundReplyNotification;
 use App\Modules\Crm\Notifications\PlannerReminderNotification;
 use Database\Seeders\RolesAndPermissionsSeeder;

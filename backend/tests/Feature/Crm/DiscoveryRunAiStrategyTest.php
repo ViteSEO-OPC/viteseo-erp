@@ -58,7 +58,6 @@ class DiscoveryRunAiStrategyTest extends TestCase
         parent::setUp();
         $this->seed(RolesAndPermissionsSeeder::class);
         Http::preventStrayRequests();
-        config()->set('discovery.crm_token', 'test-token');
         // The deployment-wide flag stays OFF, so every AI effect below comes from the per-run switch.
         config()->set('discovery.ai_strategy', false);
     }
@@ -140,6 +139,7 @@ class DiscoveryRunAiStrategyTest extends TestCase
                 ?array $bbox = null,
                 ?string $country = null,
                 bool $aiStrategy = false,
+                ?string $crmToken = null,
             ): array {
                 $call = compact('area', 'category', 'provider', 'aiStrategy');
                 $this->test->calls[] = $call;
