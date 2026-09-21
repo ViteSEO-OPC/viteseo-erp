@@ -2,46 +2,45 @@
 
 namespace App\Modules\Crm\Controllers;
 
-use App\Modules\Crm\Services\Discovery\GooglePlacesAttestation;
-use App\Support\ServiceTokens;
 use App\Http\Controllers\Controller;
-
+use App\Models\User;
+use App\Modules\Crm\Events\LeadAssigned;
+use App\Modules\Crm\Jobs\ConvertXlsImportJob;
+use App\Modules\Crm\Models\Activity;
+use App\Modules\Crm\Models\Lead;
+use App\Modules\Crm\Notifications\LeadAssignedNotification;
 use App\Modules\Crm\Requests\AssignLeadRequest;
-use App\Modules\Crm\Requests\ImportLeadsRequest;
 use App\Modules\Crm\Requests\DestroyAllLeadsRequest;
+use App\Modules\Crm\Requests\ImportLeadsRequest;
 use App\Modules\Crm\Requests\IndexArchivedLeadRequest;
 use App\Modules\Crm\Requests\IndexLeadRequest;
 use App\Modules\Crm\Requests\IngestDiscoveredLeadsRequest;
 use App\Modules\Crm\Requests\RestoreAllRequest;
 use App\Modules\Crm\Requests\StoreLeadRequest;
 use App\Modules\Crm\Requests\UpdateLeadRequest;
-use App\Modules\Crm\Events\LeadAssigned;
-// Platform-level fire-and-forget broadcast helper (App\Support), shared by every module.
-use App\Support\SafeBroadcast;
 use App\Modules\Crm\Resources\ActivityResource;
 use App\Modules\Crm\Resources\ArchivedLeadResource;
 use App\Modules\Crm\Resources\EmailResource;
 use App\Modules\Crm\Resources\LeadResource;
-use App\Modules\Crm\Models\Activity;
-use App\Modules\Crm\Models\Lead;
-use App\Modules\Crm\Notifications\LeadAssignedNotification;
-use App\Models\User;
-use App\Modules\Crm\Services\LeadCreator;
-use App\Modules\Crm\Jobs\ConvertXlsImportJob;
+use App\Modules\Crm\Services\Discovery\GooglePlacesAttestation;
 use App\Modules\Crm\Services\Import\LeadImportInProgressException;
 use App\Modules\Crm\Services\Import\XlsConverter;
 use App\Modules\Crm\Services\Import\XlsImportJobStore;
 use App\Modules\Crm\Services\LeadAssignmentService;
+use App\Modules\Crm\Services\LeadCreator;
 use App\Modules\Crm\Services\LeadImportService;
-use Illuminate\Http\UploadedFile;
 use App\Modules\Crm\Services\LeadPdfExporter;
 use App\Modules\Crm\Services\Scoring\LeadScorer;
 use App\Modules\Crm\Services\Scoring\ScoreSignal;
+// Platform-level fire-and-forget broadcast helper (App\Support), shared by every module.
+use App\Support\SafeBroadcast;
+use App\Support\ServiceTokens;
 use Illuminate\Contracts\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Builder as EloquentBuilder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Symfony\Component\HttpFoundation\Response as SymfonyResponse;
@@ -424,7 +423,7 @@ class LeadController extends Controller
     {
         $user = $request->user();
 
-        /** @var \Illuminate\Support\Collection<int, int> $ids */
+        /** @var Collection<int, int> $ids */
         $ids = $this->deletableQuery($user)->pluck('id');
 
         $archived = 0;

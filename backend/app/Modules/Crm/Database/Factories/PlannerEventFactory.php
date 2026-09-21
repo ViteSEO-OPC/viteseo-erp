@@ -2,8 +2,8 @@
 
 namespace App\Modules\Crm\Database\Factories;
 
-use App\Modules\Crm\Models\PlannerEvent;
 use App\Models\User;
+use App\Modules\Crm\Models\PlannerEvent;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**

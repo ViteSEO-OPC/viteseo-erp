@@ -33,25 +33,34 @@ use Illuminate\Support\Carbon;
 class LeadWebsiteCandidate extends Model
 {
     use BelongsToOrg;
+
     protected $table = 'crm_lead_website_candidates';
 
     /** Refusal reasons. Codes, never prose — machines read them and the UI renders them. */
     public const REJECTED_UNREACHABLE = 'not_reachable';
+
     public const REJECTED_IDENTITY = 'identity_unverified';
+
     public const REJECTED_MARGIN = 'insufficient_margin';
+
     public const REJECTED_INVALID = 'invalid_url';
 
     /** Where a candidate came from. Varchar-backed so a new tier needs no migration. */
     public const SOURCE_OSM_TAG = 'osm_tag';
+
     public const SOURCE_WIKIDATA = 'wikidata';
+
     /**
      * A hostname derived from the business name and confirmed to resolve in DNS — a guess the
      * verifier must still earn, kept distinct from SOURCE_SEARCH (a search engine's answer) so the
      * evidence trail says which places were actually tried rather than merely that something was.
      */
     public const SOURCE_PROBE = 'probe';
+
     public const SOURCE_SEARCH = 'search';
+
     public const SOURCE_AI = 'ai';
+
     public const SOURCE_MANUAL = 'manual';
 
     /** @return list<string> */

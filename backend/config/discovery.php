@@ -1,5 +1,7 @@
 <?php
 
+use App\Modules\Crm\Services\Discovery\NerbyProviderSettingService;
+
 /**
  * Stage 2 on-demand discovery — EXECUTION settings for invoking the canonical Python engine.
  *
@@ -7,7 +9,7 @@
  * lives, how long a task may take). It deliberately contains:
  *
  *   - NO API credential of any kind. The Google Places key lives in `crm_nerby_provider_settings`
- *     and is read through {@see \App\Modules\Crm\Services\Discovery\NerbyProviderSettingService}.
+ *     and is read through {@see NerbyProviderSettingService}.
  *     There is exactly one Google credential store in this system and this is not it.
  *   - NO area list, NO city list, NO niche list. Market settings live in `config/nerby.php`, which
  *     already explains why pinning geography or categories in config recreates the hardcoding the
