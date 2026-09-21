@@ -7,7 +7,9 @@ use App\Modules\Hr\Http\Resources\EmployeeResource;
 use App\Modules\Hr\Models\AuditLog;
 use App\Modules\Hr\Models\Department;
 use App\Modules\Hr\Models\Employee;
+use App\Modules\Hr\Services\EmployeeService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Validation\ValidationException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
@@ -34,6 +36,13 @@ class SensitiveFieldEncryptionTest extends HrTestCase
             'sss_number' => '34-1234567-8',
             'philhealth_number' => '12-345678901-2',
             'pagibig_number' => '1234-5678-9012',
+            // The further IDs. Covered here so the loops below actually assert something about
+            // them instead of comparing two nulls — a field added to SENSITIVE_FIELDS but not to
+            // this fixture is a field nothing checks.
+            'other_ids' => [
+                ['type' => 'Passport', 'number' => 'P1234567'],
+                ['type' => "Driver's License", 'number' => 'N01-23-456789'],
+            ],
         ]);
     }
 
@@ -45,13 +54,12 @@ class SensitiveFieldEncryptionTest extends HrTestCase
         $row = DB::table('hr_employees')->where('id', $this->employee->id)->first();
 
         foreach (Employee::SENSITIVE_FIELDS as $field) {
-            $this->assertNotSame(
-                $this->employee->{$field},
-                $row->{$field},
-                "{$field} is stored in plain text",
-            );
+            $plain = $this->employee->{$field};
+
+            $this->assertNotSame($plain, $row->{$field}, "{$field} is stored in plain text");
             $this->assertSame(
-                $this->employee->{$field},
+                // `other_ids` is cast `encrypted:array`, so what the envelope carries is its JSON.
+                is_array($plain) ? json_encode($plain) : $plain,
                 Crypt::decryptString($row->{$field}),
                 "{$field} did not round-trip through encryption",
             );
@@ -84,14 +92,76 @@ class SensitiveFieldEncryptionTest extends HrTestCase
         $this->assertSame('••••2-34', $payload['bank_account']);
         $this->assertSame('••••Cruz', $payload['bank_account_name']);
         $this->assertSame('••••9012', $payload['pagibig_number']);
+        // Every further ID is masked the same way, and the TYPES stay in full on purpose — a label
+        // is not personal data.
+        $this->assertSame([
+            ['type' => 'Passport', 'number' => '••••4567'],
+            ['type' => "Driver's License", 'number' => '••••6789'],
+        ], $payload['other_ids']);
 
         foreach (Employee::SENSITIVE_FIELDS as $field) {
-            $this->assertStringNotContainsString(
-                (string) $this->employee->{$field},
-                (string) $payload[$field],
-                "{$field} leaked its full value into the payload",
-            );
+            $plain = $this->employee->{$field};
+            $shown = json_encode($payload[$field]);
+
+            // A list hides several secrets behind one key, so each entry's number is checked.
+            foreach (is_array($plain) ? array_column($plain, 'number') : [$plain] as $secret) {
+                $this->assertStringNotContainsString(
+                    (string) $secret,
+                    (string) $shown,
+                    "{$field} leaked its full value into the payload",
+                );
+            }
         }
+    }
+
+    // --- the mask must never become the value -------------------------------------------------
+
+    /**
+     * The record only ever SHOWS ••••1234, and every editor seeds its inputs from what it was
+     * shown. Saving a section without retyping must therefore leave the stored number alone:
+     * writing the mask over it destroys the value, and nothing remembers what ••••1234 was.
+     */
+    public function test_saving_a_masked_value_back_leaves_the_stored_number_alone(): void
+    {
+        app(EmployeeService::class)->update($this->employee, [
+            'tin' => '••••-000',
+            'bank_account' => '••••2-34',
+            'other_ids' => [
+                ['type' => 'Passport', 'number' => '••••4567'],
+                ['type' => "Driver's License", 'number' => '••••6789'],
+            ],
+        ]);
+
+        $fresh = $this->employee->fresh();
+
+        $this->assertSame('123-456-789-000', $fresh->tin);
+        $this->assertSame('1234-5678-9012-34', $fresh->bank_account);
+        $this->assertSame('P1234567', $fresh->other_ids[0]['number']);
+        $this->assertSame('N01-23-456789', $fresh->other_ids[1]['number']);
+    }
+
+    /** The guard must not swallow a real edit. */
+    public function test_a_retyped_value_still_replaces_the_stored_one(): void
+    {
+        app(EmployeeService::class)->update($this->employee, [
+            'tin' => '999-888-777-666',
+            'other_ids' => [['type' => 'Passport', 'number' => 'P7654321']],
+        ]);
+
+        $fresh = $this->employee->fresh();
+
+        $this->assertSame('999-888-777-666', $fresh->tin);
+        $this->assertSame('P7654321', $fresh->other_ids[0]['number']);
+    }
+
+    /** A mask that matches no stored number is refused, rather than written as ••••. */
+    public function test_an_unresolvable_mask_is_refused(): void
+    {
+        $this->expectException(ValidationException::class);
+
+        app(EmployeeService::class)->update($this->employee, [
+            'other_ids' => [['type' => 'Passport', 'number' => '••••0000']],
+        ]);
     }
 
     /** A short value is masked entirely — showing the last four of five discloses most of it. */

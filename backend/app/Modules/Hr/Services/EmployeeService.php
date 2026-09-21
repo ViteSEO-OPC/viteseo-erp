@@ -63,6 +63,9 @@ class EmployeeService
     /** The most siblings a record may name; the count field allows more than are named. */
     public const MAX_SIBLINGS = 20;
 
+    /** The most further IDs one record may carry, beyond the four named columns. */
+    public const MAX_OTHER_IDS = 10;
+
     /**
      * Editable profile columns on hr_employees (everything except the identity
      * name/email — which live on users — and the job/salary fields set explicitly).
@@ -88,7 +91,96 @@ class EmployeeService
         // in B1 and Company → Benefits is the catalogue now, so writing them only produced a
         // number on the profile that no payslip agreed with.
         'tin', 'sss_number', 'philhealth_number', 'pagibig_number',
+        // Any number of further IDs those four do not name.
+        'other_ids',
     ];
+
+    /**
+     * Drop sensitive values that are only the MASK coming back.
+     *
+     * A record never shows a bank account or an ID number in full — it shows ••••1234 — and every
+     * editor seeds its inputs from what it was shown. So saving a section without retyping would
+     * write the mask over the number and destroy it, with no way back: nothing stores what ••••1234
+     * used to be. A value we would only ever have DISPLAYED is therefore never a new value. It
+     * means "leave this one as it is".
+     *
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     */
+    private function keepUnchangedSecrets(array $data, Employee $employee): array
+    {
+        foreach (Employee::SENSITIVE_FIELDS as $field) {
+            if (! array_key_exists($field, $data)) {
+                continue;
+            }
+
+            if ($field === 'other_ids') {
+                $data[$field] = $this->resolveOtherIdSecrets($data[$field], $employee);
+
+                continue;
+            }
+
+            if (self::looksMasked($data[$field])) {
+                unset($data[$field]);
+            }
+        }
+
+        return $data;
+    }
+
+    /**
+     * The same rule for the ID list, where one masked number has to be matched to the entry it
+     * stands for: the row in the same position when that still fits, otherwise the single stored
+     * number whose mask it is. Ambiguous or gone, it is REFUSED rather than written as ••••1234 —
+     * a number quietly replaced by its own mask is the failure this whole method exists to stop.
+     */
+    private function resolveOtherIdSecrets(mixed $incoming, Employee $employee): mixed
+    {
+        if (! is_array($incoming)) {
+            return $incoming;
+        }
+
+        $stored = is_array($employee->other_ids) ? array_values($employee->other_ids) : [];
+        $maskOf = static fn (mixed $row): ?string => is_array($row)
+            ? Employee::maskSensitive((string) ($row['number'] ?? ''))
+            : null;
+
+        $out = [];
+
+        foreach (array_values($incoming) as $i => $row) {
+            if (! is_array($row) || ! self::looksMasked($row['number'] ?? null)) {
+                $out[] = $row;
+
+                continue;
+            }
+
+            $mask = $row['number'];
+
+            if (isset($stored[$i]) && $maskOf($stored[$i]) === $mask) {
+                $out[] = [...$row, 'number' => $stored[$i]['number']];
+
+                continue;
+            }
+
+            $matches = array_values(array_filter($stored, fn ($s) => $maskOf($s) === $mask));
+
+            if (count($matches) !== 1) {
+                throw ValidationException::withMessages([
+                    "other_ids.{$i}.number" => ['Re-enter this ID number — it was only ever shown masked.'],
+                ]);
+            }
+
+            $out[] = [...$row, 'number' => $matches[0]['number']];
+        }
+
+        return $out;
+    }
+
+    /** Is this the shape a masked value is shown in, rather than a value someone typed? */
+    private static function looksMasked(mixed $value): bool
+    {
+        return is_string($value) && str_starts_with($value, '••••');
+    }
 
     /** The users.name is composed from the split-name fields, falling back to `name`. */
     private function displayName(array $data): string
@@ -580,6 +672,9 @@ class EmployeeService
     public function update(Employee $employee, array $data): Employee
     {
         return DB::transaction(function () use ($employee, $data) {
+            // What came back masked was never retyped, so it is not a change — see the method.
+            $data = $this->keepUnchangedSecrets($data, $employee);
+
             $oldSalary = (float) $employee->base_salary;
             $oldTitle = $employee->job_title;
             $wasManagement = (bool) $employee->is_management;

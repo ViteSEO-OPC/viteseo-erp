@@ -21,6 +21,15 @@ export interface EmployeeRef {
 }
 
 /** One named sibling on the personal record. */
+/**
+ * A government ID beyond the four named ones — a passport, a driver's licence, a PRC card.
+ * The number arrives MASKED on an employee payload; the full value is behind the reveal endpoint.
+ */
+export interface OtherId {
+  type: string;
+  number: string;
+}
+
 export interface Sibling {
   name: string;
   gender: string | null;
@@ -141,6 +150,8 @@ export interface Employee {
   sss_number: string | null;
   philhealth_number: string | null;
   pagibig_number: string | null;
+  /** Further IDs the four above do not name. Each number arrives masked. */
+  other_ids: OtherId[];
   department: DepartmentRef | null;
   manager: ManagerRef | null;
   created_at: string;
@@ -249,6 +260,8 @@ export interface EmployeeInput {
   sss_number?: string;
   philhealth_number?: string;
   pagibig_number?: string;
+  /** Both halves of every entry are required by the API. */
+  other_ids?: OtherId[];
   // Audit inputs (only meaningful on update when the value actually changes).
   salary_change_reason?: string;
   salary_change_type?: string;

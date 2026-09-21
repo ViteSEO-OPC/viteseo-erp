@@ -80,6 +80,8 @@ class Employee extends Model
         'sss_number',
         'philhealth_number',
         'pagibig_number',
+        // Any number of further IDs the four above do not name — a list of {type, number}.
+        'other_ids',
         'custom_workdays',
         'custom_start_time',
         'custom_end_time',
@@ -143,6 +145,13 @@ class Employee extends Model
         'sss_number' => 'encrypted',
         'philhealth_number' => 'encrypted',
         'pagibig_number' => 'encrypted',
+        /*
+         * The further IDs, as ONE encrypted blob. Their numbers are the same class of data as the
+         * four above, and a list cannot encrypt just one field of each entry — so the whole list is
+         * encrypted together. That is also why the column is TEXT and not `json`: what is stored is
+         * a ciphertext string, which a json column would refuse.
+         */
+        'other_ids' => 'encrypted:array',
     ];
 
     /**
@@ -154,11 +163,28 @@ class Employee extends Model
     public const SENSITIVE_FIELDS = [
         'bank_account', 'bank_account_name', 'tin',
         'sss_number', 'philhealth_number', 'pagibig_number',
+        'other_ids',
     ];
 
-    /** A sensitive value reduced to its last four characters. */
-    public static function maskSensitive(?string $value): ?string
+    /**
+     * A sensitive value reduced to what a record may show.
+     *
+     * A string keeps its last four characters. A LIST of further IDs is the same job done per
+     * entry: each number is masked by this very rule, and the types are left as typed, because a
+     * label ("Passport") is not personal data.
+     *
+     * @param  string|array<int, array<string, mixed>>|null  $value
+     * @return string|array<int, array<string, mixed>>|null
+     */
+    public static function maskSensitive(string|array|null $value): string|array|null
     {
+        if (is_array($value)) {
+            return array_values(array_map(fn (array $id): array => [
+                'type' => $id['type'] ?? null,
+                'number' => self::maskSensitive(isset($id['number']) ? (string) $id['number'] : null),
+            ], $value));
+        }
+
         if ($value === null || $value === '') {
             return $value;
         }

@@ -37,6 +37,7 @@ import { ContributionEnrolmentBlock } from "@/modules/hr/components/contribution
 import { EmployeeAllowancesBlock } from "@/modules/hr/components/employee-allowances-block";
 import { MyAllowancesBlock } from "@/modules/hr/components/my-allowances-block";
 import { MinimumWageBlock } from "@/modules/hr/components/minimum-wage-block";
+import { MAX_OTHER_IDS, OtherIdsFields } from "@/modules/hr/components/other-ids-fields";
 import {
   BANK_ACCOUNT_TYPES,
   PAY_FREQUENCIES,
@@ -67,6 +68,16 @@ const schema = z.object({
   sss_number: optionalText(32),
   philhealth_number: optionalText(32),
   pagibig_number: optionalText(32),
+  // Both halves of every row are required — the API refuses a half-typed entry, and an empty row
+  // the user added and changed their mind about is removed with its own button.
+  other_ids: z
+    .array(
+      z.object({
+        type: z.string().trim().min(1, "Enter the ID type"),
+        number: z.string().trim().min(1, "Enter the ID number"),
+      }),
+    )
+    .max(MAX_OTHER_IDS, `You can record at most ${MAX_OTHER_IDS} other IDs`),
   is_management: z.boolean(),
   // Out of the minimum-wage check, with the reason on the record. The server requires
   // the reason when the flag is set; asked for here so it is never a silent exemption.
@@ -97,6 +108,7 @@ function toValues(employee: Employee): Values {
     sss_number: employee.sss_number ?? "",
     philhealth_number: employee.philhealth_number ?? "",
     pagibig_number: employee.pagibig_number ?? "",
+    other_ids: (employee.other_ids ?? []).map((row) => ({ type: row.type, number: row.number })),
     is_management: employee.is_management ?? false,
     minimum_wage_exempt: employee.minimum_wage_exempt ?? false,
     minimum_wage_exempt_reason: employee.minimum_wage_exempt_reason ?? "",
@@ -123,6 +135,9 @@ function toPayload(v: Values): EmployeeUpdateInput {
     sss_number: orNull(v.sss_number),
     philhealth_number: orNull(v.philhealth_number),
     pagibig_number: orNull(v.pagibig_number),
+    other_ids: v.other_ids
+      .filter((row) => row.type.trim() !== "" || row.number.trim() !== "")
+      .map((row) => ({ type: row.type.trim(), number: row.number.trim() })),
     is_management: v.is_management,
     minimum_wage_exempt: v.minimum_wage_exempt,
     // Cleared server-side when the flag comes off, so a stale note can never sit on someone who is
@@ -320,7 +335,8 @@ export function EmployeeCompensationSection({
             Government IDs
           </p>
           <p className="mb-4 text-caption text-muted-foreground">
-            Membership numbers printed on the payslip — not the peso amounts above.
+            Membership numbers printed on the payslip — not the peso amounts above. Stored numbers
+            are shown masked; leave one as it is to keep it, or type it in full to replace it.
           </p>
           <FieldGrid
             specs={[
@@ -333,6 +349,40 @@ export function EmployeeCompensationSection({
             form={form}
             columns={4}
           />
+
+          {/* Anything the four above do not cover — as many as the record needs. */}
+          <div className="mt-6 border-t border-border pt-6">
+            <p className="mb-1 text-label font-semibold uppercase tracking-wide text-brand">
+              Other IDs
+            </p>
+            <p className="mb-4 text-caption text-muted-foreground">
+              A passport, a driver&rsquo;s licence, a PRC card — whichever this person carries.
+            </p>
+
+            {editing ? (
+              <OtherIdsFields
+                ids={form.watch("other_ids")}
+                onIdsChange={(next) => form.setValue("other_ids", next, { shouldDirty: true })}
+                typeErrors={form
+                  .watch("other_ids")
+                  .map((_, i) => form.formState.errors.other_ids?.[i]?.type?.message)}
+                numberErrors={form
+                  .watch("other_ids")
+                  .map((_, i) => form.formState.errors.other_ids?.[i]?.number?.message)}
+              />
+            ) : employee.other_ids.length === 0 ? (
+              <p className="text-sm text-muted-foreground">None recorded.</p>
+            ) : (
+              <ul className="space-y-1.5 text-sm">
+                {employee.other_ids.map((row, i) => (
+                  <li key={i} className="flex flex-wrap gap-x-3">
+                    <span className="w-44 shrink-0 text-muted-foreground">{row.type}</span>
+                    <span className="font-medium text-foreground">{row.number}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         </div>
 
         {editing ? (

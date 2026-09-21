@@ -140,6 +140,9 @@ class EmployeeResource extends JsonResource
             'sss_number' => Employee::maskSensitive($this->sss_number),
             'philhealth_number' => Employee::maskSensitive($this->philhealth_number),
             'pagibig_number' => Employee::maskSensitive($this->pagibig_number),
+            // Further IDs, each number masked like the four above and read in full only through the
+            // sensitive-fields endpoint. The type is a label, shown as it was typed.
+            'other_ids' => Employee::maskSensitive($this->other_ids ?? []),
             // Expanded personal record.
             'first_name' => $this->first_name,
             'middle_name' => $this->middle_name,
