@@ -58,6 +58,7 @@ use App\Modules\Crm\Services\Mail\Contracts\EmailProvider;
 use App\Modules\Crm\Services\Mail\Contracts\GoogleCredentialSource;
 use App\Modules\Crm\Services\Mail\Google\GoogleCredentialSourceFactory;
 use App\Modules\Crm\Services\Mail\MailboxOauthTokenStore;
+use App\Modules\Crm\Services\Inbound\Adapters\InboundAdapterRegistry;
 use App\Modules\Crm\Services\Mail\MailboxSyncManager;
 use App\Modules\Crm\Services\Mail\Providers\SmtpEmailProvider;
 use App\Modules\Crm\Services\Ranking\RankingConfig;
@@ -156,6 +157,14 @@ class CrmServiceProvider extends ServiceProvider
         // driver and the configured default, so current behaviour is unchanged.
         $this->app->singleton(MailboxSyncManager::class, function (Application $app): MailboxSyncManager {
             return new MailboxSyncManager($app);
+        });
+
+        // Phase 3C — resolves the one inbound adapter that owns a provider/channel pair. A
+        // singleton because adapters are stateless and worth reusing across a delivery; it reads
+        // `inbound.adapters` at RESOLUTION rather than here, so the list is never frozen at boot
+        // and a test can configure it without the registry needing a registration hook.
+        $this->app->singleton(InboundAdapterRegistry::class, function (Application $app): InboundAdapterRegistry {
+            return new InboundAdapterRegistry($app);
         });
     }
 

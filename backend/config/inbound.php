@@ -75,6 +75,23 @@ return [
     ],
 
     /*
+    | PHASE 3C — provider adapter classes, in resolution order-independent form.
+    |
+    | Every class listed here must implement InboundProviderAdapter, and exactly one of them may
+    | claim any given provider/channel pair (InboundAdapterRegistry refuses both zero and two).
+    | This list is the ONLY source of adapter classes: nothing is discovered by scanning, and no
+    | name that arrived in a request is ever turned into a class.
+    |
+    | It is EMPTY in production on purpose. Phase 3C builds the framework; the first real adapter
+    | arrives with Phase 3D, once Meta developer access exists. The fixture adapter used by the
+    | test suite lives under tests/ and is registered by setting this key inside a test — it must
+    | never be listed here, and a test asserts that it is not.
+    */
+    'adapters' => [
+        //
+    ],
+
+    /*
     | Integration identities are ONE PROVIDER PER ORG.
     |
     | `org_user` carries a unique index on user_id, so a user belongs to exactly one org — one
