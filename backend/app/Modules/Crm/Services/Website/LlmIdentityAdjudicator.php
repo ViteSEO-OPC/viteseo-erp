@@ -46,6 +46,35 @@ use Throwable;
  * {@see WebsiteStatusDeriver} owns `website_status`; `no-website` stays unreachable from any
  * automated path. This class reads the verdict only to decide whether asking is worthwhile.
  *
+ * ── WHAT CROSSES THE BOUNDARY, AND WHAT CANNOT ────────────────────────────────────────────────
+ *
+ * OUTBOUND, the packet is an ALLOWLIST built in {@see evidence()} and pinned by
+ * WebsiteAiAuditSecurityTest as a closed set. It carries the business name, city, industry and
+ * email DOMAIN; the page's public URLs, title, description, structural booleans, published email
+ * DOMAINS and social links; and the deterministic verdict. It carries NO credential, no token, no
+ * full email address, NO PHONE NUMBER, no raw HTML or response body, no place id, no coordinates,
+ * no owner, score, status or priority, and no private, loopback or metadata address
+ * ({@see publicUrl()}).
+ *
+ * THIS CLASS MAKES EXACTLY ONE OUTBOUND REQUEST, to the chat endpoint, and it is the only one it
+ * can make. It fetches no URL, follows no redirect, resolves no name and touches no filesystem —
+ * including for {@see publicUrl()}, which is a literal-address check precisely so that guarding a
+ * disclosure does not introduce a network operation of its own. Nothing downstream consumes the
+ * model's answer as a URL, a crawler target, an internal endpoint, a query or markup: the answer is
+ * five words, a bounded integer and one cleaned sentence, stored and read by nobody.
+ *
+ * THE AUTHORITATIVE NETWORK-FETCH BOUNDARY IS ELSEWHERE and stays there: scraper/net_guard.py
+ * (public addresses only, ports 80/443, per-hop redirect revalidation, pinned-IP connect). This
+ * class never fetches, so it is not a second implementation of that guard and must not become one.
+ *
+ * ── AN EXTERNAL PROCESSOR, ON TERMS WE HAVE NOT VERIFIED ──────────────────────────────────────
+ *
+ * OpenRouter receives real business names, cities and page text. NOTHING HERE MAY BE READ AS A
+ * CLAIM THAT THE PROVIDER IS PRIVACY-SAFE OR ZERO-RETENTION — that is a contractual property, not a
+ * technical one, and it has not been established. BEFORE ENABLING THIS IN PRODUCTION, VERIFY THE
+ * CURRENT OPENROUTER PRIVACY, DATA-RETENTION AND TRAINING / DATA-USE TERMS APPLICABLE TO API
+ * TRAFFIC. The switch defaults false so that check cannot be skipped by accident.
+ *
  * FAILURE IS ALWAYS THE STATUS QUO. Disabled, unconfigured, timed out, rate-limited, non-2xx,
  * malformed JSON, unparseable answer: every path returns null and the caller persists exactly what
  * it would have persisted without this class existing.
@@ -91,6 +120,12 @@ class LlmIdentityAdjudicator
     private const MAX_DESCRIPTION = 600;
 
     private const MAX_REASON = 300;
+
+    /**
+     * Ceiling on the raw provider body before anything decodes it. `max_tokens` bounds a provider
+     * that is behaving; this bounds one that is not.
+     */
+    private const MAX_RESPONSE_BYTES = 65536;
 
     public function __construct(
         private readonly NerbyProviderSettingService $settings,
@@ -171,12 +206,26 @@ class LlmIdentityAdjudicator
         // about one tenant's lead must never be served as evidence about another's — the same rule
         // the strategist's cache already follows. The evidence is in the key because a page that
         // changed is a different question, which is what makes reuse safe rather than stale.
-        $key = 'crm:website-audit:'.self::PROMPT_VERSION
-            .'|org:'.(CurrentOrg::id() ?? 'none')
-            .'|'.$fingerprint;
-        $cached = Cache::get($key);
-        if (is_array($cached)) {
-            return $cached;
+        //
+        // NO ORG MEANS NO CACHE, NOT A SHARED BUCKET. An `?? 'none'` fallback would file every
+        // unpinned context — a console run, a job that lost its context — into ONE namespace that
+        // every tenant reads from, which is a cross-tenant oracle built out of a convenience
+        // default. Losing reuse costs money; sharing it costs isolation.
+        $org = CurrentOrg::id();
+        $key = $org === null
+            ? null
+            : 'crm:website-audit:'.self::PROMPT_VERSION.'|org:'.$org.'|'.$fingerprint;
+
+        if ($key !== null) {
+        // CACHED ADVICE IS RE-VALIDATED, NOT TRUSTED. The cache is shared infrastructure that
+        // outlives a deploy: an entry could have been written by an older contract, corrupted, or —
+        // on a shared store — tampered with. Reading it back through the same shape check the live
+        // path uses means a bad entry is a cache MISS, never a record with arbitrary keys landing in
+        // `identity_signals`.
+            $cached = Cache::get($key);
+            if ($this->isWellFormedAdvice($cached)) {
+                return $cached;
+            }
         }
 
         try {
@@ -219,6 +268,19 @@ class LlmIdentityAdjudicator
             return null;
         }
 
+        // A COOPERATIVE PROVIDER IS BOUNDED BY `max_tokens`; A HOSTILE OR BROKEN ONE IS NOT. The
+        // body is measured before anything decodes it, so a multi-megabyte answer costs one
+        // strlen rather than a JSON parse and the memory behind it.
+        $body = (string) $response->body();
+        if (strlen($body) > self::MAX_RESPONSE_BYTES) {
+            Log::warning('Website identity adjudication answer discarded: oversized', [
+                'lead_id' => $lead->id,
+                'bytes' => strlen($body),
+            ]);
+
+            return null;
+        }
+
         $parsed = $this->parse((string) $response->json('choices.0.message.content', ''));
         if ($parsed === null) {
             return null;
@@ -231,13 +293,15 @@ class LlmIdentityAdjudicator
             'model' => $endpoint->model,
             'prompt_version' => self::PROMPT_VERSION,
             'evidence_fingerprint' => $fingerprint,
-            'org_id' => CurrentOrg::id(),
+            'org_id' => $org,
             'decided_at' => now()->toIso8601String(),
             'prompt_tokens' => (int) $response->json('usage.prompt_tokens', 0),
             'completion_tokens' => (int) $response->json('usage.completion_tokens', 0),
         ];
 
-        Cache::put($key, $advice, (int) config('discovery.website_audit.cache_ttl', 604800));
+        if ($key !== null) {
+            Cache::put($key, $advice, (int) config('discovery.website_audit.cache_ttl', 604800));
+        }
 
         return $advice;
     }
@@ -259,7 +323,11 @@ class LlmIdentityAdjudicator
             return null;
         }
 
+        // SCALARS ONLY. `is_numeric` refuses an array or object, and the cast below can therefore
+        // never meet one — `(int) []` and `(string) []` are exactly the kind of "Array to string
+        // conversion" that turns a hostile answer into a 500 on an audit that should have shrugged.
         $confidence = is_numeric($data['confidence'] ?? null) ? (int) $data['confidence'] : 0;
+        $reason = is_string($data['reason'] ?? null) ? $data['reason'] : '';
 
         return [
             'classification' => $classification,
@@ -271,7 +339,7 @@ class LlmIdentityAdjudicator
             // mistaken for one another in the stored record. It is descriptive metadata only.
             'ai_confidence' => max(0, min(100, $confidence)),
             // Cleaned through the shared boundary: a reason is a value, never a layout.
-            'reason' => UntrustedText::clean((string) ($data['reason'] ?? ''), self::MAX_REASON),
+            'reason' => UntrustedText::clean($reason, self::MAX_REASON),
         ];
     }
 
@@ -340,39 +408,42 @@ class LlmIdentityAdjudicator
      */
     private function evidence(Lead $lead, array $findings, WebsiteIdentityVerdict $verdict): string
     {
-        $strings = static fn (mixed $values, int $max): array => array_values(array_filter(
-            array_map(
-                static fn (mixed $v): ?string => is_string($v) ? (UntrustedText::clean($v, 120) ?: null) : null,
-                array_slice((array) $values, 0, $max),
-            ),
-        ));
-
         $packet = [
             'untrusted_target_data' => [
                 'business' => array_filter([
                     'name' => UntrustedText::clean((string) $lead->business_name, 200),
                     'city' => $lead->city === null ? null : UntrustedText::clean((string) $lead->city, 100),
-                    'phone' => $lead->phone,
-                    'email' => $lead->email,
+                    // NO PHONE, DELIBERATELY — neither the lead's nor the page's. Whether the two
+                    // agree is a question the deterministic verifier has ALREADY answered, exactly,
+                    // on the last seven digits; its `phone_match` signal travels below and carries
+                    // the whole reasoning value. Sending the numbers as well would hand a third
+                    // party a contact detail to re-derive a conclusion it is already given.
+                    // DATA MINIMIZATION FIRST: if a field's answer is already in the packet, the
+                    // field is not necessary.
+                    // DOMAIN ONLY — see emailDomains(). The identity question is whose domain the
+                    // address sits on; the local part is a person's contact detail and stays here.
+                    'email_domain' => $this->emailDomains([$lead->email], 1)[0] ?? null,
                     'industry' => $lead->industry === null ? null : UntrustedText::clean((string) $lead->industry, 100),
                 ]),
                 'page' => array_filter([
-                    'requested_url' => $lead->website,
-                    'final_url' => $findings['final_url'] ?? null,
-                    'canonical_url' => $findings['canonical_url'] ?? null,
+                    'requested_url' => $this->publicUrl($lead->website),
+                    'final_url' => $this->publicUrl(is_string($findings['final_url'] ?? null) ? $findings['final_url'] : null),
+                    'canonical_url' => $this->publicUrl(is_string($findings['canonical_url'] ?? null) ? $findings['canonical_url'] : null),
                     'https' => (bool) ($findings['https_enabled'] ?? false),
                     'title' => UntrustedText::clean((string) ($findings['website_title'] ?? ''), self::MAX_TITLE),
                     'description' => UntrustedText::clean((string) ($findings['website_description'] ?? ''), self::MAX_DESCRIPTION),
                     'has_about_page' => (bool) ($findings['about_page'] ?? false),
                     'has_contact_page' => (bool) ($findings['contact_page'] ?? false),
                     'has_services_page' => (bool) ($findings['services_page'] ?? false),
-                    'phones_on_page' => $strings($findings['phones_found'] ?? [], 5),
-                    'emails_on_page' => $strings($findings['emails_found'] ?? [], 5),
-                    'social_links' => $strings(array_filter([
-                        $findings['facebook_url'] ?? null,
-                        $findings['instagram_url'] ?? null,
-                        $findings['linkedin_url'] ?? null,
-                    ]), 3),
+                    'email_domains_on_page' => $this->emailDomains($findings['emails_found'] ?? [], 5),
+                    'social_links' => array_values(array_filter(array_map(
+                        fn (mixed $u): ?string => $this->publicUrl(is_string($u) ? $u : null),
+                        [
+                            $findings['facebook_url'] ?? null,
+                            $findings['instagram_url'] ?? null,
+                            $findings['linkedin_url'] ?? null,
+                        ],
+                    ))),
                 ], static fn (mixed $v): bool => $v !== null && $v !== '' && $v !== []),
             ],
             // WHAT THE DETERMINISTIC LAYER ALREADY CONCLUDED, so the model adds to a judgement rather
@@ -386,5 +457,103 @@ class LlmIdentityAdjudicator
 
         return json_encode($packet, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT)
             ?: '{}';
+    }
+
+    /**
+     * Is this a record this class would have produced — checked on the way OUT of the cache.
+     *
+     * The live path validates a model's answer; without this the cache is a second, unvalidated
+     * entrance to the same field. Shape only: it cannot tell a true opinion from a false one, and is
+     * not trying to.
+     */
+    private function isWellFormedAdvice(mixed $advice): bool
+    {
+        return is_array($advice)
+            && is_string($advice['classification'] ?? null)
+            && in_array($advice['classification'], self::VERDICTS, true)
+            && is_int($advice['ai_confidence'] ?? null)
+            && is_string($advice['reason'] ?? null)
+            && is_int($advice['prompt_version'] ?? null)
+            && $advice['prompt_version'] === self::PROMPT_VERSION;
+    }
+
+    /**
+     * A URL fit to leave our infrastructure, or null.
+     *
+     * TWO SEPARATE REASONS, AND THE SECOND IS THE SECURITY ONE. `crm_leads.website` is free text
+     * that arrives from a provider or a spreadsheet, so it can hold `http://10.0.0.5/admin`,
+     * `http://localhost:8001`, or the cloud metadata address. Sending such a value to an external
+     * processor describes our internal network to a third party for no benefit whatsoever — the
+     * host is also worthless for deciding who a business is. Anything not plainly a public
+     * http(s) address is dropped rather than repaired.
+     *
+     * This is a DISCLOSURE guard, not an SSRF guard: nothing in this class fetches anything. The
+     * fetching path has its own, in scraper/net_guard.py.
+     */
+    private function publicUrl(?string $url): ?string
+    {
+        $url = trim((string) $url);
+        if ($url === '') {
+            return null;
+        }
+
+        $scheme = mb_strtolower((string) parse_url($url, PHP_URL_SCHEME));
+        if (! in_array($scheme, ['http', 'https'], true)) {
+            return null;
+        }
+
+        $host = mb_strtolower((string) parse_url($url, PHP_URL_HOST));
+        if ($host === '') {
+            return null;
+        }
+
+        // Names that never describe a customer's website, and resolve inside our own perimeter.
+        if ($host === 'localhost' || str_ends_with($host, '.localhost') || str_ends_with($host, '.internal')) {
+            return null;
+        }
+
+        // A literal address is only allowed when it is unambiguously public. A hostname is left
+        // alone: resolving it here would be a DNS lookup this class has no business making.
+        if (filter_var($host, FILTER_VALIDATE_IP) !== false) {
+            $public = filter_var(
+                $host,
+                FILTER_VALIDATE_IP,
+                FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE,
+            );
+
+            if ($public === false) {
+                return null;
+            }
+        }
+
+        return $url;
+    }
+
+    /**
+     * The DOMAINS of the addresses a page published, never the addresses themselves.
+     *
+     * The only thing an identity judgement does with an email is ask whose domain it sits on — that
+     * is exactly what the deterministic `email_domain_match` signal asks. The local part adds
+     * nothing to that question and is a named individual's contact detail, so it does not leave the
+     * CRM. The same reduction is applied to the lead's own address.
+     *
+     * @return list<string>
+     */
+    private function emailDomains(mixed $emails, int $max): array
+    {
+        $domains = [];
+
+        foreach (array_slice((array) $emails, 0, $max) as $email) {
+            if (! is_string($email) || ! str_contains($email, '@')) {
+                continue;
+            }
+
+            $domain = UntrustedText::clean(mb_strtolower((string) substr(strrchr($email, '@') ?: '', 1)), 100);
+            if ($domain !== '') {
+                $domains[$domain] = true;
+            }
+        }
+
+        return array_keys($domains);
     }
 }

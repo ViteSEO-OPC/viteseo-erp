@@ -248,6 +248,16 @@ return [
      * on is a deliberate operational act.
      */
     'website_audit' => [
+        /*
+         * BEFORE THIS IS TURNED ON IN PRODUCTION: verify the CURRENT OpenRouter privacy, data
+         * retention and training / data-use terms that apply to API traffic.
+         *
+         * Real business names, cities and page text leave our infrastructure when this is true. No
+         * assumption is made here about what the provider keeps or trains on, and none should be
+         * inherited from a previous reading of their terms — it is an external dependency whose
+         * policy can change without us. The default is false so the check cannot be skipped by
+         * accident, and flipping it is the moment to make it.
+         */
         'enabled' => (bool) env('DISCOVERY_WEBSITE_AI_AUDIT', false),
 
         /*
