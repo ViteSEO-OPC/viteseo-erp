@@ -5,6 +5,7 @@ use App\Modules\Crm\Controllers\ActivityController;
 use App\Modules\Crm\Controllers\Auth\MeController;
 use App\Modules\Crm\Controllers\Auth\ProfilePhotoController;
 use App\Modules\Crm\Controllers\Auth\UpdateProfileController;
+use App\Modules\Crm\Controllers\AutomationConversationController;
 use App\Modules\Crm\Controllers\AutomationEmailController;
 use App\Modules\Crm\Controllers\BusinessRuleController;
 use App\Modules\Crm\Controllers\CallController;
@@ -33,6 +34,7 @@ use App\Modules\Crm\Controllers\UserController;
 use App\Modules\Crm\Controllers\WebsiteEnrichmentController;
 use App\Modules\Crm\Controllers\WebsiteEvidenceController;
 use App\Modules\Crm\Http\Middleware\EnsureCrmAccessIsActive;
+use App\Modules\Crm\Http\Middleware\EnsureCrmIntegrationAccount;
 use App\Modules\Crm\Http\Middleware\EnsurePerformanceManagement;
 use App\Modules\Crm\Models\Lead;
 use App\Modules\Crm\Models\PlannerEvent;
@@ -336,6 +338,32 @@ Route::middleware(['auth:sanctum', 'set-current-org', 'subscription-active', 'fe
         // user-facing POST /leads/{lead}/emails above is unchanged (still can:view,lead + ownership).
         Route::post('/automation/leads/{lead}/emails', [AutomationEmailController::class, 'store'])
             ->middleware('permission:crm.outreach.automation.send');
+
+        // Phase 3B — the trusted inbound conversation boundary. NOT a Meta webhook: it takes an
+        // ALREADY NORMALIZED turn (no provider payload shape, no hub.challenge handshake) and hands
+        // it to InboundConversationService. Authorized by `crm.conversations.ingest` alone — held by
+        // no human role, only by the per-org, per-provider accounts `crm:integration-account`
+        // provisions — and deliberately not by can:view,lead, exactly as the automation send above.
+        //
+        // TWO WINDOWS, BOTH PREFIXED. A per-minute limit alone permits 119 requests a minute
+        // forever; the hourly limit bounds the grind. The prefixes are required: an authenticated
+        // request is keyed on the user, so an unprefixed limiter would share one counter with every
+        // other unprefixed `throttle:` this account touches (see the Accounting note).
+        //
+        // WHY THE ABILITY CHECK IS NOT THE BOUNDARY. `permission:` authorizes through can(), and
+        // the CRM's global Gate::before answers true for any ability a super_admin is asked about
+        // — so that middleware alone would let the most privileged human credential in the system
+        // reach a machine-only endpoint. EnsureCrmIntegrationAccount reads the permission and role
+        // pivots directly (no gate, no role inheritance) and is what actually holds the line; the
+        // ability check stays because it is the project's convention and answers first for the
+        // ordinary "wrong account" case.
+        Route::post('/automation/conversations/ingest', [AutomationConversationController::class, 'ingest'])
+            ->middleware([
+                'permission:crm.conversations.ingest',
+                EnsureCrmIntegrationAccount::class,
+                'throttle:120,1,crm-conversations-ingest:',
+                'throttle:3000,60,crm-conversations-ingest-hourly:',
+            ]);
 
         // Internal notes on a lead (Lead Internal Notes Module). Read/create reuse LeadPolicy@view
         // (ownership); create also needs lead.notes.create. Edit/delete authorize via NotePolicy

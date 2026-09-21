@@ -195,11 +195,15 @@ class RolesAndPermissionsSeeder extends Seeder
             Permission::firstOrCreate(['name' => $name, 'guard_name' => 'web']);
         }
 
-        // RC3 Outreach Automation Pack — automation-only ability. Defined so it exists on a fresh
-        // install, but DELIBERATELY NOT synced to any human role: only the scoped n8n service
-        // account holds it, granted by `php artisan n8n:token` from config/n8n.php. This keeps the
-        // send-authorization least-privilege and off every human role.
-        foreach (['crm.outreach.automation.send'] as $automationPermission) {
+        // Integration-only abilities. Defined so they exist on a fresh install, but DELIBERATELY
+        // NOT synced to any human role: each is held by a scoped service account and nothing else.
+        //
+        //  - crm.outreach.automation.send — RC3 Outreach Automation Pack; the n8n service account,
+        //    granted by `php artisan n8n:token` from config/n8n.php.
+        //  - crm.conversations.ingest — Phase 3B inbound conversation boundary; the per-org,
+        //    per-provider accounts granted by `php artisan crm:integration-account`. It permits one
+        //    thing, writing an inbound turn, and carries no read of leads or conversations.
+        foreach (['crm.outreach.automation.send', 'crm.conversations.ingest'] as $automationPermission) {
             Permission::firstOrCreate(['name' => $automationPermission, 'guard_name' => 'web']);
         }
 

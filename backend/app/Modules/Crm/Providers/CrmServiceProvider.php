@@ -8,6 +8,7 @@ use App\Modules\Crm\Console\Commands\BackfillPlannerOwnershipCommand;
 use App\Modules\Crm\Console\Commands\SyncMailboxesCommand;
 use App\Modules\Crm\Console\Commands\N8nTokenCommand;
 use App\Modules\Crm\Console\Commands\PruneReadNotifications;
+use App\Modules\Crm\Console\Commands\ProvisionIntegrationAccountCommand;
 use App\Modules\Crm\Console\Commands\PruneXlsImportsCommand;
 use App\Modules\Crm\Console\Commands\RecomputeLeadScoresCommand;
 use App\Modules\Crm\Events\DealWon;
@@ -256,6 +257,9 @@ class CrmServiceProvider extends ServiceProvider
                 BackfillPlannerOwnershipCommand::class,
                 // Hourly cleanup of abandoned .xls import files (scheduled below).
                 PruneXlsImportsCommand::class,
+                // Provisions (or inspects) the per-org, per-provider inbound integration identity.
+                // Run by hand when an integration is set up; never scheduled.
+                ProvisionIntegrationAccountCommand::class,
             ]);
         }
 
