@@ -26,7 +26,14 @@ class RecruitmentService
     public const EMPLOYMENT_TYPES = ['full_time', 'part_time', 'contract', 'ojt', 'temporary'];
 
     /** How an OJT allowance is quoted. */
-    public const ALLOWANCE_PERIODS = ['per_day', 'per_month'];
+    public const ALLOWANCE_PERIODS = ['per_day', 'per_hour', 'per_month'];
+
+    /** The Intern Allowance calculation method a requisition's quoted period is read in. */
+    private const METHOD_FOR_PERIOD = [
+        'per_day' => 'per_day',
+        'per_hour' => 'per_hour',
+        'per_month' => 'fixed_monthly',
+    ];
 
     /** Employment type decides the candidate pipeline (OJT gets the OJT flow). */
     public static function pipelineForEmployment(?string $employmentType): string
@@ -105,6 +112,7 @@ class RecruitmentService
     public function __construct(
         private readonly EmployeeService $employees,
         private readonly AuditService $audit,
+        private readonly InternAllowanceService $internAllowance,
     ) {}
 
     /**
@@ -351,6 +359,18 @@ class RecruitmentService
                 // record already has rather than a second column saying the same thing.
                 'university' => $candidate->school,
                 'ojt_required_hours' => $candidate->required_hours,
+                /*
+                 * The allowance the requisition quoted becomes their own — but only when it is
+                 * quoted in the unit the company calculates in. ₱8,000 a month read as ₱8,000 a
+                 * day is not a figure to hand payroll; left null, they get the company default
+                 * until HR sets theirs.
+                 */
+                'allowance_amount' => $requisition->pipeline === 'ojt'
+                    && $requisition->allowance_amount !== null
+                    && (self::METHOD_FOR_PERIOD[$requisition->allowance_period] ?? null)
+                        === $this->internAllowance->asOf()->get('method')
+                    ? $requisition->allowance_amount
+                    : null,
                 // New hire carries the "Onboarding" tag until HR marks it complete
                 // . Applies to part-timers/OJT too.
                 'onboarding_status' => 'pending',

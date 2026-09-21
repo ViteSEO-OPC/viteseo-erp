@@ -694,6 +694,10 @@ class ReportService
             ->where('hr_payroll_runs.type', 'regular')
             ->where('hr_payroll_runs.status', 'completed')
             ->whereYear('hr_payroll_runs.cycle_start', $year)
+            // An intern's allowance is not compensation and was never withheld on, so an intern has
+            // no 2316 to reconcile. Counted here they arrive as all-zero rows that can only read as
+            // "Not settled yet" — which is the very signal this report exists to raise.
+            ->where('hr_payslips.is_intern', false)
             ->groupBy('hr_payslips.employee_id', 'users.name', 'hr_departments.name')
             ->selectRaw(
                 'hr_payslips.employee_id, users.name AS employee, hr_departments.name AS department,'

@@ -162,6 +162,8 @@ class DatabaseSeeder extends Seeder
                 ReimbursementDemoSeeder::class,
                 PayrollDemoSeeder::class,
                 RecruitmentDemoSeeder::class,
+                // Three interns across two cutoffs, for Company → Intern Allowance and its payroll.
+                \App\Modules\Hr\Database\Seeders\InternPayrollDemoSeeder::class,
                 RequestsDemoSeeder::class,
                 ConcernsDemoSeeder::class,
                 // Safety concerns across months for the Health & Safety report.

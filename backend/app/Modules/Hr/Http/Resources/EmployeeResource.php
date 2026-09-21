@@ -64,6 +64,8 @@ class EmployeeResource extends JsonResource
             'employment_status' => $this->employment_status,
             // Interns only — the practicum hours their school requires.
             'ojt_required_hours' => $this->ojt_required_hours,
+            // Set once an intern is converted: the date they became staff.
+            'intern_converted_on' => $this->intern_converted_on?->format('Y-m-d'),
             'onboarding_status' => $this->onboarding_status,
             'is_management' => (bool) $this->is_management,
             'hire_date' => $this->hire_date?->format('Y-m-d'),
@@ -95,6 +97,9 @@ class EmployeeResource extends JsonResource
             // erase when this person first joined.
             'previous_hire_date' => $this->previous_hire_date?->format('Y-m-d'),
             'base_salary' => $this->base_salary,
+            // Interns only — their own allowance in the company's calculation unit. Null reads
+            // the company default in Intern Allowance settings.
+            'allowance_amount' => $this->allowance_amount !== null ? (float) $this->allowance_amount : null,
             // WHEN that exemption started — read-only, stamped when the flag is switched on.
             'management_since' => $this->management_since?->format('Y-m-d'),
             'phone' => $this->phone,

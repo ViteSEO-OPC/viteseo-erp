@@ -147,6 +147,9 @@ export function PayslipDocument({
   // subtle enough (see PayslipResource::documentTotals) that two implementations would drift.
   const t = p.totals;
   const month = p.month_summary;
+  // An intern's payslip: an allowance priced under Company → Intern Allowance. It carries no
+  // government contributions or tax, so that table and the net figure it produces are left off.
+  const intern = p.is_intern;
 
   const employerTotal =
     (p.employer_sss ?? 0) + (p.employer_philhealth ?? 0) + (p.employer_pagibig ?? 0);
@@ -243,7 +246,7 @@ export function PayslipDocument({
 
       {/* The money */}
       <div className="flex flex-col gap-6">
-        <Table heading="Compensation">
+        <Table heading={intern ? "Allowance" : "Compensation"}>
           {earningRows(p).map((line) => (
             <Fragment key={line.key ?? line.name}>
               <Row
@@ -263,7 +266,11 @@ export function PayslipDocument({
            * and a payslip whose parts do not add up to its own total is the one error a payslip
            * cannot make — so there is no control that could produce one.
            */}
-          <Row label="Total Compensation" value={amount(t.earnings)} total />
+          <Row
+            label={intern ? "Total Allowance" : "Total Compensation"}
+            value={amount(t.earnings)}
+            total
+          />
         </Table>
 
         <Table heading="Deductions">
@@ -282,78 +289,82 @@ export function PayslipDocument({
         {/* The month, restated. Only on its last cutoff, and only when an earlier one ran. */}
         {month && <SalarySummary summary={month} />}
 
-        <Table heading="Government Benefits & Tax">
-          {/*
-           * Each statutory line carries the employer's counterpart directly beneath it.
-           * Beside the employee's own figure it means something — ₱875 of their pay went to
-           * SSS and the company put ₱1,765 in alongside it — which is why it lives here
-           * rather than in a detached block of its own. Never in the total.
-           */}
-          {(
-            [
-              ["sss", "SSS", p.sss, p.employer_sss],
-              ["philhealth", "PhilHealth", p.philhealth, p.employer_philhealth],
-              ["pagibig", "Pag-IBIG", p.pagibig, p.employer_pagibig],
-            ] as const
-          ).map(([key, label, employee, employer]) => (
-            <Fragment key={key}>
-              <Row
-                label={fixes[key]?.label_override ?? label}
-                value={amount(employee)}
-                originalValue={
-                  fixes[key]?.original_amount == null
-                    ? null
-                    : amount(fixes[key]!.original_amount as number)
-                }
-                originalLabel={fixes[key]?.label_override ? label : null}
-                pair={(employer ?? 0) > 0}
-                {...pick(key)}
-              />
-              {(employer ?? 0) > 0 && (
-                <SubRow label="+ employer share" value={amount(employer ?? 0)} />
-              )}
-              {editorFor(key)}
-            </Fragment>
-          ))}
-          <Row
-            label={fixes.withholding_tax?.label_override ?? "Withholding Tax"}
-            value={amount(p.withholding_tax)}
-            originalValue={
-              fixes.withholding_tax?.original_amount == null
-                ? null
-                : amount(fixes.withholding_tax.original_amount as number)
-            }
-            originalLabel={fixes.withholding_tax?.label_override ? "Withholding Tax" : null}
-            {...pick("withholding_tax")}
-          />
-          {editorFor("withholding_tax")}
-          {/*
-           * December folds the year's correction into the line above, and on the
-           * common case it goes NEGATIVE and net pay exceeds gross. Naming the adjustment is
-           * not enough: a lone "refund ₱5,432" is the same opacity moved somewhere else. These
-           * are the figures it was computed from, so the employee can add it up — and they are
-           * the same ones BIR 2316 will show them.
-           */}
-          <TaxSettlement basis={p.tax_annualisation_basis} amount={amount} />
-          {/*
-           * When the month's contributions did not all land here, BOTH figures are printed: the
-           * rows above sum to the first, and the second is what the walk below continues from.
-           * One row labelled "monthly" sitting under rows that do not add up to it would be the
-           * one error a payslip cannot make.
-           */}
-          {month && differs(month.government, t.government) && (
-            <Row label="Total Benefits (This Cut-Off)" value={amount(t.government)} total />
-          )}
-          <Row
-            label={month ? "Total Monthly Benefits" : "Total Benefits"}
-            value={amount(month ? month.government : t.government)}
-            total
-          />
-        </Table>
+        {!intern && (
+          <>
+          <Table heading="Government Benefits & Tax">
+            {/*
+             * Each statutory line carries the employer's counterpart directly beneath it.
+             * Beside the employee's own figure it means something — ₱875 of their pay went to
+             * SSS and the company put ₱1,765 in alongside it — which is why it lives here
+             * rather than in a detached block of its own. Never in the total.
+             */}
+            {(
+              [
+                ["sss", "SSS", p.sss, p.employer_sss],
+                ["philhealth", "PhilHealth", p.philhealth, p.employer_philhealth],
+                ["pagibig", "Pag-IBIG", p.pagibig, p.employer_pagibig],
+              ] as const
+            ).map(([key, label, employee, employer]) => (
+              <Fragment key={key}>
+                <Row
+                  label={fixes[key]?.label_override ?? label}
+                  value={amount(employee)}
+                  originalValue={
+                    fixes[key]?.original_amount == null
+                      ? null
+                      : amount(fixes[key]!.original_amount as number)
+                  }
+                  originalLabel={fixes[key]?.label_override ? label : null}
+                  pair={(employer ?? 0) > 0}
+                  {...pick(key)}
+                />
+                {(employer ?? 0) > 0 && (
+                  <SubRow label="+ employer share" value={amount(employer ?? 0)} />
+                )}
+                {editorFor(key)}
+              </Fragment>
+            ))}
+            <Row
+              label={fixes.withholding_tax?.label_override ?? "Withholding Tax"}
+              value={amount(p.withholding_tax)}
+              originalValue={
+                fixes.withholding_tax?.original_amount == null
+                  ? null
+                  : amount(fixes.withholding_tax.original_amount as number)
+              }
+              originalLabel={fixes.withholding_tax?.label_override ? "Withholding Tax" : null}
+              {...pick("withholding_tax")}
+            />
+            {editorFor("withholding_tax")}
+            {/*
+             * December folds the year's correction into the line above, and on the
+             * common case it goes NEGATIVE and net pay exceeds gross. Naming the adjustment is
+             * not enough: a lone "refund ₱5,432" is the same opacity moved somewhere else. These
+             * are the figures it was computed from, so the employee can add it up — and they are
+             * the same ones BIR 2316 will show them.
+             */}
+            <TaxSettlement basis={p.tax_annualisation_basis} amount={amount} />
+            {/*
+             * When the month's contributions did not all land here, BOTH figures are printed: the
+             * rows above sum to the first, and the second is what the walk below continues from.
+             * One row labelled "monthly" sitting under rows that do not add up to it would be the
+             * one error a payslip cannot make.
+             */}
+            {month && differs(month.government, t.government) && (
+              <Row label="Total Benefits (This Cut-Off)" value={amount(t.government)} total />
+            )}
+            <Row
+              label={month ? "Total Monthly Benefits" : "Total Benefits"}
+              value={amount(month ? month.government : t.government)}
+              total
+            />
+          </Table>
 
-        <HighlightBar label="Initial Net Salary" value={amount(initialNet)} />
+          <HighlightBar label="Initial Net Salary" value={amount(initialNet)} />
+          </>
+        )}
 
-        <Table heading="Non-Taxable Allowance">
+        <Table heading={intern ? "Company Allowances" : "Non-Taxable Allowance"}>
           {p.earnings_breakdown
             .filter((line) => line.kind === "allowance")
             .map((line) => (

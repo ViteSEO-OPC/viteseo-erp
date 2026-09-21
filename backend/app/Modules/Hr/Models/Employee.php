@@ -29,6 +29,10 @@ class Employee extends Model
         'job_title',
         'employment_status',
         'ojt_required_hours',
+        // Interns only — their own allowance, overriding the company default.
+        'allowance_amount',
+        // The conversion's effective date: the last internship day is the day before.
+        'intern_converted_on',
         'employment_type',
         'work_location',
         'employee_role',
@@ -117,6 +121,8 @@ class Employee extends Model
 
         'date_of_birth' => 'date',
         'base_salary' => 'decimal:2',
+        'allowance_amount' => 'decimal:2',
+        'intern_converted_on' => 'date',
         'is_management' => 'boolean',
         'management_since' => 'date',
         'minimum_wage_exempt' => 'boolean',
@@ -259,6 +265,27 @@ class Employee extends Model
     public function isManagement(): bool
     {
         return (bool) $this->is_management;
+    }
+
+    /** An intern today — paid an allowance under Company → Intern Allowance, not a salary. */
+    public function isIntern(): bool
+    {
+        return $this->employment_status === 'ojt';
+    }
+
+    /**
+     * Was this person an intern on $date (Manila, Y-m-d)? Payroll asks after the fact, when a
+     * converted intern's status already says otherwise — the conversion's effective date is
+     * their first day as staff.
+     */
+    public function isInternOn(string $date): bool
+    {
+        if ($this->isIntern()) {
+            return true;
+        }
+
+        return $this->intern_converted_on !== null
+            && $date < $this->intern_converted_on->toDateString();
     }
 
     /**

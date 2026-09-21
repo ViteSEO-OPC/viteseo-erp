@@ -20,11 +20,18 @@ import {
   type FieldSpec,
 } from "@/modules/hr/components/record-fields";
 import {
+  numberOrNull,
   optionalChoice,
+  optionalMoney,
   optionalText,
   orNull,
   requiredMoney,
 } from "@/modules/hr/lib/employee-validation";
+import { useInternAllowanceSettings } from "@/modules/hr/hooks/use-intern-allowance";
+import {
+  internAllowanceUnit,
+  internDefaultAmount,
+} from "@/modules/hr/lib/intern-allowance-options";
 import { useRecordSection } from "@/modules/hr/lib/use-record-section";
 import { ContributionEnrolmentBlock } from "@/modules/hr/components/contribution-enrolment-block";
 import { EmployeeAllowancesBlock } from "@/modules/hr/components/employee-allowances-block";
@@ -43,6 +50,10 @@ const PAY_FREQUENCY_VALUES = PAY_FREQUENCIES.map((f) => f.value);
 
 const schema = z.object({
   base_salary: requiredMoney("Base salary"),
+  // An intern's own allowance; blank reads the company default (Company → Intern Allowance).
+  allowance_amount: optionalMoney("Allowance"),
+  // Not a field — says whether the allowance is this record's to send at all.
+  is_intern: z.boolean(),
   pay_frequency: optionalChoice(PAY_FREQUENCY_VALUES, "Pay frequency"),
   currency: z
     .string()
@@ -74,6 +85,8 @@ type Values = z.infer<typeof schema>;
 function toValues(employee: Employee): Values {
   return {
     base_salary: String(parseFloat(employee.base_salary)),
+    allowance_amount: employee.allowance_amount != null ? String(employee.allowance_amount) : "",
+    is_intern: employee.employment_status === "ojt",
     pay_frequency: employee.pay_frequency ?? "",
     currency: employee.currency ?? "",
     bank_name: employee.bank_name ?? "",
@@ -96,6 +109,9 @@ function toValues(employee: Employee): Values {
 function toPayload(v: Values): EmployeeUpdateInput {
   return {
     base_salary: Number(v.base_salary),
+    // Sent only for an intern: the API refuses an allowance on anyone else, and a converted intern
+    // keeps theirs on the record for the days before the conversion.
+    ...(v.is_intern ? { allowance_amount: numberOrNull(v.allowance_amount) } : {}),
     pay_frequency: orNull(v.pay_frequency),
     currency: orNull(v.currency)?.toUpperCase() ?? null,
     bank_name: orNull(v.bank_name),
@@ -159,17 +175,43 @@ export function EmployeeCompensationSection({
     },
   });
 
+  const isIntern = employee.employment_status === "ojt";
+  // HR-only endpoint: asked only when HR is looking at an intern.
+  const { data: internRules } = useInternAllowanceSettings(isHr && isIntern);
+  /*
+   * WHICH UNIT the allowance is quoted in lives behind that HR-only endpoint, so an intern reading
+   * their OWN record never has it. Say nothing rather than guess: defaulting to "per day" on a
+   * company that pays per hour or per month misstates a person's pay back to their face.
+   */
+  const allowanceUnit = internRules ? internAllowanceUnit(internRules.settings.method) : null;
+  const companyDefault = internRules ? internDefaultAmount(internRules.settings) : null;
+
   const salaryChanged =
     editing && Number(form.watch("base_salary")) !== parseFloat(employee.base_salary);
 
   const pay: FieldSpec<Values>[] = [
-    {
-      name: "base_salary",
-      label: "Base salary",
-      kind: "number",
-      placeholder: "45000",
-      display: `${formatPeso(employee.base_salary)} / mo`,
-    },
+    // An intern is paid an allowance, not a salary: the field is theirs to override the default.
+    isIntern
+      ? {
+          name: "allowance_amount",
+          label: allowanceUnit ? `Allowance (${allowanceUnit})` : "Allowance",
+          kind: "number",
+          placeholder: companyDefault != null ? String(companyDefault) : "Company default",
+          display:
+            employee.allowance_amount != null
+              ? [formatPeso(employee.allowance_amount), allowanceUnit].filter(Boolean).join(" ")
+              : companyDefault != null
+                ? `Company default — ${[formatPeso(companyDefault), allowanceUnit].filter(Boolean).join(" ")}`
+                : "Company default",
+          hint: "Leave blank to use the company default in Company → Intern Allowance.",
+        }
+      : {
+          name: "base_salary",
+          label: "Base salary",
+          kind: "number",
+          placeholder: "45000",
+          display: `${formatPeso(employee.base_salary)} / mo`,
+        },
     {
       name: "pay_frequency",
       label: "Pay frequency",
@@ -251,7 +293,8 @@ export function EmployeeCompensationSection({
          * monthly figure can see what it implies per day — which is the actual gap, not that HR
          * would knowingly underpay.
          */}
-        <MinimumWageBlock employee={employee} editing={editing} form={form} />
+        {/* An allowance is not a wage the minimum daily wage applies to. */}
+        {!isIntern && <MinimumWageBlock employee={employee} editing={editing} form={form} />}
 
         {/*
          * What replaces the three fixed allowance boxes B9 removed. Rendered from

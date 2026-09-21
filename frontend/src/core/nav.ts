@@ -16,6 +16,7 @@ import {
   ShieldAlert,
   Tag,
   ScrollText,
+  GraduationCap,
   CalendarRange,
   HelpCircle,
   Wand2,
@@ -167,6 +168,9 @@ export const hrNav: NavEntry[] = [
       // /hr/team enforces server-side.
       { label: "Team & Roles", href: "/teamora/company/team", icon: UserCog },
       { label: "Settings", href: "/teamora/company/settings", icon: ScrollText },
+      // How interns are paid inside the regular runs — its own page, because every choice on
+      // it is company policy and there are too many of them for a Settings card.
+      { label: "Intern Allowance", href: "/teamora/company/intern-allowance", icon: GraduationCap },
       { label: "Holidays & Suspensions", href: "/teamora/company/holidays", icon: CalendarRange },
       { label: "FAQ", href: "/teamora/company/faq", icon: HelpCircle },
     ],

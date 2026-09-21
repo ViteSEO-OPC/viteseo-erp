@@ -30,6 +30,7 @@ class LeaveService
         private readonly RetroFlagService $retro,
         private readonly AttendanceService $attendance,
         private readonly HalfDayWindowService $windows,
+        private readonly InternAllowanceService $internAllowance,
     ) {}
 
     /**
@@ -110,6 +111,12 @@ class LeaveService
     public function selectableTypesFor(Employee $employee): Collection
     {
         $types = LeaveType::orderBy('name')->get();
+
+        // An intern files leave for the record, never against credits — an intern's allotment is
+        // nothing unless HR grants some. What they may file is Company → Intern Allowance's call.
+        if ($employee->isIntern()) {
+            return $this->internLeaveTypes($types);
+        }
 
         if ($this->isSharedMode()) {
             return $types;
@@ -260,7 +267,13 @@ class LeaveService
         // Past-dated filing is gated per leave type (HR-configurable).
         $this->assertBackdatingAllowed($type, $data['start_date']);
 
-        if (! $type || ! $type->is_unlimited) {
+        // An intern's leave is filed for the record: the type must be one the rules let interns
+        // file, and no balance is consulted — payroll prices the day under the allowance rules.
+        if ($employee->isIntern()) {
+            $this->assertInternMayFile($type);
+        }
+
+        if (! $employee->isIntern() && (! $type || ! $type->is_unlimited)) {
             if ($this->isSharedMode()) {
                 // Shared mode: every paid leave type draws from ONE pool per
                 // employee. Validate against the pool's remaining, not per-type.
@@ -346,7 +359,9 @@ class LeaveService
             // Stamp the bucket we deduct from so cancel can reverse it precisely even if HR later
             // flips the global mode.
             $type = LeaveType::find($request->leave_type_id);
-            $drawsCredits = (! $type || ! $type->is_unlimited);
+            // An intern's leave never draws credits (it was filed without consulting any), and the
+            // stamped `none` is what keeps cancel and reopen from handing back credits never taken.
+            $drawsCredits = ! $request->employee?->isIntern() && (! $type || ! $type->is_unlimited);
             $bucket = ! $drawsCredits
                 ? 'none'
                 : ($this->isSharedMode() ? 'pool' : 'per_type');
@@ -503,6 +518,35 @@ class LeaveService
         }
 
         return $request->load(['employee.user', 'leaveType', 'reviewer', 'canceller']);
+    }
+
+    /** The leave types an intern may file, per Company → Intern Allowance. */
+    private function internLeaveTypes(Collection $types): Collection
+    {
+        $rules = $this->internAllowance->asOf();
+
+        if ($rules->get('leave_types_allowed') !== 'selected') {
+            return $types;
+        }
+
+        $allowed = $rules->get('leave_type_ids');
+
+        return $types->filter(fn (LeaveType $type) => in_array($type->id, $allowed, true))->values();
+    }
+
+    private function assertInternMayFile(?LeaveType $type): void
+    {
+        $rules = $this->internAllowance->asOf();
+
+        if ($type === null
+            || $rules->get('leave_types_allowed') !== 'selected'
+            || in_array($type->id, $rules->get('leave_type_ids'), true)) {
+            return;
+        }
+
+        throw ValidationException::withMessages([
+            'leave_type_id' => ['Interns cannot file this type of leave.'],
+        ]);
     }
 
     /**

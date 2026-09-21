@@ -3,6 +3,7 @@
 use App\Modules\Hr\Http\Controllers\ApprovalQueueController;
 use App\Modules\Hr\Http\Controllers\AttendanceController;
 use App\Modules\Hr\Http\Controllers\AttendancePolicyController;
+use App\Modules\Hr\Http\Controllers\InternAllowanceSettingsController;
 use App\Modules\Hr\Http\Controllers\RemoteCheckinController;
 use App\Modules\Hr\Http\Controllers\BenefitController;
 use App\Modules\Hr\Http\Controllers\BenefitProgramController;
@@ -525,6 +526,16 @@ Route::middleware(['auth:sanctum', 'set-current-org', 'subscription-active', 'fe
         Route::match(['put', 'patch'], 'employees/{employee}/schedule', [WorkScheduleController::class, 'updateEmployeeSchedule']);
         Route::get('attendance-policy', [AttendancePolicyController::class, 'show']);
         Route::match(['put', 'patch'], 'attendance-policy', [AttendancePolicyController::class, 'update']);
+
+        // Company → Intern Allowance: how interns are paid inside the regular payroll runs.
+        Route::get('intern-allowance-settings', [InternAllowanceSettingsController::class, 'show']);
+        Route::put('intern-allowance-settings', [InternAllowanceSettingsController::class, 'update']);
+        // Prices an invented month under the page's unsaved settings, on every edit — hence the
+        // generous limit; it writes nothing.
+        Route::post('intern-allowance-settings/preview', [InternAllowanceSettingsController::class, 'preview'])
+            ->middleware('throttle:120,1,hr-intern-preview:');
+        Route::delete('intern-allowance-settings/versions/{date}', [InternAllowanceSettingsController::class, 'destroyVersion'])
+            ->where('date', '\d{4}-\d{2}-\d{2}');
 
         // Company → Settings: who the employer is, as printed on every letterhead.
         Route::match(['put', 'patch'], 'company-profile', [CompanyProfileController::class, 'update']);

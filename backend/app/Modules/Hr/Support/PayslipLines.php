@@ -71,6 +71,11 @@ final class PayslipLines
         'not_employed' => ['label' => 'Outside Employment', 'class' => self::ATTENDANCE_CHARGE, 'column' => 'absence_deduction'],
         'early_out' => ['label' => 'Early Out', 'class' => self::ATTENDANCE_CHARGE, 'column' => 'absence_deduction'],
         'late_penalty' => ['label' => 'Tardiness Penalty', 'class' => self::ATTENDANCE_CHARGE, 'column' => 'absence_deduction'],
+        // Intern allowance charges (Company → Intern Allowance), and the salary's days before a
+        // mid-cycle conversion.
+        'holiday_unpaid' => ['label' => 'Holiday (No Allowance)', 'class' => self::ATTENDANCE_CHARGE, 'column' => 'absence_deduction'],
+        'below_min_attendance' => ['label' => 'Below Minimum Attendance', 'class' => self::ATTENDANCE_CHARGE, 'column' => 'absence_deduction'],
+        'pre_conversion' => ['label' => 'Before Conversion', 'class' => self::ATTENDANCE_CHARGE, 'column' => 'absence_deduction'],
 
         // — Government ——————————————————————————————————————————————————————————————
         'sss' => ['label' => 'SSS', 'class' => self::STATUTORY, 'column' => 'sss', 'carryover' => 'sss'],

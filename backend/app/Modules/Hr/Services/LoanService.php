@@ -66,6 +66,7 @@ class LoanService
     public function create(Employee $employee, array $data, User $actor): EmployeeLoan
     {
         $policy = $this->policyFor($data['benefit_program_id'] ?? null);
+        $this->assertNotIntern($employee);
         $this->assertWithinPolicy($policy, $employee, $data);
 
         $loan = EmployeeLoan::create([
@@ -110,6 +111,7 @@ class LoanService
     public function request(Employee $employee, array $data): EmployeeLoan
     {
         $policy = $this->policyFor($data['benefit_program_id'] ?? null);
+        $this->assertNotIntern($employee);
         $this->assertWithinPolicy($policy, $employee, $data);
 
         $loan = EmployeeLoan::create([
@@ -582,6 +584,19 @@ class LoanService
         }
 
         return $payments->count();
+    }
+
+    /**
+     * Nothing is taken off an intern's allowance but what attendance takes (Company → Intern
+     * Allowance), so there is no payslip for an instalment to be collected from.
+     */
+    private function assertNotIntern(Employee $employee): void
+    {
+        if ($employee->isIntern()) {
+            throw ValidationException::withMessages([
+                'employee_id' => ['Interns are paid an allowance with no deductions, so a loan or cash advance cannot be collected from it.'],
+            ]);
+        }
     }
 
     private function typeLabel(string $type): string

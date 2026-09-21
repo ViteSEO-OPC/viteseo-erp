@@ -105,6 +105,9 @@ class EmployeeService
     private const CORE_COLUMNS = [
         'department_id', 'manager_id', 'job_title',
         'employment_status', 'onboarding_status', 'hire_date', 'base_salary',
+        // An intern's own allowance. Core, not profile: pay is HR's to set, and profile
+        // columns are also what an employee's change request may write.
+        'allowance_amount',
     ];
 
     /**
@@ -465,6 +468,10 @@ class EmployeeService
                 'onboarding_status' => $data['onboarding_status'] ?? null,
                 'hire_date' => $data['hire_date'],
                 'base_salary' => $data['base_salary'] ?? 0,
+                // An intern's own allowance; null reads the company default. Nobody else has one.
+                'allowance_amount' => ($data['employment_status'] ?? null) === 'ojt'
+                    ? ($data['allowance_amount'] ?? null)
+                    : null,
                 ...$this->profileData($data),
                 // A new hire flagged management is exempt from their first day, not from the
                 // day someone typed the record.
@@ -586,6 +593,13 @@ class EmployeeService
 
             $this->syncManagementExemption($employee, $wasManagement);
 
+            // An allowance describes an internship. Moved off intern by a plain status edit,
+            // there is nothing left for it to describe. A CONVERTED intern keeps theirs: payroll
+            // still pays the days before a conversion dated inside a cycle at that rate.
+            if (! $employee->isIntern() && $employee->intern_converted_on === null && $employee->allowance_amount !== null) {
+                $employee->update(['allowance_amount' => null]);
+            }
+
             $newSalary = (float) $employee->base_salary;
 
             // A salary change appends to the history (never rewrites it).
@@ -656,6 +670,15 @@ class EmployeeService
             ]);
         }
 
+        /*
+         * A conversion sets the first real salary, so it carries the same hazard as any raise:
+         * dated back into a payroll run that is already settled, the run would reprice if
+         * re-run. Refused unless HR acknowledges it, then flagged as an amount owed -- exactly
+         * what a back-dated raise does in update(). Asked before anything is written, and on
+         * `effective_date`, the field the conversion screen sends and listens for.
+         */
+        $this->assertSalaryDateIsSafe($employee, $data['effective_date'], $data, 'effective_date');
+
         return DB::transaction(function () use ($employee, $data) {
             $effectiveDate = $data['effective_date'];
             $newStatus = $data['employment_status'];
@@ -668,8 +691,13 @@ class EmployeeService
                 'department_id' => $data['department_id'] ?? $employee->department_id,
                 'base_salary' => $data['base_salary'],
                 // The required-hours figure belonged to the practicum. It is not a fact
-                // about the employee they have become.
+                // about the employee they have become. The allowance stays on the record: a
+                // conversion dated inside a pay period still pays the days before it as an
+                // internship, at this intern's own rate.
                 'ojt_required_hours' => null,
+                // Payroll prices a cycle after the fact, when the status already says staff:
+                // this is how it still knows the days before were an internship.
+                'intern_converted_on' => $effectiveDate,
             ]);
 
             // Close the internship on the timeline and open the role they convert into.
@@ -680,14 +708,6 @@ class EmployeeService
                 'role_change_reason' => $reason,
                 'effective_date' => $effectiveDate,
             ]);
-
-            /*
-             * A conversion sets the first real salary, so it carries the same hazard as any
-             * raise: dated back into a payroll run that is already settled, the run would
-             * reprice if re-run. Refused unless HR acknowledges it, then flagged as an
-             * amount owed -- exactly what a back-dated raise does in update().
-             */
-            $this->assertSalaryDateIsSafe($employee, $effectiveDate, $data);
 
             $history = SalaryHistory::create([
                 'employee_id' => $employee->id,
@@ -1194,10 +1214,19 @@ class EmployeeService
      * Refuse a back-dated salary change that reaches into finished payroll runs, unless HR says
      * so explicitly.
      *
+     * `$field` is the request field the date arrived in. The refusal is a QUESTION the screen
+     * answers by resending with `acknowledge_repricing`, and it can only recognise the question
+     * if it lands on the field the screen actually sent -- a conversion's date is
+     * `effective_date`, not the record edit's `salary_effective_date`.
+     *
      * @param  array<string, mixed>  $data
      */
-    private function assertSalaryDateIsSafe(Employee $employee, string $effectiveDate, array $data): void
-    {
+    private function assertSalaryDateIsSafe(
+        Employee $employee,
+        string $effectiveDate,
+        array $data,
+        string $field = 'salary_effective_date',
+    ): void {
         if ((bool) ($data['acknowledge_repricing'] ?? false)) {
             return;
         }
@@ -1214,7 +1243,7 @@ class EmployeeService
             ->implode(', ');
 
         throw ValidationException::withMessages([
-            'salary_effective_date' => [
+            $field => [
                 'This date falls inside ' . $affected->count() . ' completed payroll run'
                     . ($affected->count() === 1 ? '' : 's') . " ({$periods}). Those periods were "
                     . 'already paid at the old salary and there is no way to pay the difference '

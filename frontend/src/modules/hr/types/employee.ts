@@ -78,6 +78,10 @@ export interface Employee {
   employment_status: string;
   /** Interns only — the practicum hours their school requires. */
   ojt_required_hours: number | null;
+  /** Interns only — their own allowance, overriding the company default. Null = the default. */
+  allowance_amount?: number | null;
+  /** Set once an intern is converted: the date they became staff. */
+  intern_converted_on: string | null;
   work_location: string | null;
   employee_role: string | null;
   onboarding_status: "pending" | "complete" | null;
@@ -194,6 +198,8 @@ export interface EmployeeInput {
   employment_status: string;
   hire_date: string;
   base_salary: number;
+  /** Interns only — their own allowance in the company's calculation unit. Null = the default. */
+  allowance_amount?: number | null;
   is_management?: boolean; // fixed salary + exempt from attendance
   /** Roles in the other modules, granted at hire. See App\Support\GrantableRoles. */
   grant_roles?: string[];

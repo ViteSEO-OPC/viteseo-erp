@@ -3,6 +3,8 @@
     $t = $p['totals'];
     $month = $p['month_summary'] ?? null;
     $cutoff = $p['cutoff'] ?? null;
+    // An intern's slip: an allowance, not a salary, with no government contributions or tax to show.
+    $intern = ! empty($p['is_intern']);
 
     $orDash = fn ($v) => ($v === null || $v === '') ? '—' : $v;
 
@@ -319,7 +321,7 @@
         {{-- LEFT: the period on its own — earned, charged, and the subtotal those two produce. --}}
         <td style="width: 49%;">
             <table>
-                <tr class="thead"><td>Compensation</td><td class="amt">Amount</td></tr>
+                <tr class="thead"><td>{{ $intern ? 'Allowance' : 'Compensation' }}</td><td class="amt">Amount</td></tr>
                 @foreach ($earningLines as $line)
                     <tr class="line">
                         <td>
@@ -334,7 +336,7 @@
                         <td class="amt">{!! $was($line['original_amount'] ?? null) !!}{{ $amt($line['amount']) }}</td>
                     </tr>
                 @endforeach
-                <tr class="sum"><td>Total Compensation</td><td class="amt">{{ $amt($t['earnings']) }}</td></tr>
+                <tr class="sum"><td>{{ $intern ? 'Total Allowance' : 'Total Compensation' }}</td><td class="amt">{{ $amt($t['earnings']) }}</td></tr>
             </table>
 
             <table class="stack">
@@ -392,6 +394,9 @@
                 </table>
             @endif
 
+            {{-- An intern's allowance carries no contribution and no tax, so the table and the net
+                 figure it produces are left off rather than printed as a column of zeroes. --}}
+            @unless ($intern)
             <table class="{{ $month ? 'stack' : '' }}">
                 <tr class="thead"><td>Government Benefits &amp; Tax</td><td class="amt">Amount</td></tr>
                 {{--
@@ -473,6 +478,7 @@
                     <td class="v">{{ $amt($initialNet) }}</td>
                 </tr>
             </table>
+            @endunless
 
             {{--
                 Allowances sit BELOW the contributions rather than among the earnings: they are
@@ -480,7 +486,7 @@
                 Compensation made them look like part of the base the deductions came out of.
             --}}
             <table class="stack">
-                <tr class="thead"><td>Non-Taxable Allowance</td><td class="amt">Amount</td></tr>
+                <tr class="thead"><td>{{ $intern ? 'Company Allowances' : 'Non-Taxable Allowance' }}</td><td class="amt">Amount</td></tr>
                 @foreach ($allowanceLines as $line)
                     <tr class="line">
                         <td>

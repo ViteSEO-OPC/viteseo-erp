@@ -19,14 +19,22 @@ class ConvertInternRequest extends FormRequest
      */
     public function rules(): array
     {
+        $hireDate = $this->route('employee')?->hire_date?->toDateString();
+
         return [
             // Anything but 'ojt' — converting an intern into an intern is not a conversion.
             'employment_status' => [
                 'required',
                 Rule::in(array_diff(EmployeeService::STATUSES, ['ojt'])),
             ],
-            // Backdating is allowed: a conversion is routinely recorded after the fact.
-            'effective_date' => ['required', 'date'],
+            // Backdating is allowed: a conversion is routinely recorded after the fact. But not
+            // to before they joined -- that would open a salary history and a role on the
+            // timeline for days they were not here at all.
+            'effective_date' => array_values(array_filter([
+                'required',
+                'date',
+                $hireDate ? "after_or_equal:{$hireDate}" : null,
+            ])),
             'base_salary' => ['required', 'numeric', 'min:0', 'max:99999999.99'],
             'job_title' => ['nullable', 'string', 'max:255'],
             'department_id' => ['nullable', 'integer', 'exists:hr_departments,id'],

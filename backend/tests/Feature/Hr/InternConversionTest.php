@@ -11,7 +11,10 @@ use App\Modules\Hr\Models\LeaveBalance;
 use App\Modules\Hr\Models\LeaveSetting;
 use App\Modules\Hr\Models\LeaveType;
 use App\Modules\Hr\Models\LeaveTypeAllotment;
+use App\Modules\Hr\Models\PayrollRun;
+use App\Modules\Hr\Models\Payslip;
 use App\Modules\Hr\Models\Requisition;
+use App\Modules\Hr\Models\RetroFlag;
 use App\Modules\Hr\Models\SalaryHistory;
 use App\Modules\Hr\Models\SharedLeaveAllotment;
 use App\Modules\Hr\Models\SharedLeaveBalance;
@@ -409,5 +412,105 @@ class InternConversionTest extends HrTestCase
                 'base_salary' => 32000,
             ])
             ->assertForbidden();
+    }
+
+    /** Not to before they joined: there is no internship to close on days they were not here. */
+    public function test_the_endpoint_refuses_an_effective_date_before_the_hire_date(): void
+    {
+        $intern = $this->intern(); // hired 2026-06-01
+
+        $this->hrPost("/api/v1/hr/employees/{$intern->id}/convert-intern", [
+            'employment_status' => 'regular',
+            'effective_date' => '2026-05-31',
+            'base_salary' => 32000,
+        ])->assertStatus(422)->assertJsonValidationErrors('effective_date');
+
+        $this->assertSame('ojt', $intern->fresh()->employment_status);
+    }
+
+    // --- back-dating into payroll that already ran ----------------------------------------------
+
+    /** A completed regular run holding a payslip for this employee. */
+    private function completedRunFor(Employee $employee, string $start, string $end, bool $locked = false): PayrollRun
+    {
+        $run = PayrollRun::create([
+            'cycle_start' => $start, 'cycle_end' => $end, 'frequency' => 'semi_monthly',
+            'type' => 'regular', 'status' => 'completed', 'run_at' => now(),
+        ]);
+        if ($locked) {
+            $run->forceFill(['locked_at' => now()])->save();
+        }
+        Payslip::create([
+            'payroll_run_id' => $run->id, 'employee_id' => $employee->id,
+            'base_salary' => 0, 'gross' => 0,
+            'total_deductions' => 0, 'net_pay' => 0, 'status' => 'computed',
+        ]);
+
+        return $run;
+    }
+
+    /**
+     * THE DEAD END THIS FIXES. The refusal is a question the conversion screen answers by
+     * resending with the acknowledgement — and it can only recognise the question on the field
+     * it sent. It used to land on `salary_effective_date`, a field a conversion does not have.
+     */
+    public function test_a_conversion_backdated_into_completed_payroll_asks_on_the_effective_date(): void
+    {
+        $intern = $this->intern();
+        $this->completedRunFor($intern, '2026-09-01', '2026-09-15');
+
+        $response = $this->hrPost("/api/v1/hr/employees/{$intern->id}/convert-intern", [
+            'employment_status' => 'regular',
+            'effective_date' => '2026-09-01',
+            'base_salary' => 32000,
+        ]);
+
+        $response->assertStatus(422)->assertJsonValidationErrors('effective_date');
+        $this->assertStringContainsString(
+            'Sep 1–Sep 15, 2026',
+            $response->json('errors.effective_date.0'),
+            'the question must name the period it would reprice',
+        );
+        // Asked before anything is written: no half-converted intern behind a refusal.
+        $fresh = $intern->fresh();
+        $this->assertSame('ojt', $fresh->employment_status);
+        $this->assertEquals(0, (float) $fresh->base_salary);
+    }
+
+    public function test_an_acknowledged_backdated_conversion_goes_through(): void
+    {
+        $intern = $this->intern();
+        $this->completedRunFor($intern, '2026-09-01', '2026-09-15');
+
+        $this->hrPost("/api/v1/hr/employees/{$intern->id}/convert-intern", [
+            'employment_status' => 'regular',
+            'effective_date' => '2026-09-01',
+            'base_salary' => 32000,
+            'acknowledge_repricing' => true,
+        ])->assertOk()->assertJsonPath('data.employment_status', 'regular');
+
+        $this->assertSame(
+            '2026-09-01',
+            SalaryHistory::where('employee_id', $intern->id)->latest('id')->first()->effective_date->toDateString(),
+        );
+    }
+
+    /** Into a run that is locked, the difference is owed and must be flagged for an adjustment run. */
+    public function test_an_acknowledged_conversion_into_a_locked_run_is_flagged_as_owed(): void
+    {
+        $intern = $this->intern();
+        $this->completedRunFor($intern, '2026-09-01', '2026-09-15', locked: true);
+
+        $this->hrPost("/api/v1/hr/employees/{$intern->id}/convert-intern", [
+            'employment_status' => 'regular',
+            'effective_date' => '2026-09-01',
+            'base_salary' => 32000,
+            'acknowledge_repricing' => true,
+        ])->assertOk();
+
+        $flag = RetroFlag::where('employee_id', $intern->id)->first();
+        $this->assertNotNull($flag, 'a conversion back-dated into a locked run left no amount owed');
+        $this->assertSame(RetroFlag::OWED, $flag->direction);
+        $this->assertSame(SalaryHistory::class, $flag->flaggable_type);
     }
 }

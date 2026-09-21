@@ -17,6 +17,9 @@ class Payslip extends Model
 
     protected $fillable = [
         'payroll_run_id', 'employee_id',
+        // An intern's slip: an allowance in the salary columns, priced under Company → Intern
+        // Allowance. Snapshot, so a converted intern's old slips still read as intern slips.
+        'is_intern', 'intern_basis',
         'base_salary', 'reimbursements', 'allowances', 'holiday_premium', 'holiday_lines', 'gross',
         // Payslip redesign — the full period basic, the absence charge taken off it, and the
         // per-component allowance split, so the document can show the derivation.
@@ -88,6 +91,8 @@ class Payslip extends Model
         'undertime_deduction' => 'decimal:2',
         'late_penalty_days' => 'decimal:2',
         'attendance_lines' => 'array',
+        'is_intern' => 'boolean',
+        'intern_basis' => 'array',
         'tax_basis' => 'array',
         'engine_snapshot' => 'array',
         'reimbursements' => 'decimal:2',

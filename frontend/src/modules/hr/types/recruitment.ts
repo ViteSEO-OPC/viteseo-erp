@@ -24,6 +24,7 @@ export const EMPLOYMENT_TYPES = [
 /** How an OJT allowance is quoted. */
 export const ALLOWANCE_PERIODS = [
   { value: "per_day", label: "Per day" },
+  { value: "per_hour", label: "Per hour" },
   { value: "per_month", label: "Per month" },
 ] as const;
 

@@ -42,6 +42,9 @@ class StoreEmployeeRequest extends FormRequest
             'employment_status' => ['required', Rule::in(EmployeeService::STATUSES)],
             'hire_date' => ['required', 'date'],
             'base_salary' => ['required', 'numeric', 'min:0', 'max:99999999.99'],
+            // Interns only (checked in after()). Null means the company default.
+            'allowance_amount' => ['nullable', 'numeric', 'min:0', 'max:99999999.99'],
+            'ojt_required_hours' => ['nullable', 'integer', 'min:1', 'max:2000'],
 
             /*
              * Access in the other modules, granted as the person is hired.
@@ -64,6 +67,21 @@ class StoreEmployeeRequest extends FormRequest
     public function after(): array
     {
         return [
+            // An allowance and practicum hours describe an internship, and nothing else.
+            function (Validator $validator): void {
+                if ($this->input('employment_status') === 'ojt') {
+                    return;
+                }
+
+                foreach ([
+                    'allowance_amount' => 'Only an intern has an allowance.',
+                    'ojt_required_hours' => 'Only an intern has required practicum hours.',
+                ] as $field => $message) {
+                    if ($this->filled($field)) {
+                        $validator->errors()->add($field, $message);
+                    }
+                }
+            },
             function (Validator $validator): void {
                 $orgId = CurrentOrg::id();
                 $status = (string) $this->input('employment_status');
