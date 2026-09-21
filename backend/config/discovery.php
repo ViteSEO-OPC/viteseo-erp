@@ -228,6 +228,47 @@ return [
     ],
 
     /*
+     * ── AI WEBSITE AUDIT ───────────────────────────────────────────────────────────────────────
+     *
+     * Whether the optional AI layer may reason about an AMBIGUOUS website-identity verdict — one
+     * strong signal that nothing corroborated, which the lexical verifier must leave unconfirmed but
+     * a reader often would not. Measured on this pool: 205 leads in exactly that band.
+     *
+     * ITS OWN SWITCH, SEPARATE FROM `ai_strategy`, and that separation is the point rather than
+     * tidiness. The strategist is asked once per discovery TASK; this is asked once per LEAD, so it
+     * is by far the higher-volume caller and has to be affordable to turn off on its own. Both draw
+     * on the one credential in `crm_nerby_provider_settings`, so without a second switch enabling
+     * website auditing would quietly spend the discovery budget.
+     *
+     * ADVISORY, AND THAT IS ENFORCED ELSEWHERE. Turning this on cannot change a `website_status`, a
+     * score or a priority: the adjudicator returns evidence, never a verdict, and nothing consumes
+     * it. See Services/Website/LlmIdentityAdjudicator.
+     *
+     * OFF BY DEFAULT, like every other optional capability here — it spends money, so switching it
+     * on is a deliberate operational act.
+     */
+    'website_audit' => [
+        'enabled' => (bool) env('DISCOVERY_WEBSITE_AI_AUDIT', false),
+
+        /*
+         * NOT the strategist's 8s. That timeout is tight because the strategist sits in front of a
+         * search the user is waiting on; this runs inside a background enrichment tick where a slow
+         * answer costs nothing but the tick's own budget, and an 8s ceiling on a reasoned answer
+         * would turn ordinary latency into a stream of `unreachable`.
+         */
+        'timeout' => (float) env('DISCOVERY_WEBSITE_AI_TIMEOUT', 25),
+
+        /* One classification, one short sentence. Anything longer is not the contract. */
+        'max_tokens' => (int) env('DISCOVERY_WEBSITE_AI_MAX_TOKENS', 200),
+
+        /*
+         * How long one answer is reused for identical evidence. Keyed on the evidence itself, so a
+         * page that changed is a different question and is asked again regardless of this.
+         */
+        'cache_ttl' => (int) env('DISCOVERY_WEBSITE_AI_CACHE_TTL', 604800),
+    ],
+
+    /*
      * Wall clock for one enrichment sub-command. Longer than a single discovery task because a tick
      * crawls up to `audit_limit` sites in sequence; the scheduler's own overlap guard means a slow
      * tick delays the next one rather than stacking with it.

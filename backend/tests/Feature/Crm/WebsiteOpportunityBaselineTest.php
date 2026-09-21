@@ -3,13 +3,10 @@
 namespace Tests\Feature\Crm;
 
 use App\Models\User;
-use App\Modules\Crm\Enums\NerbyProvider;
 use App\Modules\Crm\Models\Lead;
 use App\Modules\Crm\Models\LeadWebsiteCandidate;
 use App\Modules\Crm\Models\LeadWebsiteSearch;
-use App\Modules\Crm\Models\NerbyProviderSetting;
 use App\Modules\Crm\Services\Discovery\GooglePlacesTextSearch;
-use App\Modules\Crm\Services\Discovery\NerbyProviderSettingService;
 use App\Modules\Crm\Services\Discovery\Prompts\NerbyDiscoveryInstruction;
 use App\Modules\Crm\Services\Scoring\LeadScorer;
 use App\Modules\Crm\Services\Website\LlmIdentityAdjudicator;
@@ -25,18 +22,16 @@ use Tests\TestCase;
  * STAGE 0 — the website-opportunity BASELINE. Characterisation only: every assertion here describes
  * what the system does TODAY, so a later stage has to demonstrate its change rather than assert it.
  *
- * NOTHING HERE IS AN ENDORSEMENT.
- * {@see test_the_adjudicator_reads_the_env_credential_and_never_the_nerby_provider_row} pins
- * behaviour Stage 3 is expected to change; its failure then is the intended signal, not a
- * regression.
+ * NOTHING HERE IS AN ENDORSEMENT. Two of these tests were written to pin gaps that later stages
+ * were expected to close, and say so where they still describe one.
  *
  * WHAT IS DELIBERATELY NOT DUPLICATED. The frozen point values, the +25 signal delta and the
  * zero-contribution of `website-unknown` are already pinned by {@see WebsiteStatusScoringTest}; the
  * social/directory/maps host rules by {@see WebsiteUrlClassificationTest}; the chain-brand verdict by
  * {@see WebsiteProbeEvidenceTest}; the advisory AI contract by {@see WebsiteIdentityAdjudicationTest}.
  * This file covers only what none of them reach: the PERSISTED score path, the priority column, the
- * named product rule end to end, the stranded-lead pipeline state, the adjudicator's credential
- * source, and the discovery switches that must stay off.
+ * named product rule end to end, the stranded-lead pipeline state, the fact that the env credential
+ * is not a second way into the AI layer, and the discovery switches that must stay off.
  *
  * Deterministic by construction: no network, no Google Places, no OpenRouter, no DNS, no live page.
  */
@@ -283,41 +278,39 @@ class WebsiteOpportunityBaselineTest extends TestCase
     // ── 5. the advisory AI layer's credential source — the Stage 3 target ────────────────────
 
     /**
-     * ⚠️ PINS A KNOWN GAP. Stage 3 is expected to change this.
+     * THE ENV CREDENTIAL IS NO LONGER A WAY IN, and cannot become one again.
      *
-     * FUNDING OPENROUTER DOES NOT ACTIVATE WEBSITE ADJUDICATION. The adjudicator gates on
-     * `config('openai.*')` — the env-based store — and never consults the encrypted
-     * `crm_nerby_provider_settings` row that holds the NERBY OpenRouter credential. So a funded,
-     * enabled, connection-tested NERBY provider leaves this layer exactly as switched off as it was.
+     * This test was originally written to pin the opposite: the adjudicator gated on
+     * `config('openai.*')` and never consulted the encrypted NERBY row, so funding OpenRouter did
+     * not activate website adjudication. Stage 3 closed that gap — the audit now reads the one
+     * encrypted `crm_nerby_provider_settings` credential through AiChatEndpoint.
      *
-     * Asserted through the gate's OBSERVABLE behaviour (no call, null answer) rather than by reading
-     * config, so it stays true of the gate rather than of a config key that could move.
+     * REWRITTEN RATHER THAN DELETED, because the gap it described has an obvious regression: a
+     * future change that restores an env-based lane would give this deployment a SECOND AI
+     * credential store, outside the encrypted settings the security review depends on. So the
+     * assertion is inverted — a fully-populated env credential, with the audit switch off, still
+     * reaches nothing. The env keys are inert here whatever they hold.
      */
-    public function test_the_adjudicator_reads_the_env_credential_and_never_the_nerby_provider_row(): void
+    public function test_the_env_openai_credential_cannot_enable_the_website_audit(): void
     {
-        // Off by default, and the default is what production runs.
-        $this->assertFalse((bool) config('openai.enabled'));
-
-        // A NERBY credential is present, enabled and verified — the state after a successful funding.
-        NerbyProviderSetting::query()->create([
-            'provider' => NerbyProvider::OPENAI->value,
-            'is_active' => true,
-            'enabled' => true,
-            'api_key' => 'sk-or-v1-'.str_repeat('a', 24),
-            'key_last4' => 'aaaa',
-            'options' => ['model' => 'gpt-4o-mini'],
-            'last_test_status' => NerbyProviderSettingService::TEST_OK,
-            'last_tested_at' => now(),
+        // Everything the OLD gate needed, present and switched on.
+        config([
+            'openai.enabled' => true,
+            'openai.api_key' => 'sk-env-'.str_repeat('a', 24),
+            'openai.model' => 'gpt-4o-mini',
         ]);
+
+        // The audit's own switch is the shipped default: off. No NERBY row exists either.
+        $this->assertFalse((bool) config('discovery.website_audit.enabled'));
 
         $verdict = new WebsiteIdentityVerdict(verified: false, confidence: 40, signals: []);
 
-        // Squarely inside the ambiguous band — the ONLY thing keeping the model unasked is the
-        // credential source. preventStrayRequests() would fail the test if a call were attempted.
+        // Squarely inside the ambiguous band, so only the gate keeps the model unasked.
+        // preventStrayRequests() would fail this test if any call were attempted.
         $this->assertSame(40, $verdict->confidence);
         $this->assertNull(
             app(LlmIdentityAdjudicator::class)->evidenceFor($this->prospect(), $this->findings(), $verdict),
-            'the NERBY credential must not reach the website adjudicator today',
+            'the env credential must not be a second way into the AI layer',
         );
     }
 
