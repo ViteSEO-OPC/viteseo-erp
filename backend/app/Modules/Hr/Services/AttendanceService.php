@@ -563,6 +563,83 @@ class AttendanceService
     }
 
     /**
+     * RE-JUDGE ONE DAY'S STORED STATUSES against the grace now in force for it.
+     *
+     * `status` is a snapshot written at clock-in (see `arrivalStatus()` below), while the MONEY
+     * is derived from the punches every time payroll asks — through `effectiveFor()`, which
+     * already resolves the day's grace override. Those two answers agreed only as long as the
+     * grace could not move after the fact. Once HR can bend a PAST day's grace, a re-run makes
+     * the late deduction disappear while the row still reads "Late" and the per-N-lates ladder
+     * still counts it (`unpaidDaysDetailFor()` gates that counter on this column). The figure
+     * moves and the explanation does not, which is worse than either alone.
+     *
+     * So the snapshot is rebuilt from the same punches, under the same rule the money now uses.
+     * Deliberately narrow:
+     *   - `status_override` rows are left alone — a human asserting a status beats derivation.
+     *   - only `present`/`late` are re-judged; `absent`, `on_leave`, `rest_day`, `holiday` and
+     *     both suspensions mean something a clock-in time cannot contradict.
+     *   - management is exempt from the clock entirely, like everywhere else.
+     *   - a day the schedule does not cover, or cannot say the start of, declines to judge —
+     *     the same three-way guard `lateMinutesFor()` uses.
+     *
+     * @return int how many rows actually changed
+     */
+    public function restatusDate(string $date): int
+    {
+        $tz = config('app.timezone_local');
+        $day = Carbon::parse($date, $tz);
+
+        // `withTrashed`, for the reason payGroupEmployees() uses it: someone who has since
+        // been separated still has a payslip for the period this date sits in, and the derived
+        // side of their pay follows the new grace whether their record is soft-deleted or not.
+        // Leaving their row unjudged would reopen exactly the disagreement this method closes.
+        $rows = Attendance::with(['employee' => fn ($q) => $q->withTrashed()])
+            ->whereDate('work_date', $date)
+            ->whereNotNull('time_in')
+            ->where('status_override', false)
+            ->whereIn('status', ['present', 'late'])
+            ->get();
+
+        if ($rows->isEmpty()) {
+            return 0;
+        }
+
+        // One query for the day, like every other per-day map here.
+        $offHalves = $this->halfDays->offHalvesBetween($date, $date);
+        $changed = 0;
+
+        foreach ($rows as $row) {
+            $employee = $row->employee;
+
+            if (! $employee || $employee->isManagement()) {
+                continue;
+            }
+
+            $eff = $this->schedule->effectiveFor($employee, $day);
+
+            // No scheduled start to be late for. Not redundant with the workday test: a missing
+            // start time would otherwise be judged against expectedStart()'s 09:00 fallback, and
+            // an invented baseline is how somebody with no schedule reads as late every morning.
+            if (! ($eff['is_workday'] ?? false) || ($eff['start_time'] ?? null) === null) {
+                continue;
+            }
+
+            $status = $this->arrivalStatus(
+                $eff,
+                $row->time_in->copy()->setTimezone($tz),
+                $offHalves["{$employee->id}|{$date}"] ?? null,
+            );
+
+            if ($status !== $row->status) {
+                $row->update(['status' => $status]);
+                $changed++;
+            }
+        }
+
+        return $changed;
+    }
+
+    /**
      * `present` or `late` for an arrival at $local, judged against the employee's own
      * effective schedule start plus its grace. Shared by the live clock and by HR's
      * approval of a field time-in, so an approved selfie is marked late on exactly the

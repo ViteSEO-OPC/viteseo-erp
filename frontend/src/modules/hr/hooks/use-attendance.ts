@@ -157,15 +157,20 @@ export function useUpsertDailyOverride() {
       date,
       graceMinutes,
       minFullDayMinutes,
+      acknowledgeRepricing,
     }: {
       date: string;
       graceMinutes: number | null;
       minFullDayMinutes: number | null;
-    }) => upsertDailyOverride(date, graceMinutes, minFullDayMinutes),
+      acknowledgeRepricing?: boolean;
+    }) => upsertDailyOverride(date, graceMinutes, minFullDayMinutes, acknowledgeRepricing),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["hr", "daily-override"] });
       qc.invalidateQueries({ queryKey: ["hr", "attendance-summary"] });
       qc.invalidateQueries({ queryKey: ["hr", "attendance"] });
+      // Changing a past day's grace re-judges that day's stored statuses and re-runs the
+      // violation ladder over it, so neither list is showing the truth any more.
+      qc.invalidateQueries({ queryKey: ["hr", "violations"] });
       // The rule the employee panel prints comes from `me/attendance`, so changing it here
       // has to refresh that too — an HR officer is an employee with a clock panel as well.
       qc.invalidateQueries({ queryKey: MY_KEY });
