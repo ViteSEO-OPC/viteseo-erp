@@ -10,6 +10,12 @@ const nextConfig: NextConfig = {
   async redirects() {
     return [
       { source: "/teamora/time-off", destination: "/teamora/work-schedule", permanent: false },
+      // Same alias, different old name — and this one is still being HANDED OUT: employee
+      // notifications for "Leave approved/rejected" and "Half-day approved/rejected" carry it
+      // (NotificationService::MY_TIME_LEAVE). It has to redirect here, not in a page, because
+      // the /teamora layout only opens EMPLOYEE_PATHS to non-HR users; an alias rendered inside
+      // that layout is read as HR-management and bounces the employee to "/".
+      { source: "/teamora/time-leave", destination: "/teamora/work-schedule", permanent: false },
       // The HR approvals page covers leave + half-day + early-out + overtime, so it is no longer
       // "leave" — renamed to match the employee-side Work Schedule page (OT-5 follow-up).
       { source: "/teamora/requests/leave", destination: "/teamora/requests/work-schedule", permanent: false },
