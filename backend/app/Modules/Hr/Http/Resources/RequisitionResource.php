@@ -19,6 +19,9 @@ class RequisitionResource extends JsonResource
             'pipeline' => $this->pipeline,
             'employment_type' => $this->employment_type,
             'salary_range' => $this->salary_range,
+            // Set only on an OJT requisition, which quotes an allowance rather than a salary.
+            'allowance_amount' => $this->allowance_amount !== null ? (float) $this->allowance_amount : null,
+            'allowance_period' => $this->allowance_period,
             'location' => $this->location,
             'job_description' => $this->job_description,
             'target_start_date' => $this->target_start_date?->format('Y-m-d'),

@@ -24,7 +24,7 @@ class OvertimeRequestController extends Controller
     {
         // Applied by the DATABASE. In the browser they would only narrow the page on screen.
         return OvertimeRequestResource::collection(
-            $this->service->list($request->user(), $request->only(['search', 'status', 'per_page'])),
+            $this->service->list($request->user(), $request->only(['search', 'status', 'per_page', 'from', 'to'])),
         )->response();
     }
 

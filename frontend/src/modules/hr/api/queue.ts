@@ -19,6 +19,15 @@ export interface QueueParams {
   sort?: string;
 }
 
+/**
+ * The inclusive date window a period picker sets. Both bounds are optional and independent, so
+ * an open-ended window ("everything from March on") is expressible; `{}` means no window at all.
+ */
+export interface DateWindow {
+  from?: string;
+  to?: string;
+}
+
 export interface QueuePage<T> {
   items: T[];
   /** Rows matching the current search and filter across EVERY page — not `items.length`. */

@@ -64,7 +64,38 @@ class UpdateEmployeeRequest extends FormRequest
             // Employment-history logging when the job title changes.
             'role_change_type' => ['nullable', Rule::in(['promotion', 'transfer', 'lateral', 'correction'])],
             'role_change_reason' => ['nullable', 'string', 'max:255'],
+            // Interns only (see after()). Null means the company default in Intern Allowance
+            // settings, read in the unit that page calculates in.
+            'allowance_amount' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:99999999.99'],
+            'ojt_required_hours' => ['sometimes', 'nullable', 'integer', 'min:1', 'max:2000'],
             ...$this->profileRules(),
+        ];
+    }
+
+    /**
+     * An allowance and practicum hours describe an internship. Refused on anyone else, judged
+     * against the status this same save leaves them with.
+     *
+     * @return array<int, \Closure>
+     */
+    public function after(): array
+    {
+        return [
+            function (\Illuminate\Validation\Validator $validator): void {
+                $status = $this->input('employment_status', $this->route('employee')->employment_status);
+                if ($status === 'ojt') {
+                    return;
+                }
+
+                foreach ([
+                    'allowance_amount' => 'Only an intern has an allowance.',
+                    'ojt_required_hours' => 'Only an intern has required practicum hours.',
+                ] as $field => $message) {
+                    if ($this->filled($field)) {
+                        $validator->errors()->add($field, $message);
+                    }
+                }
+            },
         ];
     }
 

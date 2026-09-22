@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import { formatDate } from "@/core/lib/format";
 import { CandidateEmailHistory } from "@/modules/hr/components/candidate-email-history";
-import { sourceLabel, type Candidate } from "@/modules/hr/types/recruitment";
+import { isOjt, sourceLabel, type Candidate } from "@/modules/hr/types/recruitment";
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -32,6 +32,8 @@ export function CandidateDetailDialog({
   candidate: Candidate | null;
   onOpenChange: (open: boolean) => void;
 }) {
+  const ojt = isOjt(candidate?.requisition?.pipeline);
+
   return (
     <Dialog open={!!candidate} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto sm:max-w-lg">
@@ -50,10 +52,17 @@ export function CandidateDetailDialog({
               <Row label="Phone">{candidate.phone || DASH}</Row>
               <Row label="Source">{sourceLabel(candidate.source)}</Row>
               <Row label="Location">{candidate.location || DASH}</Row>
-              <Row label="Expected salary">{candidate.expected_salary || DASH}</Row>
+              <Row label={ojt ? "Expected allowance" : "Expected salary"}>
+                {candidate.expected_salary || DASH}
+              </Row>
               <Row label="Experience">
                 {candidate.experience_years != null ? `${candidate.experience_years} years` : DASH}
               </Row>
+              {/* OJT applicants only — absent rather than dashed on everyone else. */}
+              {candidate.school && <Row label="School">{candidate.school}</Row>}
+              {candidate.required_hours != null && (
+                <Row label="Required hours">{candidate.required_hours} hours</Row>
+              )}
               <Row label="Stage">
                 {candidate.stage ? (
                   <StatusBadge status={candidate.stage} label={candidate.stage} />

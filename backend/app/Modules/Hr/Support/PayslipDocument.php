@@ -19,6 +19,12 @@ final class PayslipDocument
         'not_employed' => 'Outside Employment',
         'early_out' => 'Early Out',
         'late_penalty' => 'Tardiness Penalty',
+        // Intern allowance charges (Company → Intern Allowance).
+        'holiday_unpaid' => 'Holiday (No Allowance)',
+        'below_min_attendance' => 'Below Minimum Attendance',
+        // The salary's share of a cycle an intern was converted inside: the days before are paid
+        // as the intern allowance line on the same slip.
+        'pre_conversion' => 'Before Conversion',
     ];
 
     /** The five deduction rows the document always shows, in the order it shows them. */
@@ -55,7 +61,7 @@ final class PayslipDocument
     ): array {
         $lines = [];
 
-        $add = function (string $key, string $name, float $amount, ?string $note = null, string $kind = 'earning', ?array $dates = null) use (&$lines, $runType, $overrides) {
+        $add = function (string $key, string $name, float $amount, ?string $note = null, string $kind = 'earning', ?array $dates = null) use (&$lines, $runType, $overrides, $slip) {
             /*
              * A ZERO LINE IS DROPPED, with two exceptions.
              *
@@ -69,7 +75,12 @@ final class PayslipDocument
              */
             $keep = round($amount, 2) != 0.0
                 || isset($overrides[$key])
-                || ($runType === 'regular' && in_array($key, self::ALWAYS_SHOWN_EARNINGS, true));
+                || ($runType === 'regular'
+                    && in_array($key, self::ALWAYS_SHOWN_EARNINGS, true)
+                    // An intern's premium row is drawn at zero only if their rules can pay it at
+                    // all: "Overtime ₱0" on a slip whose rules pay no overtime reads as a figure
+                    // withheld rather than as one that does not exist.
+                    && (empty($slip['is_intern']) || ($slip['intern_basis']['premiums'][$key] ?? false)));
 
             if ($keep) {
                 $lines[] = ['key' => $key, 'name' => $name, 'amount' => round($amount, 2), 'note' => $note, 'kind' => $kind, 'dates' => $dates];
@@ -80,13 +91,18 @@ final class PayslipDocument
 
         // --- the ordinary period ---------------------------------------------------------------
         if ($runType === 'regular') {
+            $intern = ! empty($slip['is_intern']);
+
             $lines[] = [
+                // Still `basic` for an intern: the key is what corrections, amendments and the
+                // register group by, and an allowance occupies exactly that place on the slip.
                 'key' => 'basic',
-                'name' => 'Basic Pay',
+                'name' => $intern ? 'Allowance' : 'Basic Pay',
                 // The FULL period basic. The absence charge is shown against it on the deductions
                 // side rather than folded into it, so the cost of an absence stays visible.
                 'amount' => round($f('period_base'), 2),
-                'note' => null,
+                // "11 days × ₱500.00" — how the allowance was reached, since no salary explains it.
+                'note' => $intern ? ($slip['intern_basis']['note'] ?? null) : null,
                 'kind' => 'earning',
             ];
 

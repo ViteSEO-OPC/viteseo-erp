@@ -27,6 +27,53 @@ trait PagesQueues
     private const QUEUE_MAX_PER_PAGE = 100;
 
     /**
+     * The date window a period picker sets, applied to the QUERY.
+     *
+     * Filtering by date in the browser could only ever narrow the page it was handed — the same
+     * reason the search box and the status pills moved into the query. Shared here because the
+     * request queues all need it and only differ in which column carries the date.
+     *
+     * @param  array<string, mixed>  $filters  `from` and `to`, inclusive, as 'Y-m-d'
+     * @param  string|array{0: string, 1: string}  $column  the queue's date column, or the
+     *                                                      [start, end] pair of a queue whose
+     *                                                      rows span days — those match by
+     *                                                      OVERLAP, so a leave running Sep 28
+     *                                                      to Oct 2 is in both months rather
+     *                                                      than only the one it started in
+     */
+    protected function scopeToWindow(Builder $query, array $filters, string|array $column): Builder
+    {
+        $from = $this->windowDate($filters['from'] ?? null);
+        $to = $this->windowDate($filters['to'] ?? null);
+
+        // A pair is [start, end]: the row overlaps the window when it starts before the window
+        // ends and ends after the window starts.
+        [$lower, $upper] = is_array($column) ? [$column[1], $column[0]] : [$column, $column];
+
+        return $query
+            ->when($from, fn (Builder $q) => $q->whereDate($lower, '>=', $from))
+            ->when($to, fn (Builder $q) => $q->whereDate($upper, '<=', $to));
+    }
+
+    /**
+     * A window bound the database can be trusted with, or null.
+     *
+     * Anything that is not a real 'Y-m-d' is DROPPED rather than passed through: a bound built
+     * from a typo would otherwise be handed to the driver, and a filter that silently matches
+     * nothing looks exactly like a queue that is empty.
+     */
+    private function windowDate(mixed $value): ?string
+    {
+        if (! is_string($value) || $value === '') {
+            return null;
+        }
+
+        $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $value);
+
+        return $date && $date->format('Y-m-d') === $value ? $value : null;
+    }
+
+    /**
      * @param  Builder  $query  already scoped to what the caller may see, and NOT yet ordered
      * @param  array<string, mixed>  $filters  search, status, page, per_page
      * @param  list<string>  $searchable  columns on the queue's own table

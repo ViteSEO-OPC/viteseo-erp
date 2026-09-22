@@ -25,6 +25,7 @@ import {
 } from "@/modules/hr/lib/attendance-display";
 import type { HrAttendanceRow, OpenShiftRow, Severity } from "@/modules/hr/types/attendance";
 import { DatePicker } from "@/modules/hr/ui/date-picker";
+import { DayRulesButton } from "@/modules/hr/components/day-rules-button";
 
 function manilaToday(): string {
   return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Manila" });
@@ -156,7 +157,11 @@ export default function AttendancePage() {
         title="Attendance"
         subtitle="Daily check-in status, timing, and violation flags — click a row to correct it."
         actions={
-          <DatePicker value={date} onChange={setDate} max={manilaToday()} className="w-44" />
+          <div className="flex flex-wrap items-center gap-2">
+            <DatePicker value={date} onChange={setDate} max={manilaToday()} className="w-44" />
+            {/* Bound to the picker beside it: the rules you bend are the day you are reading. */}
+            <DayRulesButton forDate={date} />
+          </div>
         }
       />
 

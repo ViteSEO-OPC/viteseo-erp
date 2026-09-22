@@ -36,6 +36,8 @@ import {
   separateEmployee,
   reinstateEmployee,
   rehireEmployee,
+  convertIntern,
+  type ConvertInternInput,
   createEmploymentHistory,
   updateEmploymentHistory,
   deleteEmploymentHistory,
@@ -116,8 +118,21 @@ export function useRehireEmployee() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: EMPLOYEES_KEY });
       // A rehire seeds fresh leave credits and may park a loan for re-authorisation.
-      qc.invalidateQueries({ queryKey: ["hr", "leave-balances"] });
+      qc.invalidateQueries({ queryKey: ["hr", "leave-config"] });
       qc.invalidateQueries({ queryKey: ["hr", "loans"] });
+    },
+  });
+}
+
+export function useConvertIntern() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, input }: { id: number; input: ConvertInternInput }) =>
+      convertIntern(id, input),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: EMPLOYEES_KEY });
+      // The conversion raises leave credits and appends to both histories.
+      qc.invalidateQueries({ queryKey: ["hr", "leave-config"] });
     },
   });
 }

@@ -22,6 +22,12 @@ class BenefitDeductionService
         ?string $cycleStart = null,
         ?string $cycleEnd = null,
     ): array {
+        // Nothing is taken off an intern's allowance but what attendance takes (Company → Intern
+        // Allowance) — no benefit shares, no dues.
+        if ($employee->isIntern()) {
+            return ['total' => 0.0, 'lines' => []];
+        }
+
         $lines = [];
         $total = 0.0;
 

@@ -16,6 +16,10 @@ use App\Modules\Hr\Models\SalaryHistory;
 use App\Modules\Hr\Models\PayslipAmendment;
 use App\Modules\Hr\Services\Concerns\PagesComputedRows;
 use App\Modules\Hr\Services\Concerns\PagesQueues;
+use App\Modules\Hr\Support\InternAllowancePolicy;
+use App\Modules\Hr\Support\InternDay;
+use App\Modules\Hr\Support\InternPricing;
+use App\Modules\Hr\Support\InternRateContext;
 use App\Modules\Hr\Support\PayslipDocument;
 use App\Modules\Hr\Support\PayslipLines;
 use App\Modules\Hr\Models\PayslipRequest;
@@ -59,6 +63,8 @@ class PayrollService
         private readonly TaxService $tax,
         private readonly AllowanceService $allowances,
         private readonly CompanyProfileService $company,
+        private readonly InternAllowanceService $internAllowance,
+        private readonly InternAllowancePricer $internPricer,
     ) {}
 
     /**
@@ -91,6 +97,12 @@ class PayrollService
      */
     private function buildMinimumWageCheck(Employee $employee, PayrollSetting $setting, ?array $period = null): ?array
     {
+        // An intern is paid an allowance under Company → Intern Allowance, not a wage the minimum
+        // daily wage applies to.
+        if ($employee->isIntern()) {
+            return null;
+        }
+
         $derived = $this->derivedDailyRateFor($employee, $setting, $period);
 
         if ($derived === null) {
@@ -353,8 +365,23 @@ class PayrollService
 
     private function dailyRateFor(Employee $employee, AttendancePolicy $policy, int $periodsPerYear, int $workingDays): float
     {
-        $monthly = (float) $employee->base_salary;
+        return self::dailyRateFrom(
+            (float) $employee->base_salary,
+            $policy,
+            $periodsPerYear,
+            $workingDays,
+            $employee->user?->name ?? $employee->name,
+        );
+    }
 
+    /**
+     * The daily rate a MONTHLY figure works out to under the company's daily-rate basis.
+     *
+     * Shared by a salary and by an intern's fixed monthly allowance, so an absence is priced off
+     * the same division whichever of the two a person is paid.
+     */
+    public static function dailyRateFrom(float $monthly, AttendancePolicy $policy, int $periodsPerYear, int $workingDays, ?string $who = null): float
+    {
         if ($policy->daily_rate_basis === 'fixed_divisor') {
             $divisor = max(1, (int) $policy->annual_divisor);
 
@@ -370,7 +397,7 @@ class PayrollService
         if ($workingDays <= 0) {
             throw ValidationException::withMessages([
                 'work_schedule' => [
-                    ($employee->user?->name ?? $employee->name)
+                    ($who ?? 'This employee')
                         . ' has no scheduled workdays in this pay period, so a daily rate cannot be'
                         . ' computed. Check their work schedule before running payroll.',
                 ],
@@ -580,8 +607,227 @@ class PayrollService
         // `attendance_lines` is: a holiday reclassified after the run must not rewrite the
         // explanation printed under a figure that has already been paid.
         $slip['holiday_lines'] = $holidayLines ?: null;
+        // Written explicitly, not left to the column default: a slip that WAS an intern's — a re-run
+        // after a back-dated conversion — must stop reading as one.
+        $slip['is_intern'] = false;
+        $slip['intern_basis'] = null;
 
         return $slip;
+    }
+
+    /**
+     * An intern's payslip for one cycle: the allowance priced under Company → Intern Allowance, in the
+     * salary's columns, with every statutory, tax, benefit and loan line at nothing.
+     *
+     * The company's allowance programmes still apply — an intern can be eligible for a rice or
+     * transport allowance like anyone else — and reimbursements are still folded in.
+     *
+     * @param  array<string, mixed>  $dist  the run's distribution facts
+     * @return array<string, mixed>
+     */
+    private function internPayslipFor(
+        Employee $employee,
+        string $cycleStart,
+        string $cycleEnd,
+        int $periodsPerYear,
+        array $dist,
+        float $reimb,
+        AttendancePolicy $policy,
+    ): array {
+        $rules = $this->internAllowance->asOf($cycleEnd);
+        [$from, $to, $share] = $this->internRangeFor($rules, $dist, $cycleStart, $cycleEnd);
+
+        $pricing = $this->priceIntern($employee, $rules, $from, $to, $share, $periodsPerYear, $policy);
+        [$allowances, $allowanceLines] = $this->internCompanyAllowances($employee, $dist, $periodsPerYear);
+
+        // Priced through the ordinary engine with nothing to charge: no contribution config, a zero
+        // contribution base, a zero taxable figure and no other deductions — so every total, cap and
+        // rounding rule is the one every other payslip goes through.
+        $slip = $this->computePayslip(
+            $pricing->netAllowance(),
+            $reimb,
+            $allowances,
+            ['basic' => 0.0, 'earnings' => 0.0],
+            0.0,
+            [],
+            Arr::except($dist, ['year_end_true_up', 'arrears', 'month_to_date']),
+            $pricing->holidayPay,
+            $pricing->overtimePay,
+            $pricing->nightDiffPay,
+            $pricing->restDayPay,
+        );
+
+        $slip = [...$slip, ...$pricing->toSlipFields()];
+        $slip['intern_basis']['effective_from'] = $this->internAllowance->versionDateAsOf($cycleEnd);
+        $slip['allowances_breakdown'] = $allowanceLines;
+        $slip['other_benefits'] = 0.0;
+        $slip['thirteenth_month'] = 0.0;
+
+        return $slip;
+    }
+
+    /**
+     * A converted intern's first salaried slip: the salary already prices from the conversion
+     * (unpaidDaysDetailFor charges the days before it as `pre_conversion`), and those days are paid
+     * here instead, as the intern allowance they were — untaxed, uncontributed, on one named line.
+     *
+     * @param  array<string, mixed>  $slip
+     * @return array<string, mixed>
+     */
+    private function withInternAllowanceBefore(
+        array $slip,
+        Employee $employee,
+        string $cycleStart,
+        string $cycleEnd,
+        string $convertedOn,
+        int $periodsPerYear,
+        AttendancePolicy $policy,
+    ): array {
+        $lastInternDay = Carbon::parse($convertedOn)->subDay()->toDateString();
+        $rules = $this->internAllowance->asOf($lastInternDay);
+
+        // The internship's share of THIS cycle whatever the distribution setting says: the
+        // conversion closed the internship, so there is no later cutoff left to hold it for.
+        $pricing = $this->priceIntern($employee, $rules, $cycleStart, $cycleEnd, InternRateContext::SHARE_PERIOD, $periodsPerYear, $policy, $convertedOn);
+        $amount = $pricing->earnings();
+
+        if ($amount <= 0) {
+            return $slip;
+        }
+
+        $name = 'Intern Allowance (' . Carbon::parse($cycleStart)->format('M j') . '–'
+            . Carbon::parse($lastInternDay)->format('M j') . ')';
+
+        $slip['allowances'] = round((float) $slip['allowances'] + $amount, 2);
+        $slip['allowances_breakdown'] = [...($slip['allowances_breakdown'] ?? []), ['name' => $name, 'amount' => $amount]];
+        $slip['gross'] = round((float) $slip['gross'] + $amount, 2);
+        $slip['net_pay'] = round((float) $slip['net_pay'] + $amount, 2);
+        $slip['intern_basis'] = [
+            ...$pricing->toSlipFields()['intern_basis'],
+            'effective_from' => $this->internAllowance->versionDateAsOf($lastInternDay),
+            'until' => $lastInternDay,
+            'paid_as_allowance' => $amount,
+        ];
+
+        return $slip;
+    }
+
+    /**
+     * Price an intern over a range. With `$internUntil`, the days from it onward are the salary's:
+     * outside the internship, exactly as days outside employment are.
+     */
+    private function priceIntern(
+        Employee $employee,
+        InternAllowancePolicy $rules,
+        string $from,
+        string $to,
+        string $share,
+        int $periodsPerYear,
+        AttendancePolicy $policy,
+        ?string $internUntil = null,
+    ): InternPricing {
+        $days = [];
+        $workdays = 0;
+
+        if ($share !== InternRateContext::SHARE_NONE) {
+            // Only measured when the rules can pay for them — neither is a free query.
+            $overtime = [];
+            if ($rules->get('overtime_rule') !== 'not_paid') {
+                // The first 8 hours of a worked rest day are already the rest-day premium, so only
+                // the excess can be overtime. That cap lives in overtimeMinutesByDate() and runs
+                // ONLY when it is handed the rest-day map — without it an intern's rest day is paid
+                // twice over the same minutes, once as premium and once as overtime.
+                $restByDate = $this->attendance->restDayWorkedMinutesFor(
+                    $employee,
+                    $from,
+                    $to,
+                    $this->holidays->typedHolidaysBetween(Carbon::parse($from), Carbon::parse($to)),
+                );
+                $overtime = $this->overtimeMinutesByDate($employee, $from, $to, $policy, $restByDate);
+            }
+            $night = $rules->get('night_diff_rule') === 'not_paid'
+                ? []
+                : $this->attendance->nightMinutesFor($employee, $from, $to, $policy);
+
+            $days = $this->attendance->internDaysFor($employee, $from, $to, $policy, $overtime, $night);
+            $workdays = $this->attendance->scheduledWorkdaysFor($employee, $from, $to);
+
+            if ($internUntil !== null) {
+                $days = array_values(array_filter(array_map(
+                    fn (InternDay $d) => match (true) {
+                        $d->date < $internUntil => $d,
+                        ! $d->isWorkday => null,
+                        default => new InternDay(
+                            date: $d->date,
+                            kind: InternDay::NOT_EMPLOYED,
+                            isWorkday: true,
+                            scheduledMinutes: $d->scheduledMinutes,
+                            detail: 'After conversion',
+                        ),
+                    },
+                    $days,
+                )));
+            }
+        }
+
+        ['amount' => $amount, 'source' => $source] = InternAllowanceService::amountFor($employee, $rules);
+
+        return $this->internPricer->price(
+            $days,
+            $rules,
+            new InternRateContext($amount, $source, $periodsPerYear, $workdays, $share),
+            $policy,
+        );
+    }
+
+    /**
+     * Which days an intern's allowance is priced over on this cutoff, and how much of the month
+     * they stand for — the Distribution setting. Paid once a month, the whole calendar month is
+     * priced on the cutoff that pays it and nothing on the others.
+     *
+     * @param  array<string, mixed>  $dist
+     * @return array{0: string, 1: string, 2: string}
+     */
+    private function internRangeFor(InternAllowancePolicy $rules, array $dist, string $cycleStart, string $cycleEnd): array
+    {
+        $index = (int) ($dist['index'] ?? 0);
+        $count = max(1, (int) ($dist['count'] ?? 1));
+        $monthStart = Carbon::parse($cycleEnd)->startOfMonth()->toDateString();
+        $monthEnd = Carbon::parse($cycleEnd)->endOfMonth()->toDateString();
+        $none = [$cycleStart, $cycleEnd, InternRateContext::SHARE_NONE];
+
+        return match ($rules->get('distribution_timing')) {
+            'first_cutoff' => $index === 0
+                ? [min($cycleStart, $monthStart), $monthEnd, InternRateContext::SHARE_MONTH]
+                : $none,
+            'last_cutoff' => $index >= $count - 1
+                ? [min($cycleStart, $monthStart), $cycleEnd, InternRateContext::SHARE_MONTH]
+                : $none,
+            default => [$cycleStart, $cycleEnd, InternRateContext::SHARE_PERIOD],
+        };
+    }
+
+    /**
+     * The company allowance programmes an intern qualifies for, for this cutoff — the same monthly
+     * figure, timing factor and part-period proration payslipFor() applies.
+     *
+     * @param  array<string, mixed>  $dist
+     * @return array{0: float, 1: list<array{name: string, amount: float}>}
+     */
+    private function internCompanyAllowances(Employee $employee, array $dist, int $periodsPerYear): array
+    {
+        $pricedAsOf = $dist['cycle_end'] ?? null;
+        $factor = $this->allowanceFactor($dist, $periodsPerYear);
+        $perPeriod = round($this->allowances->monthlyFor($employee, $pricedAsOf) * $factor, 2);
+
+        $fraction = isset($dist['cycle_start'], $dist['cycle_end'])
+            ? $this->attendance->employmentFractionFor($employee, (string) $dist['cycle_start'], (string) $dist['cycle_end'])
+            : 1.0;
+        if ($fraction < 1.0) {
+            $perPeriod = round($perPeriod * $fraction, 2);
+        }
+
+        return [$perPeriod, $this->allowanceBreakdown($employee, $periodsPerYear, $perPeriod, $fraction, $pricedAsOf, $factor)];
     }
 
     /**
@@ -688,6 +934,8 @@ class PayrollService
         return Payslip::query()
             ->whereIn('hr_payslips.employee_id', $employeeIds)
             ->where('hr_payslips.payroll_run_id', '!=', $run->id)
+            // An intern slip earned an allowance, which no contribution is charged on.
+            ->where('hr_payslips.is_intern', false)
             ->whereHas('payrollRun', fn ($q) => $q
                 ->where('type', $run->type)
                 ->whereDate('cycle_end', '>=', $monthStart)
@@ -767,6 +1015,9 @@ class PayrollService
                 ->all(),
             // Frequency sets per-period pay; the timings decide which cutoff deductions land on.
             'payroll_setting' => $setting->only($setting->getFillable()),
+            // What an intern's allowance was priced under (Company → Intern Allowance).
+            'intern_allowance' => $this->internAllowance->asOf($cycleEnd)->toArray()
+                + ['effective_from' => $this->internAllowance->versionDateAsOf($cycleEnd)],
         ];
     }
 
@@ -840,6 +1091,7 @@ class PayrollService
             'attendance_policy' => $this->attendancePolicy->asOf($cycleEnd)
                 ->only(array_keys(AttendancePolicyService::DEFAULTS)),
             'payroll_setting' => PayrollSetting::asOf($cycleEnd)->only((new PayrollSetting)->getFillable()),
+            'intern_allowance' => $this->internAllowance->asOf($cycleEnd)->toArray(),
             'contributions' => $this->contributions->versionsAsOf($cycleEnd)
                 ->mapWithKeys(fn ($v) => [$v->type => [
                     'basis' => $v->basis,
@@ -853,6 +1105,15 @@ class PayrollService
         $was = [
             'attendance_policy' => $snapshot['attendance_policy'] ?? [],
             'payroll_setting' => $snapshot['payroll_setting'] ?? [],
+            // Re-typed through the policy (a JSON column hands 650.0 back as 650, which would read
+            // as a change), and cut back to the keys the run recorded — a setting added since is
+            // not a change to one.
+            'intern_allowance' => isset($snapshot['intern_allowance'])
+                ? array_intersect_key(
+                    InternAllowancePolicy::fromPayload((array) $snapshot['intern_allowance'])->toArray(),
+                    (array) $snapshot['intern_allowance'],
+                )
+                : [],
             'contributions' => collect($snapshot['contribution_versions'] ?? [])
                 ->mapWithKeys(fn ($v) => [$v['type'] => [
                     'basis' => $v['basis'] ?? null,
@@ -1777,7 +2038,10 @@ class PayrollService
             ->whereNull('hr_payroll_runs.deleted_at')
             ->where('hr_payroll_runs.type', 'regular')
             ->where('hr_payroll_runs.status', 'completed')
-            ->whereYear('hr_payroll_runs.cycle_start', $year);
+            ->whereYear('hr_payroll_runs.cycle_start', $year)
+            // An intern's allowance is not the basic salary 13th month is a twelfth of, and it was
+            // never taxed — so an intern slip counts towards neither, even after a conversion.
+            ->where('hr_payslips.is_intern', false);
     }
 
     /**
@@ -2255,6 +2519,11 @@ class PayrollService
     /** Withholding on an amount paid ON TOP of what an employee has already earned this year. */
     private function marginalTaxOn(int $employeeId, int $year, string $asOf, float $amount): float
     {
+        // An intern's allowance is not taxed, and neither is a correction or adjustment to it.
+        if (Employee::withTrashed()->find($employeeId)?->isIntern()) {
+            return 0.0;
+        }
+
         $alreadyTaxed = (float) $this->thirteenthMonthBasisFor($year)
             ->where('hr_payslips.employee_id', $employeeId)
             ->sum('hr_payslips.taxable_pay');
@@ -2833,6 +3102,14 @@ class PayrollService
 
         $class = PayslipLines::classFor($key, $separationTaxable);
         $column = PayslipLines::columnFor($key);
+        // Read off the SLIP, not the employee: a converted intern's old slip is still an allowance.
+        $intern = ! empty($slip['is_intern']);
+
+        if ($intern && ($class === PayslipLines::STATUTORY || $class === PayslipLines::TAX)) {
+            throw ValidationException::withMessages([
+                'target_key' => ['An intern payslip carries no government contributions or withholding tax to correct.'],
+            ]);
+        }
 
         $add = function (string $field, float $by) use (&$slip): void {
             $slip[$field] = round((float) ($slip[$field] ?? 0) + $by, 2);
@@ -2877,7 +3154,7 @@ class PayrollService
 
                 $add('gross', $delta);
 
-                if ($class === PayslipLines::TAXABLE_EARNING) {
+                if ($class === PayslipLines::TAXABLE_EARNING && ! $intern) {
                     $add('taxable_pay', $delta);
                     $add('withholding_tax', $this->marginalTaxOn($employeeId, $year, $asOf, $delta));
                 }
@@ -2887,13 +3164,17 @@ class PayrollService
                 $add('absence_deduction', $delta);
                 $add('base_salary', -$delta);
                 $add('gross', -$delta);
-                $add('taxable_pay', -$delta);
+                if (! $intern) {
+                    $add('taxable_pay', -$delta);
+                }
 
                 if ($column !== null && $column !== 'absence_deduction') {
                     $add($column, $delta);
                 }
 
-                $add('withholding_tax', $this->marginalTaxOn($employeeId, $year, $asOf, -$delta));
+                if (! $intern) {
+                    $add('withholding_tax', $this->marginalTaxOn($employeeId, $year, $asOf, -$delta));
+                }
                 break;
 
             case PayslipLines::OTHER_DEDUCTION:
@@ -3272,7 +3553,8 @@ class PayrollService
 
             // --- 2. separation pay, as entered ------------------------------------------------
             $separationPay = round((float) ($data['separation_pay'] ?? 0), 2);
-            $separationTaxable = (bool) ($data['separation_pay_taxable'] ?? false);
+            // An intern's separation is not taxed: nothing they were paid was compensation.
+            $separationTaxable = ! $employee->isIntern() && (bool) ($data['separation_pay_taxable'] ?? false);
 
             // --- 3. what is taxable of the above ----------------------------------------------
             // Up to 12 days of monetised VL is exempt (RR 29-2025). The excess joins the ₱90,000
@@ -3300,7 +3582,7 @@ class PayrollService
                 ->sum('hr_payslips.withholding_tax');
 
             $annualDue = $this->annualWithholdingTax($priorTaxable + $taxableTerminal, $separationDate);
-            $tax = round($annualDue - $priorWithheld, 2);
+            $tax = $employee->isIntern() ? 0.0 : round($annualDue - $priorWithheld, 2);
 
             $gross = round($leaveConversion + $separationPay, 2);
 
@@ -4106,52 +4388,71 @@ class PayrollService
                     ->get();
                 $reimbTotal = (float) $reimbursements->sum('amount');
 
-                // Attendance is the source of truth, per the employee's OWN schedule:
-                // scheduled workdays drive the daily rate; unpaid days (absences +
-                // missing records on past workdays, minus approved leave) prorate pay.
-                $workingDays = $this->attendance->scheduledWorkdaysFor($employee, $cycleStart, $cycleEnd);
-                // Management staff are on a FIXED salary — unpaidDaysDetailFor() returns 0 for
-                // them, so pay is never prorated by attendance. holidayPremiumFor() likewise
-                // pays them nothing UNLESS `management_holiday_premium` is on in Company → Settings.
-                // $policy is passed EXPLICITLY. It always accepted one (the preview/dry-run
-                // override, step 6b) and this call never supplied it, so the late and undertime
-                // deductions re-read the live singleton instead of the policy resolved above.
-                // That was invisible while the two were always the same object; now that the
-                // policy is dated, omitting it would price every deduction at today's rules and
-                // silently defeat asOf() for the one part of the payslip it matters most to.
-                $unpaidDetail = $this->attendance->unpaidDaysDetailFor($employee, $cycleStart, $cycleEnd, $policy);
+                // An INTERN for the whole of this cycle is paid an allowance under Company → Intern
+                // Allowance instead of a salary: no contributions, no tax, no benefit shares, no loans.
+                // A conversion dated after the cycle ends still leaves the whole cycle an internship.
+                $convertedOn = $employee->intern_converted_on?->toDateString();
+                $internThisCycle = $employee->isIntern() || ($convertedOn !== null && $convertedOn > $cycleEnd);
+                // Converted INSIDE this cycle: the salary pays from the conversion, and the days before
+                // it are paid on this same slip as an intern allowance line.
+                $salaryFrom = ! $internThisCycle && $convertedOn !== null && $convertedOn > $cycleStart
+                    ? $convertedOn
+                    : null;
 
-                // Premium for working on a (non-working) holiday in this cycle, plus the days
-                // behind it for the payslip to print.
-                $holiday = $this->holidayPremiumFor($employee, $cycleStart, $cycleEnd, $periodsPerYear, $workingDays, $holidayMap, $policy);
-                $holidayPremium = $holiday['pay'];
-                // Rest days worked feed BOTH the rest-day premium and the overtime cap below.
-                $restByDate = $this->attendance->restDayWorkedMinutesFor($employee, $cycleStart, $cycleEnd, $holidayMap);
-                $restDay = $this->restDayPremiumFor($employee, $periodsPerYear, $workingDays, $restByDate, $policy);
-                // One overtime source, shared by the OT line and the night differential.
-                $otByDate = $this->overtimeMinutesByDate($employee, $cycleStart, $cycleEnd, $policy, $restByDate);
-                $overtime = $this->overtimePayFor($employee, $cycleStart, $cycleEnd, $periodsPerYear, $workingDays, $holidayMap, $policy, $otByDate);
-                $nightDiff = $this->nightDiffPayFor($employee, $cycleStart, $cycleEnd, $periodsPerYear, $workingDays, $holidayMap, $policy, $otByDate);
+                if ($internThisCycle) {
+                    $slip = $this->internPayslipFor($employee, $cycleStart, $cycleEnd, $periodsPerYear, $dist, $reimbTotal, $policy);
+                } else {
+                    // Attendance is the source of truth, per the employee's OWN schedule:
+                    // scheduled workdays drive the daily rate; unpaid days (absences +
+                    // missing records on past workdays, minus approved leave) prorate pay.
+                    $workingDays = $this->attendance->scheduledWorkdaysFor($employee, $cycleStart, $cycleEnd);
+                    // Management staff are on a FIXED salary — unpaidDaysDetailFor() returns 0 for
+                    // them, so pay is never prorated by attendance. holidayPremiumFor() likewise
+                    // pays them nothing UNLESS `management_holiday_premium` is on in Company → Settings.
+                    // $policy is passed EXPLICITLY. It always accepted one (the preview/dry-run
+                    // override, step 6b) and this call never supplied it, so the late and undertime
+                    // deductions re-read the live singleton instead of the policy resolved above.
+                    // That was invisible while the two were always the same object; now that the
+                    // policy is dated, omitting it would price every deduction at today's rules and
+                    // silently defeat asOf() for the one part of the payslip it matters most to.
+                    $unpaidDetail = $this->attendance->unpaidDaysDetailFor($employee, $cycleStart, $cycleEnd, $policy, $salaryFrom);
 
-                // On the cycle that closes the tax year, hand this employee's prior
-                // totals down so computePayslip settles the year instead of projecting it again.
-                // Absent on every other cycle, which leaves the existing behaviour untouched.
-                $employeeDist = $isFinalCycleOfYear
-                    ? [...$dist, 'year_end_true_up' => $yearToDateTax[$employee->id] ?? ['taxable_prior' => 0.0, 'withheld_prior' => 0.0]]
-                    : $dist;
+                    // Premium for working on a (non-working) holiday in this cycle, plus the days
+                    // behind it for the payslip to print.
+                    $holiday = $this->holidayPremiumFor($employee, $salaryFrom ?? $cycleStart, $cycleEnd, $periodsPerYear, $workingDays, $holidayMap, $policy);
+                    $holidayPremium = $holiday['pay'];
+                    // Rest days worked feed BOTH the rest-day premium and the overtime cap below.
+                    $restByDate = $this->attendance->restDayWorkedMinutesFor($employee, $salaryFrom ?? $cycleStart, $cycleEnd, $holidayMap);
+                    $restDay = $this->restDayPremiumFor($employee, $periodsPerYear, $workingDays, $restByDate, $policy);
+                    // One overtime source, shared by the OT line and the night differential.
+                    $otByDate = $this->overtimeMinutesByDate($employee, $salaryFrom ?? $cycleStart, $cycleEnd, $policy, $restByDate);
+                    $overtime = $this->overtimePayFor($employee, $salaryFrom ?? $cycleStart, $cycleEnd, $periodsPerYear, $workingDays, $holidayMap, $policy, $otByDate);
+                    $nightDiff = $this->nightDiffPayFor($employee, $salaryFrom ?? $cycleStart, $cycleEnd, $periodsPerYear, $workingDays, $holidayMap, $policy, $otByDate);
 
-                // This employee's outstanding shortfall, if any. Absent for almost
-                // everyone, which keeps the ordinary payslip untouched.
-                if (isset($arrears[$employee->id])) {
-                    $employeeDist['arrears'] = $arrears[$employee->id];
+                    // On the cycle that closes the tax year, hand this employee's prior
+                    // totals down so computePayslip settles the year instead of projecting it again.
+                    // Absent on every other cycle, which leaves the existing behaviour untouched.
+                    $employeeDist = $isFinalCycleOfYear
+                        ? [...$dist, 'year_end_true_up' => $yearToDateTax[$employee->id] ?? ['taxable_prior' => 0.0, 'withheld_prior' => 0.0]]
+                        : $dist;
+
+                    // This employee's outstanding shortfall, if any. Absent for almost
+                    // everyone, which keeps the ordinary payslip untouched.
+                    if (isset($arrears[$employee->id])) {
+                        $employeeDist['arrears'] = $arrears[$employee->id];
+                    }
+
+                    // The month so far, so a contribution on `earnings` can be charged on
+                    // the WHOLE month rather than on this cutoff doubled.
+                    $employeeDist['month_to_date'] = $monthToDate[$employee->id]
+                        ?? ['earnings' => 0.0, 'sss' => 0.0, 'philhealth' => 0.0, 'pagibig' => 0.0];
+
+                    $slip = $this->payslipFor($employee, $reimbTotal, $unpaidDetail->unpaidDays, $periodsPerYear, $workingDays, $employeeDist, $holidayPremium, $unpaidDetail, $policy, $overtime['pay'], $overtime['minutes'], $nightDiff['pay'], $nightDiff['minutes'], $restDay['pay'], $restDay['minutes'], $holiday['lines']);
+
+                    if ($salaryFrom !== null) {
+                        $slip = $this->withInternAllowanceBefore($slip, $employee, $cycleStart, $cycleEnd, $salaryFrom, $periodsPerYear, $policy);
+                    }
                 }
-
-                // The month so far, so a contribution on `earnings` can be charged on
-                // the WHOLE month rather than on this cutoff doubled.
-                $employeeDist['month_to_date'] = $monthToDate[$employee->id]
-                    ?? ['earnings' => 0.0, 'sss' => 0.0, 'philhealth' => 0.0, 'pagibig' => 0.0];
-
-                $slip = $this->payslipFor($employee, $reimbTotal, $unpaidDetail->unpaidDays, $periodsPerYear, $workingDays, $employeeDist, $holidayPremium, $unpaidDetail, $policy, $overtime['pay'], $overtime['minutes'], $nightDiff['pay'], $nightDiff['minutes'], $restDay['pay'], $restDay['minutes'], $holiday['lines']);
 
                 // A correction added to this period belongs to the period, not to the run that
                 // happened to compute it. `payslipFor()` prices the cutoff from attendance and knows
@@ -4171,11 +4472,18 @@ class PayrollService
                 // depends on what the payslip can still afford. They're post-tax and don't
                 // touch gross, so folding them in afterwards is exact rather than a re-compute.
                 // Always called (even at zero) so a cancelled loan's stale ledger row is cleared.
-                $loans = $this->loans->collectForPeriod(
-                    $employee, $run, $cycleEnd, (float) $slip['net_pay'], $payslip,
-                    // The diminishing-balance rate is per year; this splits it per payday.
-                    $periodsPerYear,
-                );
+                // An intern's allowance carries no loan instalments. Any a previous compute of this
+                // cycle collected — before a status change, say — are handed back.
+                if (! empty($slip['is_intern'])) {
+                    $this->loans->reverseForPayslip($payslip);
+                    $loans = ['total' => 0.0, 'lines' => [], 'interest' => 0.0];
+                } else {
+                    $loans = $this->loans->collectForPeriod(
+                        $employee, $run, $cycleEnd, (float) $slip['net_pay'], $payslip,
+                        // The diminishing-balance rate is per year; this splits it per payday.
+                        $periodsPerYear,
+                    );
+                }
 
                 if ($loans['total'] > 0) {
                     $slip['other_deductions'] = round((float) $slip['other_deductions'] + $loans['total'], 2);

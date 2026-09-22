@@ -74,7 +74,7 @@ export function AttendanceReport({ reportKey }: { reportKey: string }) {
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
   }
 
-  /** Both Print and Export CSV pull the same file — the report is a register, not a chart. */
+  /** Both Print and Export pull the same file — the report is a register, not a chart. */
   async function onExport() {
     try {
       await exportMut.mutateAsync();
@@ -193,14 +193,14 @@ export function AttendanceReport({ reportKey }: { reportKey: string }) {
             variant="outline"
             onClick={onExport}
             disabled={exportMut.isPending || !report}
-            title="Downloads the report as a CSV you can print from a spreadsheet."
+            title="Downloads the report as a formatted spreadsheet, under the company letterhead."
           >
             <Printer />
             Print
           </Button>
           <Button variant="outline" onClick={onExport} disabled={exportMut.isPending || !report}>
             <Download />
-            {exportMut.isPending ? "Exporting…" : "Export CSV"}
+            {exportMut.isPending ? "Exporting…" : "Export"}
           </Button>
         </div>
       </div>

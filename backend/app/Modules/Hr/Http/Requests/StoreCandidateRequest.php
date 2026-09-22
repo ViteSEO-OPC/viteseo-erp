@@ -31,6 +31,9 @@ class StoreCandidateRequest extends FormRequest
             // Free-text salary range (e.g. "₱45,000 - 65,000").
             'expected_salary' => ['nullable', 'string', 'max:100'],
             'location' => ['nullable', 'string', 'max:255'],
+            // OJT only -- the service drops both unless the requisition is an OJT.
+            'school' => ['nullable', 'string', 'max:255'],
+            'required_hours' => ['nullable', 'integer', 'min:1', 'max:2000'],
             'feedback' => ['nullable', 'string', 'max:2000'],
             'notes' => ['nullable', 'string', 'max:1000'],
             'resume' => ['nullable', 'file', 'mimes:pdf,doc,docx', 'max:5120'],

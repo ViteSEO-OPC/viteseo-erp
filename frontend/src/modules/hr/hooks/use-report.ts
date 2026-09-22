@@ -27,7 +27,7 @@ export function useReport(
 export function useExportReport(key: string, params?: Record<string, string | number>) {
   const qc = useQueryClient();
   return useMutation({
-    // Fetch the file, then trigger a browser download (CSV or PDF).
+    // Fetch the file, then trigger a browser download (XLSX or PDF).
     mutationFn: async () => {
       const { blob, filename } = await exportReport(key, params);
       const url = URL.createObjectURL(blob);

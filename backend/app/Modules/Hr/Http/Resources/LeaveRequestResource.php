@@ -32,6 +32,15 @@ class LeaveRequestResource extends JsonResource
             'days' => (int) $this->days,
             'reason' => $this->reason,
             'status' => $this->status,
+            // An intern's leave is filed for the record, and is unpaid unless Company → Intern
+            // Allowance pays it by its leave type. Null for everyone else, and only worked out for
+            // interns' requests, which are few.
+            'unpaid_for_intern' => $this->employee?->isIntern()
+                ? app(\App\Modules\Hr\Services\InternAllowanceService::class)
+                    ->asOf($this->start_date?->toDateString())
+                    ->get('leave_pay_rule') === 'unpaid'
+                    || ! $this->leaveType?->is_paid
+                : null,
             'reviewed_at' => $this->reviewed_at,
             'reviewed_by' => $this->reviewer?->name,
             'review_note' => $this->review_note,

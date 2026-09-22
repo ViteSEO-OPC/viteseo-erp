@@ -6,6 +6,8 @@ use App\Modules\Hr\Models\AuditLog;
 use App\Modules\Hr\Services\AuditService;
 use App\Modules\Hr\Services\ReportService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use OpenSpout\Reader\XLSX\Reader;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 /** And — the audit trail lied about itself in two different ways. */
 class AuditVocabularyAndPagingTest extends HrTestCase
@@ -116,22 +118,61 @@ class AuditVocabularyAndPagingTest extends HrTestCase
         $this->assertCount(50, $second['entries']);
     }
 
+    /**
+     * The data rows of the exported workbook — everything under the letterhead and the header.
+     *
+     * The export is an XLSX now rather than a CSV, so counting newlines says nothing. The file
+     * is read where it was written: `download()` hands back a BinaryFileResponse over a temp
+     * file, which is only cleaned up once it has actually been sent.
+     *
+     * @param  array<string, mixed>  $filters
+     * @return list<list<string>>
+     */
+    private function exportedRows(array $filters = []): array
+    {
+        $response = app(ReportService::class)->download('audit', $filters);
+        $this->assertInstanceOf(BinaryFileResponse::class, $response);
+
+        $reader = new Reader();
+        $reader->open($response->getFile()->getPathname());
+
+        $rows = [];
+
+        foreach ($reader->getSheetIterator() as $sheet) {
+            foreach ($sheet->getRowIterator() as $row) {
+                $rows[] = array_map(fn ($c) => (string) $c, $row->toArray());
+            }
+            break; // one sheet, and it is the only one that carries the entries
+        }
+
+        $reader->close();
+
+        // Company name · title · address · blank · column headers, then the entries.
+        $header = 0;
+        foreach ($rows as $i => $row) {
+            if ('Timestamp' === ($row[0] ?? null)) {
+                $header = $i;
+                break;
+            }
+        }
+
+        return array_values(array_filter(
+            array_slice($rows, $header + 1),
+            fn (array $row) => '' !== trim(implode('', $row)),
+        ));
+    }
+
     /** THE ONE THAT MATTERS: an export must carry everything, not page one. */
     public function test_the_export_carries_every_row_in_range(): void
     {
         $this->seedEntries(420);
 
-        // The export streams, so the body is written to the output buffer rather than held on the
-        // response — `getContent()` on a StreamedResponse is `false`, not the file.
-        $response = app(ReportService::class)->download('audit');
-        ob_start();
-        $response->sendContent();
-        $csv = ob_get_clean();
+        $rows = $this->exportedRows();
 
-        // 420 entries + one header row.
-        $this->assertSame(421, count(array_filter(explode("\n", trim($csv)))));
-        $this->assertStringContainsString('Entry 1', $csv);
-        $this->assertStringContainsString('Entry 420', $csv);
+        $this->assertCount(420, $rows);
+        $flat = implode('|', array_map(fn (array $r) => implode('|', $r), $rows));
+        $this->assertStringContainsString('Entry 1', $flat);
+        $this->assertStringContainsString('Entry 420', $flat);
     }
 
     /** Nothing above 500 per page, so the screen cannot be asked to render 20,000 rows. */
@@ -299,15 +340,12 @@ class AuditVocabularyAndPagingTest extends HrTestCase
             'description' => 'Distinctive marker row', 'ip_address' => '127.0.0.1',
         ]);
 
-        $response = app(ReportService::class)->download('audit', ['search' => 'Distinctive']);
-        ob_start();
-        $response->sendContent();
-        $csv = ob_get_clean();
+        $rows = $this->exportedRows(['search' => 'Distinctive']);
 
-        $lines = array_filter(explode("\n", trim($csv)));
-        $this->assertCount(2, $lines, 'header + the one matching row');
-        $this->assertStringContainsString('Distinctive marker row', $csv);
-        $this->assertStringNotContainsString('Entry 1', $csv);
+        $this->assertCount(1, $rows, 'only the matching row');
+        $flat = implode('|', $rows[0]);
+        $this->assertStringContainsString('Distinctive marker row', $flat);
+        $this->assertStringNotContainsString('Entry 1', $flat);
     }
 
     /** An empty or whitespace-only box is not a filter — it must not narrow anything. */

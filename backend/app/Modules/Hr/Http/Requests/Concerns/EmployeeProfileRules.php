@@ -89,6 +89,11 @@ trait EmployeeProfileRules
             'sss_number' => ['nullable', 'string', 'max:32'],
             'philhealth_number' => ['nullable', 'string', 'max:32'],
             'pagibig_number' => ['nullable', 'string', 'max:32'],
+            // Further IDs the four above do not name. BOTH halves of an entry are required: a row
+            // with only a type is a value someone failed to finish typing, not a choice.
+            'other_ids' => ['nullable', 'array', 'max:'.EmployeeService::MAX_OTHER_IDS],
+            'other_ids.*.type' => ['required', 'string', 'max:50'],
+            'other_ids.*.number' => ['required', 'string', 'max:32'],
         ];
     }
 

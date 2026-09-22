@@ -50,6 +50,7 @@ class RolesAndPermissionsSeeder extends Seeder
             'hr.office_expenses.view', 'hr.office_expenses.manage',
             'hr.faqs.view', 'hr.faqs.manage',
             'hr.holidays.view', 'hr.holidays.manage',
+            'hr.intern_allowance.view', 'hr.intern_allowance.manage',
         ];
 
         foreach ($permissions as $name) {

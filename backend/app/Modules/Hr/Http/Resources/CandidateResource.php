@@ -19,6 +19,9 @@ class CandidateResource extends JsonResource
             'requisition' => $this->requisition ? [
                 'id' => $this->requisition->id,
                 'title' => $this->requisition->title,
+                // What the candidate is applying to decides how their card reads —
+                // an OJT's compensation is an allowance, not a salary.
+                'pipeline' => $this->requisition->pipeline,
             ] : null,
             'name' => $this->name,
             'email' => $this->email,
@@ -29,6 +32,9 @@ class CandidateResource extends JsonResource
             'rating' => $this->rating !== null ? (float) $this->rating : null,
             'expected_salary' => $this->expected_salary,
             'location' => $this->location,
+            // Set only on an OJT applicant; null on everyone else.
+            'school' => $this->school,
+            'required_hours' => $this->required_hours,
             'feedback' => $this->feedback,
             'notes' => $this->notes,
             'emails_sent' => $this->emails_sent ?? [],
