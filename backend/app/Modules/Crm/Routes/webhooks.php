@@ -5,9 +5,13 @@ use App\Modules\Crm\Http\Middleware\MetaSignatureGuard;
 use Illuminate\Support\Facades\Route;
 
 /*
- * PUBLIC Meta webhook routes — mounted by CrmServiceProvider with the `api` middleware group and
- * no prefix, so the paths are exactly /webhooks/meta. Meta registers a literal callback URL, so
- * these paths are not ours to tidy later.
+ * PUBLIC Meta webhook routes — mounted by CrmServiceProvider under the `api` prefix with the `api`
+ * middleware group, so the paths are exactly /api/webhooks/meta. Meta registers a literal callback
+ * URL, so once it is entered in the dashboard these paths are not ours to tidy.
+ *
+ * The prefix is not decoration: the production host forwards only /api (plus /storage and two exact
+ * paths) to PHP and proxies everything else to the frontend, so a root-mounted webhook was served
+ * by Next.js as an HTML 404 and never reached this file at all.
  *
  * WHY THEY CARRY NONE OF THE CRM MIDDLEWARE. Everything else in this module sits behind
  * auth:sanctum → set-current-org → subscription-active → feature:crm → EnsureCrmAccessIsActive,

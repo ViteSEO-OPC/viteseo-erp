@@ -25,7 +25,14 @@ trait SignsMetaDeliveries
 
     protected const FIXTURE_VERIFY_TOKEN = 'fixture-verify-token-for-tests-only';
 
-    protected const WEBHOOK = '/webhooks/meta';
+    /**
+     * The callback path Meta will be given.
+     *
+     * Under /api on purpose: the production host forwards only /api (plus /storage and two exact
+     * paths) to PHP and proxies the rest to the frontend, so a root-mounted webhook never reached
+     * Laravel at all. A routing test pins both halves of that.
+     */
+    protected const WEBHOOK = '/api/webhooks/meta';
 
     /** Enables the integration with fixture credentials. Nothing real is involved. */
     protected function enableMetaWebhook(array $overrides = []): void

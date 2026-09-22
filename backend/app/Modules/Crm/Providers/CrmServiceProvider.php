@@ -177,13 +177,22 @@ class CrmServiceProvider extends ServiceProvider
             ->middleware('api')
             ->group(__DIR__ . '/../Routes/api.php');
 
-        // PUBLIC Meta webhook routes, mounted at the ROOT with no prefix so the paths are exactly
-        // /webhooks/meta — the literal callback URL Meta is given. `api` middleware rather than
-        // `web`: there is no session and no CSRF token in a server-to-server delivery. Their
-        // security boundary is Meta-specific and lives in the route file (signature guard on POST,
-        // verify-token handshake on GET); none of the CRM auth stack applies, because there is no
-        // user and the tenant is resolved per Meta resource.
-        Route::middleware('api')
+        // PUBLIC Meta webhook routes, at /api/webhooks/meta — the literal callback URL Meta is
+        // given. `api` middleware rather than `web`: there is no session and no CSRF token in a
+        // server-to-server delivery. Their security boundary is Meta-specific and lives in the
+        // route file (signature guard on POST, verify-token handshake on GET); none of the CRM auth
+        // stack applies, because there is no user and the tenant is resolved per Meta resource.
+        //
+        // WHY THE `api` PREFIX AND NOT THE ROOT. The production host sends only `/api`, `/storage`
+        // and two exact paths to PHP; everything else is proxied to the Next.js frontend. A
+        // root-mounted /webhooks/meta was therefore answered by the frontend with an HTML 404 and
+        // never reached Laravel, so Meta's verification could not have succeeded. Living under the
+        // existing /api ingress needs no nginx exception, no reload and no per-host config, and it
+        // keeps working if the app ever moves to another server. The `api` middleware GROUP adds no
+        // URI prefix of its own — only this call does — so the path is /api/webhooks/meta, not
+        // /api/api/webhooks/meta.
+        Route::prefix('api')
+            ->middleware('api')
             ->group(__DIR__ . '/../Routes/webhooks.php');
 
         // The Google OAuth callback, mounted at the ROOT with no prefix so its path is exactly
