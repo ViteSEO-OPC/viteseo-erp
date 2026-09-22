@@ -9,6 +9,7 @@ use App\Modules\Crm\Console\Commands\SyncMailboxesCommand;
 use App\Modules\Crm\Console\Commands\N8nTokenCommand;
 use App\Modules\Crm\Console\Commands\PruneReadNotifications;
 use App\Modules\Crm\Console\Commands\ProvisionIntegrationAccountCommand;
+use App\Modules\Crm\Console\Commands\ProvisionMetaAccountCommand;
 use App\Modules\Crm\Console\Commands\PruneXlsImportsCommand;
 use App\Modules\Crm\Console\Commands\RecomputeLeadScoresCommand;
 use App\Modules\Crm\Events\DealWon;
@@ -176,6 +177,15 @@ class CrmServiceProvider extends ServiceProvider
             ->middleware('api')
             ->group(__DIR__ . '/../Routes/api.php');
 
+        // PUBLIC Meta webhook routes, mounted at the ROOT with no prefix so the paths are exactly
+        // /webhooks/meta — the literal callback URL Meta is given. `api` middleware rather than
+        // `web`: there is no session and no CSRF token in a server-to-server delivery. Their
+        // security boundary is Meta-specific and lives in the route file (signature guard on POST,
+        // verify-token handshake on GET); none of the CRM auth stack applies, because there is no
+        // user and the tenant is resolved per Meta resource.
+        Route::middleware('api')
+            ->group(__DIR__ . '/../Routes/webhooks.php');
+
         // The Google OAuth callback, mounted at the ROOT with no prefix so its path is exactly
         // /auth/google/callback — the string registered as GOOGLE_REDIRECT_URI on the OAuth client,
         // which Google matches literally. `api` middleware rather than `web`: the flow authenticates
@@ -269,6 +279,7 @@ class CrmServiceProvider extends ServiceProvider
                 // Provisions (or inspects) the per-org, per-provider inbound integration identity.
                 // Run by hand when an integration is set up; never scheduled.
                 ProvisionIntegrationAccountCommand::class,
+                ProvisionMetaAccountCommand::class,
             ]);
         }
 

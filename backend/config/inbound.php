@@ -1,6 +1,8 @@
 <?php
 
 declare(strict_types=1);
+use App\Modules\Crm\Services\Inbound\Meta\Adapters\MetaInstagramAdapter;
+use App\Modules\Crm\Services\Inbound\Meta\Adapters\MetaMessengerAdapter;
 
 return [
 
@@ -82,13 +84,21 @@ return [
     | This list is the ONLY source of adapter classes: nothing is discovered by scanning, and no
     | name that arrived in a request is ever turned into a class.
     |
-    | It is EMPTY in production on purpose. Phase 3C builds the framework; the first real adapter
-    | arrives with Phase 3D, once Meta developer access exists. The fixture adapter used by the
-    | test suite lives under tests/ and is registered by setting this key inside a test — it must
-    | never be listed here, and a test asserts that it is not.
+    | Phase 3D.1 adds the first real entries: the two Meta messaging adapters. They are inert
+    | until a delivery reaches them, and the only door that can reach them — the public Meta
+    | webhook — refuses everything while `meta.enabled` is false (the default).
+    |
+    | There is deliberately NO Meta Lead Ads adapter. A leadgen webhook carries identifiers only,
+    | with the submitted answers behind a Graph API call this phase does not make, so there is no
+    | conversation turn to normalize; the dispatcher recognises it and defers. Registering an
+    | adapter for it would invite an empty "message" into a customer's thread.
+    |
+    | The fixture adapter used by the test suite lives under tests/ and is registered by setting
+    | this key inside a test — it must never be listed here, and a test asserts that it is not.
     */
     'adapters' => [
-        //
+        MetaMessengerAdapter::class,
+        MetaInstagramAdapter::class,
     ],
 
     /*

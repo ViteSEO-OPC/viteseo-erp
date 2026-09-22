@@ -140,7 +140,14 @@ class InboundAdapterSafetyTest extends TestCase
     {
         $production = require base_path('config/inbound.php');
 
-        $this->assertSame([], $production['adapters'], 'production configures no adapters at all');
+        // Phase 3D.1 gave production its first real adapters, so "empty" is no longer the
+        // assertion — the assertion is that nothing from the TEST namespace is among them, which
+        // is what this test was always actually about.
+        foreach ($production['adapters'] as $configured) {
+            $this->assertStringStartsNotWith('Tests\\', (string) $configured, 'no test class may be configured in production');
+        }
+
+        $this->assertNotContains(FixtureInboundProviderAdapter::class, $production['adapters']);
 
         // Stronger than the config list: the class is not even autoloadable in production, because
         // `Tests\` is declared only in composer's autoload-dev.
