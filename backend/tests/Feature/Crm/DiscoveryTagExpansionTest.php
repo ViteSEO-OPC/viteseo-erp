@@ -182,6 +182,100 @@ class DiscoveryTagExpansionTest extends TestCase
             ->assertJsonPath('data.selectors', ['amenity=fast_food']);
     }
 
+    // --- the covered set is part of the question, so it is part of the key ---
+
+    /**
+     * TWO COVERED SETS ARE TWO QUESTIONS. The prompt asks for selectors ADDITIONAL to the ones the
+     * caller says it already has, so the same category asked with a different covered set has a
+     * legitimately different answer. Sharing one entry replayed the first caller's answer to every
+     * later one — observed in practice, when a diagnostic call made with NO covered set cached an
+     * answer consisting only of the baseline's own selectors and that answer was then served to the
+     * real discovery lane, which had asked the narrower question.
+     */
+    public function test_a_different_covered_set_is_a_different_cache_entry(): void
+    {
+        $this->actingAsScraper();
+        $this->openAiLive();
+        Http::fake(['*' => Http::sequence()
+            ->push($this->openAiChat(['amenity=pharmacy']))
+            ->push($this->openAiChat(['shop=chemist']))]);
+
+        $first = $this->postJson(self::EXPANSIONS, ['category' => 'pharmacy'])->assertOk();
+        $second = $this->postJson(self::EXPANSIONS, [
+            'category' => 'pharmacy',
+            'knownSelectors' => ['amenity=pharmacy'],
+        ])->assertOk();
+
+        Http::assertSentCount(2);
+        $this->assertSame(['amenity=pharmacy'], $first->json('data.selectors'));
+        $this->assertSame(['shop=chemist'], $second->json('data.selectors'));
+    }
+
+    public function test_the_same_covered_set_still_answers_from_cache(): void
+    {
+        $this->actingAsScraper();
+        $this->openAiLive();
+        Http::fake(['*' => Http::response($this->openAiChat(['shop=chemist']))]);
+
+        $payload = ['category' => 'pharmacy', 'knownSelectors' => ['amenity=pharmacy']];
+        $this->postJson(self::EXPANSIONS, $payload)->assertOk();
+        $again = $this->postJson(self::EXPANSIONS, $payload)->assertOk();
+
+        Http::assertSentCount(1);
+        $this->assertSame('cache', $again->json('data.usage.model'));
+    }
+
+    /** Order and casing do not make a new question — the fingerprint is normalised and sorted. */
+    public function test_the_covered_set_fingerprint_ignores_order_and_case(): void
+    {
+        $this->actingAsScraper();
+        $this->openAiLive();
+        Http::fake(['*' => Http::response($this->openAiChat(['shop=chemist']))]);
+
+        $this->postJson(self::EXPANSIONS, [
+            'category' => 'pharmacy',
+            'knownSelectors' => ['amenity=pharmacy', 'shop=beauty'],
+        ])->assertOk();
+
+        $again = $this->postJson(self::EXPANSIONS, [
+            'category' => 'pharmacy',
+            'knownSelectors' => ['SHOP=BEAUTY', 'amenity=pharmacy'],
+        ])->assertOk();
+
+        Http::assertSentCount(1);
+        $this->assertSame('cache', $again->json('data.usage.model'));
+    }
+
+    /** Forgetting is scoped the same way, so one covered set's entry cannot clear another's. */
+    public function test_forgetting_one_covered_set_leaves_the_other_cached(): void
+    {
+        $this->actingAsScraper();
+        $this->openAiLive();
+        Http::fake(['*' => Http::sequence()
+            ->push($this->openAiChat(['amenity=pharmacy']))
+            ->push($this->openAiChat(['shop=chemist']))
+            ->push($this->openAiChat(['healthcare=pharmacy']))]);
+
+        $this->postJson(self::EXPANSIONS, ['category' => 'pharmacy'])->assertOk();
+        $this->postJson(self::EXPANSIONS, [
+            'category' => 'pharmacy', 'knownSelectors' => ['amenity=pharmacy'],
+        ])->assertOk();
+        Http::assertSentCount(2);
+
+        OpenAiTagExpander::forget('pharmacy');
+
+        // The unconstrained entry is gone and re-asks…
+        $this->postJson(self::EXPANSIONS, ['category' => 'pharmacy'])->assertOk();
+        Http::assertSentCount(3);
+
+        // …while the covered-set entry is untouched.
+        $kept = $this->postJson(self::EXPANSIONS, [
+            'category' => 'pharmacy', 'knownSelectors' => ['amenity=pharmacy'],
+        ])->assertOk();
+        Http::assertSentCount(3);
+        $this->assertSame('cache', $kept->json('data.usage.model'));
+    }
+
     public function test_forgetting_a_category_makes_the_next_call_re_ask(): void
     {
         $this->actingAsScraper();
