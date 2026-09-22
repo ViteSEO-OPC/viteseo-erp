@@ -284,10 +284,15 @@ export function countryLabel(code: string): string {
 }
 
 /** Human labels for the provider ids the API returns. Unknown ids render as themselves, never guessed. */
+// ONE VOCABULARY FOR THE LANES, matching the integrations card. `openai` is the AI-assisted
+// OpenStreetMap lane — its businesses are OSM nodes reached through AI-proposed searches — so the
+// bare word "AI-assisted" read as though AI were itself the factual source. Spelling out the source
+// keeps this row answering "where did the businesses come from"; which AI planned the search is the
+// AI engine row's question, and {@see AI_ENGINE_NAME} answers it.
 const PROVIDER_LABELS: Record<string, string> = {
   google_places: "Google Places",
   openstreetmap: "OpenStreetMap",
-  openai: "AI-assisted",
+  openai: "AI-assisted OpenStreetMap",
 };
 
 export function providerLabel(id: string | null): string {

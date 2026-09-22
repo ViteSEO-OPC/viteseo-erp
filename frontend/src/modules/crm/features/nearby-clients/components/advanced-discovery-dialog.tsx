@@ -27,6 +27,7 @@ import {
   useStartDiscoveryRun,
 } from "@/modules/crm/features/nearby-clients/hooks/use-discovery-runs";
 import {
+  AI_ENGINE_NAME,
   aiOutcomeLabel,
   aiOutcomeMessage,
   discoveryPhase,
@@ -95,7 +96,7 @@ export function AdvancedDiscoveryDialog({ open, onOpenChange }: Props) {
   // Nationwide is Google-only, exactly as the orchestrator requires. Offering it on any other
   // provider could only ever produce a run that fails the moment the worker picks it up.
   // AI Discovery is offered only when the backend reports AI available on the Google flow.
-  const { canRunNationwide, canRunAi, aiStatus } = useDiscoveryCapability();
+  const { canRunNationwide, canRunAi, aiStatus, effectiveProvider } = useDiscoveryCapability();
   const phase = discoveryPhase({
     submitting: start.isPending,
     run,
@@ -247,6 +248,10 @@ export function AdvancedDiscoveryDialog({ open, onOpenChange }: Props) {
                 works.
               </p>
             )}
+            <PreRunAttribution
+              effectiveProvider={effectiveProvider}
+              canRunAi={canRunAi}
+            />
           </>
         ) : (
           <RunPanel run={run} />
@@ -623,6 +628,55 @@ function RunProgress({ percent, failed }: { percent: number; failed: boolean }) 
   );
 }
 
+/**
+ * WHICH ENGINE, AND WHOSE DATA — said before a run is started rather than only after it finishes.
+ *
+ * THE CONFUSION THIS ANSWERS. "Discover with AI" is offered only on the Google flow, so a run it
+ * starts is planned by AI and sourced from Google at the same time. With nothing naming the two
+ * roles, the results read as purely Google-discovered and the AI's part went unrecorded.
+ *
+ * IT CLAIMS NOTHING ABOUT A RUN THAT HAS NOT HAPPENED. The AI row is drawn only when the backend
+ * reports AI actually available (`canRunAi`), and it says the engine would be used when the AI
+ * action is chosen — never that it will be, because the ordinary Run discovery button is still
+ * right beside it. What AI did is reported afterwards, from the run's own recorded outcome.
+ *
+ * Presentation only: both values are read from the capability the dialog already fetched. It does
+ * not choose, change or resolve a provider, and it never touches a discovered lead.
+ */
+function PreRunAttribution({
+  effectiveProvider,
+  canRunAi,
+}: {
+  effectiveProvider: string | null;
+  canRunAi: boolean;
+}) {
+  if (effectiveProvider === null) return null;
+
+  return (
+    <div className="rounded-md border border-border p-3">
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-caption text-muted-foreground">Business data source</span>
+        <span className="text-sm font-medium">{providerLabel(effectiveProvider)}</span>
+      </div>
+      {canRunAi && (
+        <>
+          <div className="mt-2 flex items-center justify-between gap-3">
+            <span className="flex items-center gap-1.5 text-caption text-muted-foreground">
+              <Sparkles className="h-3.5 w-3.5" aria-hidden />
+              AI engine
+            </span>
+            <span className="text-sm font-medium">{AI_ENGINE_NAME}</span>
+          </div>
+          <p className="mt-1 text-caption text-muted-foreground">
+            Used when you choose Discover with AI. {AI_ENGINE_NAME} plans how the searches are
+            phrased; every business still comes from {providerLabel(effectiveProvider)}.
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
+
 /** Live progress, then the outcome. Every number here comes from the API; none is computed locally. */
 function RunPanel({ run }: { run: DiscoveryRun }) {
   const { progress, counters, provider } = run;
@@ -681,10 +735,14 @@ function RunPanel({ run }: { run: DiscoveryRun }) {
         )}
       </div>
 
-      {/* Provider truth: what actually answered, stated plainly. */}
+      {/* TWO ROLES, TWO ROWS. "Provider used" had to carry both questions at once — which engine
+          planned the search and where the businesses came from — so an AI-planned Google run read as
+          purely Google-discovered. Naming the roles separates them. The values are the same two
+          fields as before (`provider.effective` and the run's recorded AI outcome); nothing about
+          provider resolution, ingestion or a lead's `source` is touched. */}
       <div className="rounded-md border border-border p-3">
         <div className="flex items-center justify-between gap-3">
-          <span className="text-caption text-muted-foreground">Provider used</span>
+          <span className="text-caption text-muted-foreground">Business data source</span>
           <span className="text-sm font-medium">{providerLabel(provider.effective)}</span>
         </div>
         {provider.isFallback && (
@@ -701,7 +759,7 @@ function RunPanel({ run }: { run: DiscoveryRun }) {
             <div className="mt-2 flex items-center justify-between gap-3">
               <span className="flex items-center gap-1.5 text-caption text-muted-foreground">
                 <Sparkles className="h-3.5 w-3.5" aria-hidden />
-                AI search planning
+                AI engine
               </span>
               <span className="text-sm font-medium">{aiLabel}</span>
             </div>

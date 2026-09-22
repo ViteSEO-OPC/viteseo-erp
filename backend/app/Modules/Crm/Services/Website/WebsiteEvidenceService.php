@@ -6,6 +6,7 @@ use App\Models\User;
 use App\Modules\Crm\Models\Lead;
 use App\Modules\Crm\Models\LeadWebsiteCandidate;
 use App\Modules\Crm\Models\LeadWebsiteSearch;
+use App\Modules\Crm\Services\WebsiteIdentityVerdict;
 use App\Modules\Crm\Services\WebsiteIdentityVerifier;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
@@ -153,6 +154,74 @@ class WebsiteEvidenceService
             $search->save();
 
             return $this->refreshCounts($search->refresh());
+        });
+    }
+
+    /**
+     * Refile a URL the ORDINARY AUDIT conclusively refused, so the lead can rejoin the evidence path.
+     *
+     * THE EXACT MIRROR OF {@see promoteVerifiedWebsite()}. That method writes `crm_leads.website`
+     * when the evidence chain proves a URL, moving the lead into the audit queue where page findings
+     * get made. This one clears the column when the audit disproves a URL, moving the lead back into
+     * the evidence queue where a search for its real site can finally happen. `website` is what
+     * ROUTES a lead between the two, and until now it only ever moved one way: a lead holding a
+     * refused URL was offered forever to the audit that had already judged it, and was invisible to
+     * the tiers. Measured on the live pool: 412 leads holding a refused URL, none of them reachable
+     * by any path that could conclude an absence.
+     *
+     * ONLY A CONCLUSIVE REFUSAL MAY COME THROUGH HERE, and the caller decides that — see
+     * {@see LeadWebsiteCandidate::REJECTED_PLATFORM}. A refusal that merely failed to CONFIRM
+     * ownership must never reach this method: stripping a URL on "we could not tell" would delete a
+     * genuine website on weak evidence, which is the one error {@see recordDeterminedAbsence()}
+     * already refuses to make from the other direction.
+     *
+     * THE CANDIDATE ARRIVES ALREADY CHECKED, which is why this does not go through
+     * {@see recordCandidates()}: that method records material still to be examined and reopens an
+     * exhausted search because of it. There is nothing here left to examine — the audit has just
+     * finished examining it — so `checked_at` is set now, `tiers_run` is untouched (this was never a
+     * tier), and an exhausted search stays exhausted.
+     *
+     * IT WRITES NO VERDICT. `website_status` is the caller's to derive, exactly as before, and
+     * `website` is deliberately absent from LeadObserver's scoring inputs, so moving a URL out of it
+     * cannot move a Lead Score any more than promotion moving one in could.
+     */
+    public function recordRefusedWebsite(
+        Lead $lead,
+        string $url,
+        string $reason,
+        WebsiteIdentityVerdict $verdict,
+    ): ?LeadWebsiteCandidate {
+        $url = trim($url);
+        if ($url === '') {
+            return null;
+        }
+
+        return DB::transaction(function () use ($lead, $url, $reason, $verdict): LeadWebsiteCandidate {
+            $candidate = LeadWebsiteCandidate::query()->updateOrCreate(
+                [
+                    'lead_id' => $lead->id,
+                    'url_hash' => LeadWebsiteCandidate::hashFor($url),
+                    'source' => LeadWebsiteCandidate::SOURCE_AUDIT,
+                ],
+                [
+                    'url' => $url,
+                    'confidence' => $verdict->confidence,
+                    'signals' => $verdict->signals,
+                    'verified' => false,
+                    'rejection_reason' => $reason,
+                    'checked_at' => now(),
+                ],
+            );
+
+            // The search row is the evidence chain's ledger, and the counts below are read by the
+            // UI. Created if the lead never had one — a lead that arrived holding a URL never
+            // entered the evidence path, so usually it has not.
+            $search = $this->searchFor($lead);
+            $search->lead_id = $lead->id;
+            $search->save();
+            $this->refreshCounts($search->refresh());
+
+            return $candidate;
         });
     }
 

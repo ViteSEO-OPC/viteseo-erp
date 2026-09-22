@@ -634,9 +634,9 @@ const aiRun = (status: DiscoveryRun["status"], ai: DiscoveryRun["ai"], isTermina
   if (discoveryPhase({ submitting: true, run: undefined }) !== "submitting") bad.push("in-flight start is not submitting");
   if (discoveryPhase({ submitting: false, run: aiRun("pending", requested) }) !== "queued") bad.push("pending is not queued");
   if (discoveryPhase({ submitting: false, run: aiRun("running", requested) }) !== "running") bad.push("running is not running");
-  // While it runs, "not applied" means "not yet" — never a verdict.
+  // While it runs, "not applied" means "not yet" — never a verdict. The engine is named either way.
   const live = aiOutcomeLabel(aiRun("running", requested));
-  if (live !== "Requested") bad.push(`a live AI run is labelled "${live}", want "Requested"`);
+  if (live !== "OpenAI — requested") bad.push(`a live AI run is labelled "${live}", want "OpenAI — requested"`);
   report("T  submitting, queued and running are distinct", 5 - bad.length, 5, bad);
 }
 
@@ -645,11 +645,13 @@ const aiRun = (status: DiscoveryRun["status"], ai: DiscoveryRun["ai"], isTermina
   const bad: string[] = [];
   const applied = aiRun("completed", { requested: true, outcome: "applied" }, true);
   if (discoveryPhase({ submitting: false, run: applied }) !== "completed") bad.push("completed is not completed");
-  if (aiOutcomeLabel(applied) !== "Applied") bad.push("applied run not labelled Applied");
+  // The AI row NAMES THE ENGINE. Google Places is the answer to the other row, and the message
+  // below still has to say so — the two roles must never collapse back into one line.
+  if (aiOutcomeLabel(applied) !== "OpenAI") bad.push("an applied run does not name OpenAI as the engine");
   if (!/Google Places/.test(aiOutcomeMessage(applied) ?? "")) bad.push("applied message does not say Google supplied the businesses");
 
   const unshaped = aiRun("completed", { requested: true, outcome: "not_applied" }, true);
-  if (aiOutcomeLabel(unshaped) !== "Not applied") bad.push("an AI run AI did not shape is not labelled Not applied");
+  if (aiOutcomeLabel(unshaped) !== "OpenAI — not applied") bad.push("an AI run AI did not shape is not labelled OpenAI — not applied");
   if (!/did not change/.test(aiOutcomeMessage(unshaped) ?? "")) bad.push("the unshaped message does not say so");
 
   const ordinary = aiRun("completed", { requested: false, outcome: "not_applied" }, true);
@@ -685,7 +687,7 @@ const aiRun = (status: DiscoveryRun["status"], ai: DiscoveryRun["ai"], isTermina
   const bad: string[] = [];
   const stopped = aiRun("failed", { requested: true, outcome: "insufficient_credit" }, true);
   if (discoveryPhase({ submitting: false, run: stopped }) !== "insufficient_credit") bad.push("a credit-stopped run is not the credit state");
-  if (aiOutcomeLabel(stopped) !== "No AI credit") bad.push("credit-stopped run not labelled No AI credit");
+  if (aiOutcomeLabel(stopped) !== "OpenAI — no credit") bad.push("credit-stopped run not labelled OpenAI — no credit");
   if (!/no credit/.test(aiOutcomeMessage(stopped) ?? "")) bad.push("credit message does not name credit");
   if (discoveryPhase({ submitting: false, run: undefined, aiStartRefusedForCredit: true }) !== "insufficient_credit") {
     bad.push("a start refused for credit is not the credit state");
@@ -748,6 +750,42 @@ const aiRun = (status: DiscoveryRun["status"], ai: DiscoveryRun["ai"], isTermina
   // Nationwide stays Google-only, through the same capability as before.
   if (!dialog.includes('const nationwide = mode === "nationwide" && canRunNationwide;')) bad.push("nationwide gating changed");
   report("Z  the default Advanced Lead Discovery flow is unchanged", 5 - bad.length, 5, bad);
+}
+
+// ── AA  the AI engine and the factual source are named as two separate roles ─────────────────
+//
+// An AI-planned Google run is planned by OpenAI and sourced from Google Places at the same time.
+// Before this, one row called "Provider used" carried both questions, so such a run read as purely
+// Google-discovered. These assertions keep the two roles from collapsing back into one line — and
+// keep the factual half pointing at the provider, never at the engine.
+{
+  const bad: string[] = [];
+  const dialog = readFileSync(
+    new URL("../../src/modules/crm/features/nearby-clients/components/advanced-discovery-dialog.tsx", import.meta.url),
+    "utf8",
+  );
+  const types = readFileSync(
+    new URL("../../src/modules/crm/features/nearby-clients/types/discovery-run-types.ts", import.meta.url),
+    "utf8",
+  );
+
+  // Both roles are named, before a run and after it.
+  if ((dialog.match(/Business data source/g) ?? []).length < 2) bad.push("the factual source is not named both before and after a run");
+  if ((dialog.match(/AI engine/g) ?? []).length < 2) bad.push("the AI engine is not named both before and after a run");
+  // The RENDERED row, not the word: the comment above it explains what it replaced and must stay.
+  if (/>\s*Provider used\s*</.test(dialog)) bad.push("the old single-role 'Provider used' row is back");
+
+  // The factual row reads the PROVIDER, never the engine name.
+  if (!dialog.includes("{providerLabel(provider.effective)}")) bad.push("the run's factual row no longer reads provider.effective");
+  if (!/openai: "AI-assisted OpenStreetMap"/.test(types)) bad.push("the openai lane label no longer names its factual source");
+
+  // The engine name is one constant, not a word retyped per surface.
+  if (!dialog.includes("AI_ENGINE_NAME")) bad.push("the dialog hard-codes the engine name instead of using AI_ENGINE_NAME");
+
+  // Naming the engine must not have moved provenance: no surface may map a lead source to OpenAI.
+  if (/google_places:\s*"[^"]*(OpenAI|AI-assisted)/.test(types)) bad.push("Google Places is labelled as an AI source");
+
+  report("AA the AI engine and the factual source are named separately", 7 - bad.length, 7, bad);
 }
 
 console.log(failed === 0 ? "\nAll gates passed." : `\n${failed} gate(s) FAILED.`);

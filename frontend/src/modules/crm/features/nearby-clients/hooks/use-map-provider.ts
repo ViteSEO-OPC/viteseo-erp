@@ -88,6 +88,14 @@ export type DiscoveryCapability = {
   canRunAi: boolean;
   /** The backend's AI status word (`available`, `insufficient_credit`, ...), or null while unknown. */
   aiStatus: string | null;
+  /**
+   * The factual provider that would answer a search right now, or null while unknown.
+   *
+   * Already computed here to decide the capability flags; returned so a caller can NAME the source
+   * of the businesses instead of only knowing whether a button may be drawn. Read-only surfacing of
+   * an existing value — provider resolution is the server's and is untouched.
+   */
+  effectiveProvider: string | null;
   /** True while the lookup is in flight. Capability is withheld until it answers. */
   isLoading: boolean;
 };
@@ -108,6 +116,7 @@ export function useDiscoveryCapability(): DiscoveryCapability {
     unavailableReason: discoveryUnavailableReason(effective),
     canRunAi: canRunAiDiscovery(effective, query.data?.aiStrategy?.status),
     aiStatus: query.data?.aiStrategy?.status ?? null,
+    effectiveProvider: effective,
     isLoading: query.isLoading,
   };
 }

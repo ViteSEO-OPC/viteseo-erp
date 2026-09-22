@@ -16,14 +16,19 @@ use Tests\TestCase;
  */
 class NationwidePlannerTest extends TestCase
 {
+    /**
+     * The planner with no coverage evidence, which is what every assertion below is about: these
+     * tests pin the SHAPE of the tiling — that it comes from the polygon and not from a city list —
+     * and that shape is a property of the geometry, not of what has been searched before.
+     */
     private function planner(): NationwidePlanner
     {
-        return new NationwidePlanner(new PhilippinesBoundary());
+        return new NationwidePlanner(new PhilippinesBoundary, null);
     }
 
     public function test_every_generated_cell_touches_the_philippines(): void
     {
-        $boundary = new PhilippinesBoundary();
+        $boundary = new PhilippinesBoundary;
         $cells = $this->planner()->cells(0.5);
 
         $this->assertNotEmpty($cells);
@@ -38,7 +43,7 @@ class NationwidePlannerTest extends TestCase
 
     public function test_no_cell_extends_beyond_the_national_extent(): void
     {
-        [$south, $west, $north, $east] = (new PhilippinesBoundary())->bbox();
+        [$south, $west, $north, $east] = (new PhilippinesBoundary)->bbox();
 
         foreach ($this->planner()->cells(0.5) as $cell) {
             [$s, $w, $n, $e] = $cell['bbox'];

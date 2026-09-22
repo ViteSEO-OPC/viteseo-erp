@@ -7,7 +7,9 @@ use App\Http\Controllers\Controller;
 use App\Modules\Crm\Requests\StoreWebsiteEnrichmentRequest;
 use App\Modules\Crm\Resources\WebsiteEnrichmentResource;
 use App\Modules\Crm\Models\Lead;
+use App\Modules\Crm\Models\LeadWebsiteCandidate;
 use App\Modules\Crm\Services\Website\LlmIdentityAdjudicator;
+use App\Modules\Crm\Services\Website\WebsiteEvidenceService;
 use App\Modules\Crm\Services\WebsiteIdentityVerifier;
 use App\Modules\Crm\Services\WebsiteStatusDeriver;
 use Illuminate\Http\JsonResponse;
@@ -64,6 +66,7 @@ class WebsiteEnrichmentController extends Controller
         WebsiteStatusDeriver $deriver,
         WebsiteIdentityVerifier $verifier,
         LlmIdentityAdjudicator $adjudicator,
+        WebsiteEvidenceService $evidence,
     ): JsonResponse {
         $data = $request->validated();
         $now = now();
@@ -97,6 +100,34 @@ class WebsiteEnrichmentController extends Controller
             ],
         );
 
+        // A CONCLUSIVELY REFUSED URL STOPS ROUTING THE LEAD. Refusal alone is not enough: only a
+        // refusal decided by the LANDING HOST qualifies, because that is a fact about the domain
+        // rather than a judgement about the evidence. A page that merely could not be CONFIRMED
+        // stays exactly where it is — "we could not tell" is not "this is not a website", and acting
+        // on the difference would strip a genuine site on weak evidence.
+        //
+        // The URL is preserved as evidence and the column is cleared, which moves the lead out of
+        // this queue and into the evidence/tier queue where a search for its real site can finally
+        // run. Until this existed such a lead was offered forever to the audit that had already
+        // judged it and was invisible to the tiers, so `no-website` was unreachable however absent
+        // its website really was. The exact mirror of
+        // {@see WebsiteEvidenceService::promoteVerifiedWebsite()}.
+        $refiled = ! $verdict->verified
+            && ($verdict->signals['platform_hosted'] ?? false) === true
+            && filled($lead->website);
+
+        if ($refiled) {
+            $evidence->recordRefusedWebsite(
+                $lead,
+                (string) $lead->website,
+                LeadWebsiteCandidate::REJECTED_PLATFORM,
+                $verdict,
+            );
+            // In memory, so the derivation below sees the lead as the update will leave it. Both
+            // columns are written in ONE update so the observer sees a single change.
+            $lead->website = null;
+        }
+
         // Derive the coarse website_status (the ONLY lead field this provider writes).
         $status = $deriver->derive(
             hasUrl: filled($lead->website),
@@ -107,7 +138,7 @@ class WebsiteEnrichmentController extends Controller
             contactPage: (bool) $data['contact_page'],
             servicesPage: (bool) $data['services_page'],
         );
-        $lead->update(['website_status' => $status]);
+        $lead->update(['website_status' => $status, ...($refiled ? ['website' => null] : [])]);
 
         return response()->json([
             'data' => new WebsiteEnrichmentResource($enrichment->refresh()),

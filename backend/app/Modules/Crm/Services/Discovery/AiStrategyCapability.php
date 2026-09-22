@@ -3,6 +3,7 @@
 namespace App\Modules\Crm\Services\Discovery;
 
 use App\Modules\Crm\Enums\NerbyProvider;
+use App\Modules\Crm\Services\Website\LlmIdentityAdjudicator;
 
 /**
  * Can a discovery run ask AI to plan its searches right now — and if not, why not?
@@ -50,6 +51,33 @@ class AiStrategyCapability
 
     public function status(): string
     {
+        $credential = $this->credential();
+
+        if ($credential !== self::AVAILABLE) {
+            return $credential;
+        }
+
+        if ($this->settings->resolveQuietly()->provider !== NerbyProvider::GOOGLE_PLACES) {
+            return self::UNSUPPORTED_PROVIDER;
+        }
+
+        return self::AVAILABLE;
+    }
+
+    /**
+     * IS THE SHARED AI CREDENTIAL USABLE AT ALL — without asking what it would be used FOR.
+     *
+     * Split out of {@see status()} because a second caller arrived that is not about discovery:
+     * the website audit ({@see LlmIdentityAdjudicator}) asks
+     * the same model on the same key, but which provider is executing a SEARCH has nothing to do
+     * with whether a page can be reasoned about. Only the discovery lane applies the provider gate,
+     * so it stays in `status()` and the shared half lives here.
+     *
+     * Returns the identical vocabulary, minus {@see UNSUPPORTED_PROVIDER}, which this cannot emit.
+     * `status()` is unchanged in behaviour — it is this, then the provider check, in the same order.
+     */
+    public function credential(): string
+    {
         $ai = $this->settings->for(NerbyProvider::OPENAI);
 
         if (! $ai->exists || ! $ai->hasApiKey()) {
@@ -65,13 +93,9 @@ class AiStrategyCapability
         }
 
         // ONLY A PASSED TEST MAKES AI AVAILABLE. The connection test checks both the key and the
-        // account balance; nothing short of its `ok` is evidence that a planning call can succeed.
+        // account balance; nothing short of its `ok` is evidence that a call can succeed.
         if ($ai->last_test_status !== NerbyProviderSettingService::TEST_OK) {
             return self::UNVERIFIED;
-        }
-
-        if ($this->settings->resolveQuietly()->provider !== NerbyProvider::GOOGLE_PLACES) {
-            return self::UNSUPPORTED_PROVIDER;
         }
 
         return self::AVAILABLE;

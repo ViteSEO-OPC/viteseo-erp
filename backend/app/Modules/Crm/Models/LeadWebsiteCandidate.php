@@ -3,6 +3,7 @@
 namespace App\Modules\Crm\Models;
 
 use App\Models\Concerns\BelongsToOrg;
+use App\Modules\Crm\Services\Website\WebsiteEvidenceService;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -45,6 +46,21 @@ class LeadWebsiteCandidate extends Model
 
     public const REJECTED_INVALID = 'invalid_url';
 
+    /**
+     * The URL resolves to somebody else's platform — a social profile, a directory listing, a
+     * link-in-bio hub.
+     *
+     * CONCLUSIVE, UNLIKE EVERY OTHER REFUSAL HERE, and that is the whole reason it is its own code.
+     * `identity_unverified` and `insufficient_margin` both mean "a live page answered and we could
+     * not judge whether it belongs to this business", which is why
+     * {@see WebsiteEvidenceService::recordDeterminedAbsence()}
+     * withholds an absence from them. This one means the opposite: we know exactly what the page is,
+     * because the HOST says so without anything having to be judged. A business whose only web
+     * presence is a page on Meta's domain has no website of its own, and an absence determined over
+     * that fact asserts nothing the evidence does not already state.
+     */
+    public const REJECTED_PLATFORM = 'platform_hosted';
+
     /** Where a candidate came from. Varchar-backed so a new tier needs no migration. */
     public const SOURCE_OSM_TAG = 'osm_tag';
 
@@ -62,6 +78,14 @@ class LeadWebsiteCandidate extends Model
     public const SOURCE_AI = 'ai';
 
     public const SOURCE_MANUAL = 'manual';
+
+    /**
+     * The URL the lead itself was carrying, refiled here when the ordinary audit conclusively refused
+     * it. Not a tier — nothing searched for it, so it never joins `tiers_run` and can never help an
+     * exhaustion claim; it records WHAT WAS ALREADY TRIED so the trail does not lose a URL the
+     * provider once asserted.
+     */
+    public const SOURCE_AUDIT = 'audit';
 
     /** @return list<string> */
     public static function sources(): array

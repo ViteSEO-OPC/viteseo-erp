@@ -122,7 +122,67 @@ class OpenAiDiscoveryStrategist implements DiscoveryStrategist
         private readonly NerbyProviderSettingService $settings,
         private readonly ExecutedQueryLedger $ledger,
         private readonly QueryFeedback $feedback,
+        private readonly StrategyOutcomeLog $outcomes,
     ) {}
+
+    /**
+     * Note a consultation that produced no query this search can run.
+     *
+     * WHY BOTH RETURN PATHS CALL THIS. A cached empty plan and a freshly generated one are the same
+     * fact for the run — this target got no usable phrase — so recording only the live path would
+     * hide most of the saturation, a permanently cached question never reaching the model again.
+     * They are marked apart so cost stays readable.
+     *
+     * ONLY WHERE QUERIES WERE ASKED FOR. A plan with no `queries` is not a refusal when queries were
+     * never a requested dialect — on the OpenStreetMap lane that is the correct, complete answer,
+     * and logging it would manufacture an exhaustion signal out of a provider difference.
+     *
+     * @param  array{queries: list<string>}  $strategy
+     * @param  list<string>  $dialects
+     * @param  list<string>  $covered
+     */
+    private function noteEmptyPlan(
+        string $category,
+        string $scope,
+        array $strategy,
+        array $dialects,
+        array $covered,
+        string $source,
+    ): void {
+        if (! in_array(self::DIALECT_QUERIES, $dialects, true) || $strategy['queries'] !== []) {
+            return;
+        }
+
+        $this->outcomes->recordEmptyPlan($category, $scope, $source, $dialects, count($covered));
+    }
+
+    /**
+     * A plan that cannot shape the search it was asked for.
+     *
+     * WHY THIS IS NOT CACHEABLE, THOUGH THE CALL SUCCEEDED. Pinning it closes a loop that cannot
+     * reopen: the plan carries no query, so no phrase executes, so the ledger cannot change, so the
+     * coverage fingerprint in the cache key cannot change — and the same entry answers this target
+     * forever without the model ever being asked again. Measured on run 85: 77 of 100 targets served
+     * by a cached empty plan, every one of them a cache hit, and not one live call among them. It is
+     * the same reason a failure is not cached, applied to a non-answer that happens to arrive with a
+     * 200.
+     *
+     * IT IS JUDGED ON QUERIES, NOT ON EMPTINESS, and the difference is the whole fix. The pinned
+     * entries were not empty — they carried a place type and no queries — and because the category
+     * was in the engine's static type table that place type was discarded before the search. So an
+     * "is the plan empty" test would have matched none of the 77.
+     *
+     * ONLY WHERE QUERIES WERE ASKED FOR. On the OpenStreetMap lane queries are not a requested
+     * dialect and an empty list is the correct, complete answer; refusing to cache it there would
+     * spend a model call on every repeat of a question already answered properly.
+     *
+     * @param  array{queries: list<string>}  $strategy
+     * @param  list<string>  $dialects
+     */
+    private function isUnusable(array $strategy, array $dialects): bool
+    {
+        return in_array(self::DIALECT_QUERIES, $dialects, true) && $strategy['queries'] === [];
+    }
 
     /**
      * @param  list<string>  $knownSelectors
@@ -174,9 +234,12 @@ class OpenAiDiscoveryStrategist implements DiscoveryStrategist
 
         $cached = Cache::get($this->cacheKey($category, $scope, $dialects, $covered, $measured));
         if (is_array($cached)) {
+            $shaped = $this->shape($cached);
+            $this->noteEmptyPlan($category, $scope, $shaped, $dialects, $covered, StrategyOutcomeLog::SOURCE_CACHE);
+
             return [
                 'status' => self::STATUS_OK,
-                'strategy' => $this->shape($cached),
+                'strategy' => $shaped,
                 // Zeroed rather than absent: this call really did cost nothing, which is a different
                 // fact from "cost was not measured".
                 'usage' => [
@@ -320,8 +383,13 @@ class OpenAiDiscoveryStrategist implements DiscoveryStrategist
                 ? $this->strings($decoded['subAreas'] ?? null, self::MAX_SUB_AREAS) : [],
         ]);
 
-        // Only successful answers are cached — a failure must never be pinned in place.
-        Cache::forever($this->cacheKey($category, $scope, $dialects, $covered, $measured), $strategy);
+        // Only successful answers are cached — a failure must never be pinned in place, and a plan
+        // that cannot shape a search is not an answer either. See {@see isUnusable()}.
+        if (! $this->isUnusable($strategy, $dialects)) {
+            Cache::forever($this->cacheKey($category, $scope, $dialects, $covered, $measured), $strategy);
+        }
+
+        $this->noteEmptyPlan($category, $scope, $strategy, $dialects, $covered, StrategyOutcomeLog::SOURCE_LIVE);
 
         return [
             'status' => self::STATUS_OK,

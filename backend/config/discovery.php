@@ -228,6 +228,57 @@ return [
     ],
 
     /*
+     * ── AI WEBSITE AUDIT ───────────────────────────────────────────────────────────────────────
+     *
+     * Whether the optional AI layer may reason about an AMBIGUOUS website-identity verdict — one
+     * strong signal that nothing corroborated, which the lexical verifier must leave unconfirmed but
+     * a reader often would not. Measured on this pool: 205 leads in exactly that band.
+     *
+     * ITS OWN SWITCH, SEPARATE FROM `ai_strategy`, and that separation is the point rather than
+     * tidiness. The strategist is asked once per discovery TASK; this is asked once per LEAD, so it
+     * is by far the higher-volume caller and has to be affordable to turn off on its own. Both draw
+     * on the one credential in `crm_nerby_provider_settings`, so without a second switch enabling
+     * website auditing would quietly spend the discovery budget.
+     *
+     * ADVISORY, AND THAT IS ENFORCED ELSEWHERE. Turning this on cannot change a `website_status`, a
+     * score or a priority: the adjudicator returns evidence, never a verdict, and nothing consumes
+     * it. See Services/Website/LlmIdentityAdjudicator.
+     *
+     * OFF BY DEFAULT, like every other optional capability here — it spends money, so switching it
+     * on is a deliberate operational act.
+     */
+    'website_audit' => [
+        /*
+         * BEFORE THIS IS TURNED ON IN PRODUCTION: verify the CURRENT OpenRouter privacy, data
+         * retention and training / data-use terms that apply to API traffic.
+         *
+         * Real business names, cities and page text leave our infrastructure when this is true. No
+         * assumption is made here about what the provider keeps or trains on, and none should be
+         * inherited from a previous reading of their terms — it is an external dependency whose
+         * policy can change without us. The default is false so the check cannot be skipped by
+         * accident, and flipping it is the moment to make it.
+         */
+        'enabled' => (bool) env('DISCOVERY_WEBSITE_AI_AUDIT', false),
+
+        /*
+         * NOT the strategist's 8s. That timeout is tight because the strategist sits in front of a
+         * search the user is waiting on; this runs inside a background enrichment tick where a slow
+         * answer costs nothing but the tick's own budget, and an 8s ceiling on a reasoned answer
+         * would turn ordinary latency into a stream of `unreachable`.
+         */
+        'timeout' => (float) env('DISCOVERY_WEBSITE_AI_TIMEOUT', 25),
+
+        /* One classification, one short sentence. Anything longer is not the contract. */
+        'max_tokens' => (int) env('DISCOVERY_WEBSITE_AI_MAX_TOKENS', 200),
+
+        /*
+         * How long one answer is reused for identical evidence. Keyed on the evidence itself, so a
+         * page that changed is a different question and is asked again regardless of this.
+         */
+        'cache_ttl' => (int) env('DISCOVERY_WEBSITE_AI_CACHE_TTL', 604800),
+    ],
+
+    /*
      * Wall clock for one enrichment sub-command. Longer than a single discovery task because a tick
      * crawls up to `audit_limit` sites in sequence; the scheduler's own overlap guard means a slow
      * tick delays the next one rather than stacking with it.
@@ -322,5 +373,23 @@ return [
          * exhausted. Raising this buys deeper pages per request and makes truncation a weaker signal.
          */
         'limit_per_task' => (int) env('DISCOVERY_NATIONWIDE_LIMIT_PER_TASK', 20),
+
+        /*
+         * ORDER THE TILING BY WHAT HAS ALREADY BEEN SEARCHED, instead of by latitude.
+         *
+         * The cells are emitted from the southern edge of the national extent upward, and the island
+         * groups are interleaved so a truncated plan stays national in character. That balances the
+         * three groups against each other; it does not balance latitude inside any of them. A budget
+         * that cannot afford all 736 cells therefore buys the southern part of the country and calls
+         * it nationwide — measured on run 89, 600 tasks reached 91 cells and never crossed 13.16°N,
+         * while the same southern squares were swept again and Northern Luzon was never searched.
+         *
+         * Turning this on puts the cells nobody has searched for the requested niche first. It
+         * changes ORDER ONLY: the same cells, the same count, the same groups, the same geometry.
+         *
+         * DEFAULT OFF, because it is being validated against run 89 as its control and a reordering
+         * of where a paid sweep goes should be switched on deliberately rather than inherited.
+         */
+        'coverage_ordering' => (bool) env('DISCOVERY_COVERAGE_ORDERING', false),
     ],
 ];

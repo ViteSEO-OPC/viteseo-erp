@@ -3,7 +3,11 @@
 namespace Tests\Feature\Crm;
 
 use App\Models\User;
+use App\Modules\Crm\Enums\NerbyProvider;
 use App\Modules\Crm\Models\Lead;
+use App\Modules\Crm\Models\NerbyProviderSetting;
+use App\Modules\Crm\Services\Discovery\AiChatEndpoint;
+use App\Modules\Crm\Services\Discovery\NerbyProviderSettingService;
 use App\Modules\Crm\Services\Website\LlmIdentityAdjudicator;
 use App\Modules\Crm\Services\WebsiteIdentityVerifier;
 use Database\Seeders\RolesAndPermissionsSeeder;
@@ -34,7 +38,7 @@ class WebsiteIdentityAdjudicationTest extends TestCase
     use ActsAsNerbyService;
     use RefreshDatabase;
 
-    private const ENDPOINT = 'https://api.openai.com/v1/chat/completions';
+    private const ENDPOINT = AiChatEndpoint::OPENROUTER_BASE_URL.'/chat/completions';
 
     protected function setUp(): void
     {
@@ -43,7 +47,28 @@ class WebsiteIdentityAdjudicationTest extends TestCase
         // LeadFactory resolves `created_by` from an existing user; without one the FK fails.
         User::factory()->create(['status' => 'active']);
 
-        config(['openai.enabled' => true, 'openai.api_key' => 'test-key', 'openai.model' => 'gpt-4o-mini']);
+        // The credential now comes from the encrypted NERBY provider row through AiChatEndpoint,
+        // not from `config('openai.*')` — the website audit and the discovery lanes share ONE store.
+        // `sk-or-` routes to OpenRouter and qualifies the bare model id as `openai/gpt-4o-mini`.
+        $this->enableAi();
+    }
+
+    /** Switch on, credential present, enabled and connection-tested — the usable state. */
+    private function enableAi(bool $enabled = true): void
+    {
+        config(['discovery.website_audit.enabled' => $enabled]);
+
+        NerbyProviderSetting::query()->updateOrCreate(
+            ['provider' => NerbyProvider::OPENAI->value],
+            [
+                'enabled' => true,
+                'api_key' => 'sk-or-v1-'.str_repeat('a', 24),
+                'key_last4' => 'aaaa',
+                'options' => ['model' => 'gpt-4o-mini'],
+                'last_test_status' => NerbyProviderSettingService::TEST_OK,
+                'last_tested_at' => now(),
+            ],
+        );
     }
 
     private function admin(): User
@@ -126,9 +151,11 @@ class WebsiteIdentityAdjudicationTest extends TestCase
         return [
             'choices' => [[
                 'message' => [
+                    // The contract is now a five-state classification; `match` is DERIVED from it
+                    // and kept so this trail stays readable by anything written against it.
                     'content' => json_encode([
-                        'match' => $match,
-                        'ai_confidence' => $aiConfidence,
+                        'classification' => $match ? 'verified' : 'rejected',
+                        'confidence' => $aiConfidence,
                         'reason' => $reason,
                     ]),
                 ],
@@ -163,8 +190,9 @@ class WebsiteIdentityAdjudicationTest extends TestCase
         $this->assertTrue($record['match']);
         $this->assertSame(91, $record['ai_confidence']);
         $this->assertSame('Title and city match after rebrand.', $record['reason']);
-        $this->assertSame('gpt-4o-mini', $record['model']);
-        $this->assertSame(1, $record['prompt_version']);
+        $this->assertSame('verified', $record['classification'], 'the five-state answer is the contract');
+        $this->assertSame('openai/gpt-4o-mini', $record['model'], 'OpenRouter qualifies the bare id');
+        $this->assertSame(LlmIdentityAdjudicator::PROMPT_VERSION, $record['prompt_version']);
         $this->assertSame(210, $record['prompt_tokens']);
         $this->assertSame(24, $record['completion_tokens']);
 
@@ -252,7 +280,8 @@ class WebsiteIdentityAdjudicationTest extends TestCase
 
     public function test_nothing_is_called_and_nothing_changes_when_ai_is_disabled(): void
     {
-        config(['openai.enabled' => false]);
+        // The audit's OWN switch, which is off by default and independent of the discovery one.
+        config(['discovery.website_audit.enabled' => false]);
         Http::fake([self::ENDPOINT => Http::response($this->fakeAnswer(true))]);
 
         ['status' => $status, 'enrichment' => $enrichment] = $this->submit($this->ambiguousLead());
@@ -265,7 +294,8 @@ class WebsiteIdentityAdjudicationTest extends TestCase
 
     public function test_a_missing_api_key_behaves_exactly_like_disabled(): void
     {
-        config(['openai.enabled' => true, 'openai.api_key' => null]);
+        // Switch on, credential gone: the shared capability check refuses it just as firmly.
+        NerbyProviderSetting::query()->where('provider', NerbyProvider::OPENAI->value)->delete();
         Http::fake([self::ENDPOINT => Http::response($this->fakeAnswer(true))]);
 
         ['status' => $status] = $this->submit($this->ambiguousLead());
@@ -366,7 +396,7 @@ class WebsiteIdentityAdjudicationTest extends TestCase
         $lead->forceFill(['qualified_at' => now()])->saveQuietly();
 
         $frozenState = function (bool $aiEnabled) use ($lead): array {
-            config(['openai.enabled' => $aiEnabled]);
+            $this->enableAi($aiEnabled);
             Http::fake([self::ENDPOINT => Http::response($this->fakeAnswer(true, 97, 'Confident match.'))]);
 
             ['enrichment' => $enrichment] = $this->submit($lead);
