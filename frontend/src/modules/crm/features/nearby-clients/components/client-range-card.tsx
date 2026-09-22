@@ -12,6 +12,21 @@ const PRIORITY: Record<NearbyPriority, { dot: string; text: string; cls: string 
   low: { dot: "bg-blue-500", text: "Low priority", cls: "text-blue-600" },
 };
 
+/**
+ * WHERE THE BUSINESS CAME FROM, on the row itself.
+ *
+ * Provenance was filterable but never shown, so a board mixing three discovery lanes looked like one
+ * undifferentiated pool. Read from `foundBy`, which the payload already carries — no new request.
+ *
+ * `unknown` draws nothing. A lane this build does not recognise must not be folded into one it does;
+ * saying nothing is the honest rendering of a provenance we cannot name.
+ */
+const FOUND_BY_CHIP: Record<string, string> = {
+  "google-places": "Google Places",
+  "ai-assisted": "AI-assisted · OpenStreetMap",
+  openstreetmap: "OpenStreetMap",
+};
+
 function Chip({ dot, text, cls }: { dot: string; text: string; cls: string }) {
   return (
     <span className={cn("inline-flex items-center gap-1.5 text-xs font-medium", cls)}>
@@ -91,6 +106,13 @@ export function ClientRangeCard({ client, selected, onSelect, onPlanVisit, onDir
       <div className="mt-3 flex flex-wrap items-center gap-3">
         {client.active && <Chip dot="bg-green-500" text="Active" cls="text-green-700" />}
         <Chip dot={p.dot} text={p.text} cls={p.cls} />
+        {FOUND_BY_CHIP[client.foundBy] !== undefined && (
+          <Chip
+            dot="bg-slate-400"
+            text={FOUND_BY_CHIP[client.foundBy]}
+            cls="text-muted-foreground"
+          />
+        )}
         {client.qualified && (
           <Chip dot="bg-muted-foreground" text="Already added to CRM" cls="text-muted-foreground" />
         )}

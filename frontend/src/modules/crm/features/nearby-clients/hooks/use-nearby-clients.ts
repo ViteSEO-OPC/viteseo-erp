@@ -279,15 +279,27 @@ function formatPriority(priority: string): string {
 
 // Discovery lanes, baseline first. Like PRIORITY_ORDER this is a CLOSED vocabulary the server
 // decides, not a set derived from whatever the pool currently contains.
-const FOUND_BY_ORDER = ["OpenStreetMap", "AI-assisted", "Google Places"] as const;
+const FOUND_BY_ORDER = ["OpenStreetMap", "AI-assisted · OpenStreetMap", "Google Places"] as const;
 
 // Server lane value → readable label. EXPLICIT, with no catch-all: a lane this build does not know
 // must stay visibly distinct rather than being folded into OpenStreetMap, which would credit the
 // deterministic sweep with a lead it never found. "Unknown" is deliberately absent from
 // FOUND_BY_ORDER, so such a row is never selectable by lane but still appears under "All sources".
+//
+// TWO DIMENSIONS IN ONE LABEL, and only where the record carries both. The AI lane's businesses are
+// OpenStreetMap nodes reached through AI-proposed searches, so "AI-assisted" alone read as though AI
+// were itself the factual source; naming the source keeps this answering "where did the business
+// come from".
+//
+// THERE IS DELIBERATELY NO "AI-assisted · Google Places". A Google lead carries no per-lead record of
+// whether AI shaped the search that found it — `foundBy` is derived from `leads.source` alone, and
+// `crm_leads` has no strategy or run column. The only AI fact available is the RUN's `ai_outcome`,
+// which rises to `applied` on the first AI-planned search and never comes back down: run 85 read
+// `applied` while 23% of its targets were AI-planned. Labelling Google leads from it would be wrong
+// about roughly three in four. Factual attribution is kept instead of an invented one.
 const FOUND_BY_LABELS: Record<string, string> = {
   openstreetmap: "OpenStreetMap",
-  "ai-assisted": "AI-assisted",
+  "ai-assisted": "AI-assisted · OpenStreetMap",
   "google-places": "Google Places",
 };
 

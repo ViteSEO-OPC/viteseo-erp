@@ -777,7 +777,7 @@ const aiRun = (status: DiscoveryRun["status"], ai: DiscoveryRun["ai"], isTermina
 
   // The factual row reads the PROVIDER, never the engine name.
   if (!dialog.includes("{providerLabel(provider.effective)}")) bad.push("the run's factual row no longer reads provider.effective");
-  if (!/openai: "AI-assisted OpenStreetMap"/.test(types)) bad.push("the openai lane label no longer names its factual source");
+  if (!/openai: "AI-assisted · OpenStreetMap"/.test(types)) bad.push("the openai lane label no longer names its factual source");
 
   // The engine name is one constant, not a word retyped per surface.
   if (!dialog.includes("AI_ENGINE_NAME")) bad.push("the dialog hard-codes the engine name instead of using AI_ENGINE_NAME");
@@ -786,6 +786,61 @@ const aiRun = (status: DiscoveryRun["status"], ai: DiscoveryRun["ai"], isTermina
   if (/google_places:\s*"[^"]*(OpenAI|AI-assisted)/.test(types)) bad.push("Google Places is labelled as an AI source");
 
   report("AA the AI engine and the factual source are named separately", 7 - bad.length, 7, bad);
+}
+
+// ── AB  the board names provenance, and never invents it ─────────────────────────────────────
+//
+// The Nearby board mixes three discovery lanes and used to show none of them. It now names each on
+// the row — and, just as importantly, refuses to name one it cannot know: a Google lead carries no
+// per-lead record of whether AI shaped the search that found it, so there is no "AI-assisted · Google
+// Places". These assertions keep both halves of that: the lanes we CAN name stay named, and the one
+// we cannot stays unclaimed.
+{
+  const bad: string[] = [];
+  const hook = readFileSync(
+    new URL("../../src/modules/crm/features/nearby-clients/hooks/use-nearby-clients.ts", import.meta.url),
+    "utf8",
+  );
+  const card = readFileSync(
+    new URL("../../src/modules/crm/features/nearby-clients/components/client-range-card.tsx", import.meta.url),
+    "utf8",
+  );
+
+  // ONE VOCABULARY. The board and the run panel must not name the same lane two ways.
+  if (!/"ai-assisted": "AI-assisted · OpenStreetMap"/.test(hook)) bad.push("the board no longer names the AI lane's factual source");
+  if (/"ai-assisted": "AI-assisted",/.test(hook)) bad.push("the bare 'AI-assisted' label is back on the board");
+
+  // NEVER INVENTED. No surface may claim AI shaped a Google lead; the data cannot say so.
+  // Tested against CODE ONLY, with comments stripped: the documentation explaining why this label
+  // does not exist has to be able to name it, and two earlier drafts of this gate failed on their
+  // own prose before this stripping was added.
+  const code = (text: string): string =>
+    text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  const inventedGoogleAi = /["']AI-assisted[^"']*Google Places["']/;
+  if (inventedGoogleAi.test(code(hook))) bad.push("the board invents AI attribution for Google Places leads");
+  if (inventedGoogleAi.test(code(card))) bad.push("the card invents AI attribution for Google Places leads");
+
+  // Provenance is shown on the row, from data the payload already carries.
+  if (!/FOUND_BY_CHIP/.test(card)) bad.push("the card no longer shows where the business came from");
+  if (!/client\.foundBy/.test(card)) bad.push("the card's provenance chip no longer reads foundBy");
+
+  // PROVENANCE IS ADDITIVE. The chip was added BESIDE the priority chip, and the priority vocabulary
+  // is deliberately untouched: High / Medium / Low stays the name of the derived prospecting
+  // priority on every surface. An earlier draft renamed `high` to "Website opportunity" on the card
+  // and in the intel panel; that conflated a descriptive signal with the priority label and was
+  // reverted. These assertions keep the priority labels intact on both surfaces that render them.
+  const panel = readFileSync(
+    new URL("../../src/modules/crm/features/nearby-clients/components/website-intel-panel.tsx", import.meta.url),
+    "utf8",
+  );
+  if (!/text: "High priority"/.test(card)) bad.push("the card no longer labels the derived priority 'High priority'");
+  if (!/label: "High priority"/.test(panel)) bad.push("the intel panel no longer labels the derived priority 'High priority'");
+
+  // The FILTER vocabulary is what a selected value is COMPARED against by formatPriority(), so a
+  // renamed option would silently match nothing. This guards it staying put.
+  if (!/PRIORITY_ORDER = \["High", "Medium", "Low"\]/.test(hook)) bad.push("the priority filter vocabulary changed, which silently breaks filtering");
+
+  report("AB the board names provenance and never invents it", 9 - bad.length, 9, bad);
 }
 
 console.log(failed === 0 ? "\nAll gates passed." : `\n${failed} gate(s) FAILED.`);
