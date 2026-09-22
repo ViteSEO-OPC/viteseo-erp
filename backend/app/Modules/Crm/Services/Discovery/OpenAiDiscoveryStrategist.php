@@ -122,7 +122,39 @@ class OpenAiDiscoveryStrategist implements DiscoveryStrategist
         private readonly NerbyProviderSettingService $settings,
         private readonly ExecutedQueryLedger $ledger,
         private readonly QueryFeedback $feedback,
+        private readonly StrategyOutcomeLog $outcomes,
     ) {}
+
+    /**
+     * Note a consultation that produced no query this search can run.
+     *
+     * WHY BOTH RETURN PATHS CALL THIS. A cached empty plan and a freshly generated one are the same
+     * fact for the run — this target got no usable phrase — so recording only the live path would
+     * hide most of the saturation, a permanently cached question never reaching the model again.
+     * They are marked apart so cost stays readable.
+     *
+     * ONLY WHERE QUERIES WERE ASKED FOR. A plan with no `queries` is not a refusal when queries were
+     * never a requested dialect — on the OpenStreetMap lane that is the correct, complete answer,
+     * and logging it would manufacture an exhaustion signal out of a provider difference.
+     *
+     * @param  array{queries: list<string>}  $strategy
+     * @param  list<string>  $dialects
+     * @param  list<string>  $covered
+     */
+    private function noteEmptyPlan(
+        string $category,
+        string $scope,
+        array $strategy,
+        array $dialects,
+        array $covered,
+        string $source,
+    ): void {
+        if (! in_array(self::DIALECT_QUERIES, $dialects, true) || $strategy['queries'] !== []) {
+            return;
+        }
+
+        $this->outcomes->recordEmptyPlan($category, $scope, $source, $dialects, count($covered));
+    }
 
     /**
      * @param  list<string>  $knownSelectors
@@ -174,9 +206,12 @@ class OpenAiDiscoveryStrategist implements DiscoveryStrategist
 
         $cached = Cache::get($this->cacheKey($category, $scope, $dialects, $covered, $measured));
         if (is_array($cached)) {
+            $shaped = $this->shape($cached);
+            $this->noteEmptyPlan($category, $scope, $shaped, $dialects, $covered, StrategyOutcomeLog::SOURCE_CACHE);
+
             return [
                 'status' => self::STATUS_OK,
-                'strategy' => $this->shape($cached),
+                'strategy' => $shaped,
                 // Zeroed rather than absent: this call really did cost nothing, which is a different
                 // fact from "cost was not measured".
                 'usage' => [
@@ -322,6 +357,8 @@ class OpenAiDiscoveryStrategist implements DiscoveryStrategist
 
         // Only successful answers are cached — a failure must never be pinned in place.
         Cache::forever($this->cacheKey($category, $scope, $dialects, $covered, $measured), $strategy);
+
+        $this->noteEmptyPlan($category, $scope, $strategy, $dialects, $covered, StrategyOutcomeLog::SOURCE_LIVE);
 
         return [
             'status' => self::STATUS_OK,
