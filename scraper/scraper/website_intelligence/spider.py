@@ -48,7 +48,24 @@ class WebsiteAuditSpider(scrapy.Spider):
                 callback=self.parse,
                 errback=self.on_error,
                 headers=headers,
-                meta={"lead_id": item["id"], "handle_httpstatus_all": True},
+                meta={
+                    "lead_id": item["id"],
+                    # 4xx/5xx MUST reach parse(), so a broken homepage is recorded as
+                    # reachable-but-broken rather than dropped by HttpErrorMiddleware.
+                    #
+                    # IT MUST NOT BE `handle_httpstatus_all`, AND THAT IS THE WHOLE POINT OF THE
+                    # LIST. That flag is the first condition RedirectMiddleware tests, and it
+                    # returns the 3xx before it ever reads `Location` — so REDIRECT_ENABLED and
+                    # REDIRECT_MAX_TIMES below were dead letters, every `http` -> `https` upgrade
+                    # was audited as its own redirect stub, and the title recorded for the business
+                    # was "301 Moved Permanently". Measured on the live pool at the time of the fix:
+                    # 225 of 469 audits ended on a 3xx and never saw the page they were auditing.
+                    #
+                    # Naming only the error range leaves 3xx to RedirectMiddleware and changes
+                    # nothing else: HttpErrorMiddleware honours a meta `handle_httpstatus_list`
+                    # exactly as it honours the blanket flag.
+                    "handle_httpstatus_list": list(range(400, 600)),
+                },
                 dont_filter=True,
             )
 

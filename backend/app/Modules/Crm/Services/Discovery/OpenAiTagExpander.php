@@ -74,6 +74,17 @@ class OpenAiTagExpander implements TagExpander
      */
     public const ALLOWED_KEYS = ['shop', 'amenity', 'tourism', 'office', 'leisure', 'craft', 'healthcare'];
 
+    /**
+     * THIS PROMPT'S OWN VERSION, in the cache key beside the trust boundary's.
+     *
+     * The key already carried NerbyTrustBoundary::VERSION, which covers the shared security text —
+     * but not this lane's own wording. So improving the question could not invalidate the answers
+     * cached under the worse one without bumping a constant shared by the proposal and strategy
+     * lanes too, which would needlessly discard their caches. Bump this on any change to
+     * SYSTEM_PROMPT.
+     */
+    public const PROMPT_VERSION = '2026-09-21.1';
+
     /** A tag value: the engine's own pattern (tag_expansion.py VALUE_PATTERN), bounded. */
     private const VALUE_PATTERN = '/^[a-z][a-z0-9_]{0,59}$/';
 
@@ -101,7 +112,7 @@ class OpenAiTagExpander implements TagExpander
 
         // A CACHED ANSWER IS RETURNED WITHOUT A CALL. Only successful answers are ever cached — see
         // the write below — so this can never pin a failure in place.
-        $cached = Cache::get(self::cacheKey($category));
+        $cached = Cache::get(self::cacheKey($category, $known));
         if (is_array($cached)) {
             return [
                 'status' => self::STATUS_OK,
@@ -184,7 +195,7 @@ class OpenAiTagExpander implements TagExpander
         // ONLY SUCCESS IS CACHED, and it is cached forever. Caching a failure would turn a transient
         // outage into a permanent "this category has no other tags", which is exactly the confusion
         // the status vocabulary exists to prevent.
-        Cache::forever(self::cacheKey($category), $selectors);
+        Cache::forever(self::cacheKey($category, $known), $selectors);
 
         return [
             'status' => self::STATUS_OK,
@@ -198,23 +209,75 @@ class OpenAiTagExpander implements TagExpander
         ];
     }
 
-    /** Drop a category's cached expansion so the next call re-asks. The only way an answer changes. */
-    public static function forget(string $category): void
+    /**
+     * Drop a category's cached expansion so the next call re-asks. The only way an answer changes.
+     *
+     * TAKES THE SAME ALREADY-COVERED SET THE CALL USED, because that set is part of the key. Calling
+     * this with a different one forgets a different entry — which is the point: the entries are
+     * genuinely distinct answers, not one answer with an incidental label.
+     *
+     * @param  list<string>  $knownSelectors
+     */
+    public static function forget(string $category, array $knownSelectors = []): void
     {
-        Cache::forget(self::cacheKey(UntrustedText::clean($category, self::MAX_CATEGORY_LENGTH)));
+        Cache::forget(self::cacheKey(
+            UntrustedText::clean($category, self::MAX_CATEGORY_LENGTH),
+            $knownSelectors,
+        ));
     }
 
     /**
-     * Keyed by the TRUST-BOUNDARY VERSION and the ORG as well as the category. The version means a
-     * hardened prompt cannot be bypassed by answers cached under an older one; the org means one
-     * tenant's cached answer is never replayed to another.
+     * Keyed by the TRUST-BOUNDARY VERSION, the ORG, the ALREADY-COVERED SET and the category.
+     *
+     * The version means a hardened prompt cannot be bypassed by answers cached under an older one;
+     * the org means one tenant's cached answer is never replayed to another.
+     *
+     * THE COVERED SET IS IN THE KEY BECAUSE IT IS PART OF THE QUESTION. The prompt tells the model
+     * which selectors are already covered and asks for ADDITIONAL ones only, so the same category
+     * asked with a different covered set is a different question with a legitimately different
+     * answer. Without it the first caller's answer was replayed to every later one — observed in
+     * practice: a diagnostic call made with no covered set cached an answer consisting solely of
+     * the baseline's own selectors, and that useless answer was then served to the real discovery
+     * lane, which had asked the narrower question and would have got usable alternatives. The
+     * entries are distinct answers, not one answer under an incidental label.
+     *
+     * Same fingerprint shape the strategist's coverage ledger uses: sorted, sha1, 12 chars, with an
+     * empty set named rather than hashed so an unconstrained ask is obvious in a key.
+     *
+     * @param  list<string>  $known  already-covered selectors, as sent to the model
      */
-    private static function cacheKey(string $category): string
+    private static function cacheKey(string $category, array $known = []): string
     {
         return self::CACHE_PREFIX
             .NerbyTrustBoundary::VERSION.'|'
+            .'p'.self::PROMPT_VERSION.'|'
             .'org:'.(CurrentOrg::id() ?? 'none').'|'
+            .'covered:'.self::coveredFingerprint($known).'|'
             .mb_strtolower($category);
+    }
+
+    /**
+     * A deterministic, order-independent fingerprint of the already-covered set.
+     *
+     * @param  list<string>  $known
+     */
+    private static function coveredFingerprint(array $known): string
+    {
+        $normalized = [];
+        foreach ($known as $selector) {
+            if (is_string($selector) && ($clean = mb_strtolower(trim($selector))) !== '') {
+                $normalized[$clean] = true;
+            }
+        }
+
+        if ($normalized === []) {
+            return 'none';
+        }
+
+        $sorted = array_keys($normalized);
+        sort($sorted);
+
+        return substr(sha1(implode("\n", $sorted)), 0, 12);
     }
 
     /**

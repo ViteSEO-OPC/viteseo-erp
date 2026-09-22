@@ -337,3 +337,118 @@ def test_spider_start_yields_every_request_after_a_malformed_value_is_filtered()
         return [request.url async for request in WebsiteAuditSpider(queue=queue).start()]
 
     assert asyncio.run(drain()) == ["https://good-one.com", "https://good-two.com"]
+
+
+# --- redirect handling: the audit must assess the page, not the redirect stub ----------------
+
+
+def _audit_request(url: str = "http://www.southstardrug.com.ph/"):
+    """The REAL request the spider emits, so these assertions cannot drift from it."""
+    import asyncio
+
+    from scraper.website_intelligence.spider import WebsiteAuditSpider
+
+    async def drain():
+        return [r async for r in WebsiteAuditSpider(queue=[{"id": "1", "website": url}]).start()]
+
+    return asyncio.run(drain())[0]
+
+
+def _redirect_middleware():
+    from scrapy.downloadermiddlewares.redirect import RedirectMiddleware
+    from scrapy.utils.test import get_crawler
+
+    from scraper.website_intelligence.spider import WebsiteAuditSpider
+
+    crawler = get_crawler(WebsiteAuditSpider)
+    crawler.spider = WebsiteAuditSpider(queue=[])
+
+    return RedirectMiddleware.from_crawler(crawler)
+
+
+def test_the_audit_spider_does_not_disable_redirect_following():
+    """`handle_httpstatus_all` is the FIRST condition RedirectMiddleware tests, and it returns the
+    3xx before reading `Location`. Setting it made REDIRECT_ENABLED and REDIRECT_MAX_TIMES dead
+    letters and audited every http -> https upgrade as its own redirect stub."""
+    assert "handle_httpstatus_all" not in _audit_request().meta
+
+
+def test_the_audit_spider_still_handles_every_error_status_itself():
+    """The reason the blanket flag was there: a broken homepage must reach parse() and be recorded
+    as reachable-but-broken, not dropped by HttpErrorMiddleware. Naming the error range keeps that
+    exactly as it was."""
+    handled = _audit_request().meta["handle_httpstatus_list"]
+
+    assert set(range(400, 600)) <= set(handled)
+    # …and the redirect range is deliberately NOT claimed, so the middleware still owns it.
+    assert not set(range(300, 400)) & set(handled)
+
+
+def test_a_redirect_is_followed_instead_of_being_audited_as_the_page():
+    """The whole bug, end to end: a 301 must become a new Request for the destination, never a
+    Response handed to parse() and scraped for its `<title>301 Moved Permanently</title>`."""
+    request = _audit_request()
+    response = scrapy.http.Response(
+        request.url,
+        status=301,
+        headers={"Location": "https://www.southstardrug.com.ph/"},
+        body=b"<html><head><title>301 Moved Permanently</title></head><body></body></html>",
+    )
+
+    result = _redirect_middleware().process_response(request, response)
+
+    assert isinstance(result, scrapy.Request), "a 3xx must be followed, not delivered to parse()"
+    assert result.url == "https://www.southstardrug.com.ph/"
+
+
+def test_the_previous_meta_would_have_delivered_the_stub_to_parse():
+    """The negative control. Without it the test above could pass for reasons unrelated to the
+    flag — this pins that the flag is what was doing the damage."""
+    request = _audit_request().replace(meta={"lead_id": "1", "handle_httpstatus_all": True})
+    response = scrapy.http.HtmlResponse(
+        request.url,
+        status=301,
+        headers={"Location": "https://www.southstardrug.com.ph/"},
+        body=b"<html><head><title>301 Moved Permanently</title></head><body></body></html>",
+        encoding="utf-8",
+    )
+
+    result = _redirect_middleware().process_response(request, response)
+
+    assert isinstance(result, scrapy.http.Response)
+    assert build_audit(result.text, result.url, result.status)["website_title"] == "301 Moved Permanently"
+
+
+def test_a_followed_redirect_is_still_checked_by_the_ssrf_guard(monkeypatch):
+    """Following redirects must not widen the network boundary. The hop re-enters the chain as a
+    new Request, so the downloader middleware validates the DESTINATION before any connection."""
+    import socket
+
+    from scrapy.exceptions import IgnoreRequest
+
+    from scraper import net_guard
+    from scraper.net_guard import SafeUrlDownloaderMiddleware
+
+    # A public answer for any name, so the safe hop is judged on policy rather than on whether the
+    # test machine has DNS. The hostile hop below is a literal address and never reaches a resolver.
+    # Signature mirrors socket.getaddrinfo, as net_guard calls it with `port` and `type`.
+    def resolve(host, port, type=0, **_):  # noqa: A002 - mirrors socket.getaddrinfo
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", port))]
+
+    monkeypatch.setattr(net_guard, "RESOLVE", resolve)
+
+    guard = SafeUrlDownloaderMiddleware()
+    request = _audit_request()
+
+    safe = _redirect_middleware().process_response(
+        request,
+        scrapy.http.Response(request.url, status=301, headers={"Location": "https://shop.example/"}),
+    )
+    assert guard.process_request(safe) is None
+
+    hostile = _redirect_middleware().process_response(
+        request,
+        scrapy.http.Response(request.url, status=302, headers={"Location": "http://169.254.169.254/latest/meta-data/"}),
+    )
+    with pytest.raises(IgnoreRequest):
+        guard.process_request(hostile)
