@@ -140,14 +140,36 @@ export function aiOutcomeMessage(
     : "AI planning requested — results are reported when the searches finish.";
 }
 
-/** A short label for the AI row in the run panel. */
+/**
+ * THE AI ENGINE, NAMED. One product name for the intelligence lane, used by every surface that has
+ * to say which AI is involved.
+ *
+ * OpenRouter is a routing detail of the credential, not a product identity: {@see AiChatEndpoint}
+ * picks the base URL from the key prefix, and the settings card has always called this lane OpenAI.
+ * Naming it here keeps the three surfaces from drifting into three different words for one thing.
+ */
+export const AI_ENGINE_NAME = "OpenAI";
+
+/**
+ * A short label for the AI ENGINE row in the run panel.
+ *
+ * IT NAMES THE ENGINE, NEVER THE DATA. This answers "which AI planned these searches" — a different
+ * question from "where did the businesses come from", which the Business data source row beside it
+ * answers from `provider.effective`. Saying OpenAI here adds the attribution that was missing; it
+ * does not move, rename or dilute Google Places' provenance, and no lead's `source` is involved in
+ * this string at any point.
+ *
+ * THE STATE TRAVELS WITH THE NAME rather than replacing it, so a run that asked for AI and did not
+ * get it still reads as an OpenAI row that did not apply — not as an absent engine. The four states
+ * and the null (an ordinary run shows no AI row at all) are exactly the ones this returned before.
+ */
 export function aiOutcomeLabel(run: Pick<DiscoveryRun, "ai" | "isTerminal"> | undefined): string | null {
   const ai = run?.ai;
   if (ai === undefined || (!ai.requested && ai.outcome !== "applied")) return null;
 
-  if (ai.outcome === "applied") return "Applied";
-  if (ai.outcome === "insufficient_credit") return "No AI credit";
-  return run?.isTerminal === true ? "Not applied" : "Requested";
+  if (ai.outcome === "applied") return AI_ENGINE_NAME;
+  if (ai.outcome === "insufficient_credit") return `${AI_ENGINE_NAME} — no credit`;
+  return run?.isTerminal === true ? `${AI_ENGINE_NAME} — not applied` : `${AI_ENGINE_NAME} — requested`;
 }
 
 /**
