@@ -2,6 +2,9 @@
 
 namespace App\Modules\Crm\Services\Discovery\Geo;
 
+use App\Modules\Crm\Services\Discovery\CoverageLedger;
+use Illuminate\Support\Facades\Log;
+
 /**
  * NATIONWIDE = THE POLYGON, TILED. Never a city list.
  *
@@ -56,7 +59,82 @@ class NationwidePlanner
     /** @var list<array{group: string, bbox: array{0: float, 1: float, 2: float, 3: float}}>|null */
     private ?array $landmasses = null;
 
-    public function __construct(private readonly PhilippinesBoundary $boundary) {}
+    public function __construct(
+        private readonly PhilippinesBoundary $boundary,
+        /**
+         * Coverage evidence, when this deployment has it.
+         *
+         * OPTIONAL BY CONSTRUCTION. Null is a supported state, not a degraded one: the planner's job
+         * is to produce the cells, and it produced them correctly for every run before this reader
+         * existed. Anything that cannot be answered leaves the order exactly as it was.
+         *
+         * NULLABLE BUT WITHOUT A DEFAULT, deliberately. A nullable parameter that also has a default
+         * is never injected — the container takes the default and the reader silently stays null,
+         * which is exactly how this arrived with ordering that could never activate. Requiring the
+         * argument makes the container resolve it and makes every caller state its intent.
+         */
+        private readonly ?CoverageLedger $coverage,
+    ) {}
+
+    /**
+     * Put the ground nobody has covered first, without changing what the ground is.
+     *
+     * WHAT THIS FIXES. The tiling is emitted from the southern edge upward, and the group interleave
+     * balances Luzon, Visayas and Mindanao against each other but not latitude within any of them. So
+     * a budget short of the whole country buys the southern part of it: run 89 spent 600 tasks on 91
+     * cells and stopped at 13.16°N, having re-swept the same southern squares while Central and
+     * Northern Luzon were never searched at all.
+     *
+     * IT REORDERS AND NOTHING ELSE. Same cells, same count, same groups, same geometry — a stable
+     * sort inside each group's bucket, so cells sharing a tier keep the order they already had. With
+     * no evidence every cell is tier 0 and the sort is an identity: the plan is byte-identical to the
+     * one this method was added to.
+     *
+     * THE TIER IS THE MINIMUM ACROSS THE REQUESTED NICHES, because coverage is per (cell, category).
+     * A square swept for pharmacies has not been searched for printing shops, and a run asking for
+     * both should treat it as unexplored — the alternative lets one niche's history suppress
+     * another's exploration.
+     *
+     * @param  list<array{group: string, area: string, bbox: array{0: float, 1: float, 2: float, 3: float}}>  $cells
+     * @param  list<string>  $niches
+     * @return list<array{group: string, area: string, bbox: array{0: float, 1: float, 2: float, 3: float}}>
+     */
+    private function orderByCoverage(array $cells, array $niches, float $cellDegrees): array
+    {
+        if ($this->coverage === null || $niches === [] || ! config('discovery.nationwide.coverage_ordering', false)) {
+            return $cells;
+        }
+
+        try {
+            $evidence = [];
+            foreach ($niches as $niche) {
+                $evidence[] = $this->coverage->evidenceFor((string) $niche, $cellDegrees);
+            }
+        } catch (\Throwable $e) {
+            // EVIDENCE IS AN OPTIMISATION, NEVER A PREREQUISITE. A reader that cannot answer must
+            // cost the run its ordering, not the run itself.
+            Log::warning('Coverage ordering skipped; the evidence query failed', [
+                'exception' => $e::class,
+            ]);
+
+            return $cells;
+        }
+
+        $tiers = [];
+        foreach ($cells as $index => $cell) {
+            $best = CoverageLedger::TIER_EXHAUSTED;
+            foreach ($evidence as $perNiche) {
+                $best = min($best, $this->coverage->tier($perNiche, $cell['bbox'][0], $cell['bbox'][1]));
+            }
+            $tiers[$index] = $best;
+        }
+
+        // Stable: the original index breaks every tie, so equal tiers keep their emission order.
+        $order = array_keys($cells);
+        usort($order, static fn (int $a, int $b): int => [$tiers[$a], $a] <=> [$tiers[$b], $b]);
+
+        return array_map(static fn (int $i): array => $cells[$i], $order);
+    }
 
     /**
      * Build the ordered cell plan for one nationwide run.
@@ -77,6 +155,13 @@ class NationwidePlanner
         $byGroup = [self::GROUP_LUZON => [], self::GROUP_VISAYAS => [], self::GROUP_MINDANAO => []];
         foreach ($cells as $cell) {
             $byGroup[$cell['group']][] = $cell;
+        }
+
+        // ORDER INSIDE EACH BUCKET, THEN INTERLEAVE EXACTLY AS BEFORE. The round-robin below is what
+        // keeps a truncated plan national in character, so it is left alone; what changes is which
+        // of a group's cells that round-robin reaches first.
+        foreach ($byGroup as $group => $groupCells) {
+            $byGroup[$group] = $this->orderByCoverage($groupCells, $niches, $cellDegrees);
         }
 
         $interleaved = [];

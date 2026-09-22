@@ -373,5 +373,23 @@ return [
          * exhausted. Raising this buys deeper pages per request and makes truncation a weaker signal.
          */
         'limit_per_task' => (int) env('DISCOVERY_NATIONWIDE_LIMIT_PER_TASK', 20),
+
+        /*
+         * ORDER THE TILING BY WHAT HAS ALREADY BEEN SEARCHED, instead of by latitude.
+         *
+         * The cells are emitted from the southern edge of the national extent upward, and the island
+         * groups are interleaved so a truncated plan stays national in character. That balances the
+         * three groups against each other; it does not balance latitude inside any of them. A budget
+         * that cannot afford all 736 cells therefore buys the southern part of the country and calls
+         * it nationwide — measured on run 89, 600 tasks reached 91 cells and never crossed 13.16°N,
+         * while the same southern squares were swept again and Northern Luzon was never searched.
+         *
+         * Turning this on puts the cells nobody has searched for the requested niche first. It
+         * changes ORDER ONLY: the same cells, the same count, the same groups, the same geometry.
+         *
+         * DEFAULT OFF, because it is being validated against run 89 as its control and a reordering
+         * of where a paid sweep goes should be switched on deliberately rather than inherited.
+         */
+        'coverage_ordering' => (bool) env('DISCOVERY_COVERAGE_ORDERING', false),
     ],
 ];
