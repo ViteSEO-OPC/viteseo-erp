@@ -367,6 +367,7 @@
   /* Lead Detail quick-action icon tiles — light mint/cream surfaces become accent-tinted
      panels on dark (the glyph text gets a dark: variant in the component). */
   --qa-tile-teal: rgba(79, 216, 215, 0.12);    /* teal-400 @ 12% */
+  --dropzone-icon-tint: rgba(79, 216, 215, 0.12); /* upload-circle: was #EBF7F8, a white disc on the dark Import dialog */
   --qa-tile-amber: rgba(245, 166, 35, 0.12);   /* #F5A623 @ 12% */
   --qa-icon-teal: var(--teal-400);             /* glyph brightens on dark (was dark:text-teal-400) */
 

@@ -43,7 +43,7 @@ class LastLoginStampTest extends TestCase
         $user = $this->bd();
         $this->assertNull($user->last_login_at, 'precondition: never stamped');
 
-        $this->postJson('/api/v1/auth/login', [
+        $this->fromTheApp()->postJson('/api/v1/auth/login', [
             'email' => $user->email,
             'password' => 'password',
         ])->assertOk();
@@ -58,7 +58,7 @@ class LastLoginStampTest extends TestCase
         $user->forceFill(['last_login_at' => now()->subDays(3)])->saveQuietly();
         $before = $user->fresh()->last_login_at;
 
-        $this->postJson('/api/v1/auth/login', [
+        $this->fromTheApp()->postJson('/api/v1/auth/login', [
             'email' => $user->email,
             'password' => 'password',
         ])->assertOk();
@@ -72,7 +72,7 @@ class LastLoginStampTest extends TestCase
         $user->forceFill(['last_login_at' => now()->subDays(3)])->saveQuietly();
         $before = $user->fresh()->last_login_at;
 
-        $this->postJson('/api/v1/auth/login', [
+        $this->fromTheApp()->postJson('/api/v1/auth/login', [
             'email' => $user->email,
             'password' => 'wrong-password',
         ])->assertStatus(422);
@@ -84,7 +84,7 @@ class LastLoginStampTest extends TestCase
     {
         $this->bd();
 
-        $this->postJson('/api/v1/auth/login', [
+        $this->fromTheApp()->postJson('/api/v1/auth/login', [
             'email' => 'nobody@example.test',
             'password' => 'password',
         ])->assertStatus(422);
@@ -101,7 +101,7 @@ class LastLoginStampTest extends TestCase
         $user = $this->bd();
         $before = (array) DB::table('users')->where('id', $user->id)->first();
 
-        $this->postJson('/api/v1/auth/login', [
+        $this->fromTheApp()->postJson('/api/v1/auth/login', [
             'email' => $user->email,
             'password' => 'password',
         ])->assertOk();
@@ -125,7 +125,7 @@ class LastLoginStampTest extends TestCase
         $user = $this->bd();
         $pivotBefore = DB::table('model_has_roles')->where('model_id', $user->id)->count();
 
-        $this->postJson('/api/v1/auth/login', [
+        $this->fromTheApp()->postJson('/api/v1/auth/login', [
             'email' => $user->email,
             'password' => 'password',
         ])->assertOk();
@@ -140,7 +140,7 @@ class LastLoginStampTest extends TestCase
         $user = $this->bd();
         $before = DB::table('crm_activities')->count();
 
-        $this->postJson('/api/v1/auth/login', [
+        $this->fromTheApp()->postJson('/api/v1/auth/login', [
             'email' => $user->email,
             'password' => 'password',
         ])->assertOk();
@@ -155,7 +155,12 @@ class LastLoginStampTest extends TestCase
         $admin = User::factory()->create(['status' => 'active']);
         $admin->assignRole('crm_admin');
 
-        $this->postJson('/api/v1/auth/login', ['email' => $bd->email, 'password' => 'password'])->assertOk();
+        $this->fromTheApp()->postJson('/api/v1/auth/login', ['email' => $bd->email, 'password' => 'password'])->assertOk();
+
+        // The admin is someone else, on another machine -- not bd's browser, and not
+        // bd's session. Left in place, the Origin would route the admin's request
+        // through the session this process still holds for bd.
+        $this->flushHeaders();
 
         $row = collect(
             $this->actingAs($admin)->getJson('/api/v1/crm/users')->assertOk()->json('data')

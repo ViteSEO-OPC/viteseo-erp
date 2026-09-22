@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Http\Middleware;
 
+use App\Models\User;
 use App\Support\CurrentOrg;
+use App\Support\ServiceTokens;
 use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -25,6 +27,24 @@ class SetCurrentOrg
         $user = $request->user();
 
         if ($user === null || ! method_exists($user, 'currentOrgId')) {
+            return $next($request);
+        }
+
+        /*
+         * A SERVICE TOKEN ACTS FOR THE ORG IT WAS ISSUED FOR, and for no other.
+         *
+         * The service user belongs to no org by design (see ServiceTokens), so without this it
+         * would resolve to nothing and every tenant-scoped callback would fail closed -- which is
+         * the safe failure. The token's own `org:<id>` binding is what makes it work, and it is
+         * honoured ONLY for a registered service role presenting a real personal access token: a
+         * human's token can never choose its tenant. A service user whose token carries no valid
+         * binding is refused rather than allowed to fall through to any other resolution.
+         */
+        if ($user instanceof User && ServiceTokens::token($user) !== null && ServiceTokens::isServiceUser($user)) {
+            $bound = ServiceTokens::boundOrg($user);
+            abort_if($bound === null, 403, 'This service token is not bound to an organization.');
+            CurrentOrg::set($bound);
+
             return $next($request);
         }
 

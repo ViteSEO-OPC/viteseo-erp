@@ -5,9 +5,16 @@ namespace App\Modules\Crm\Services;
 use App\Models\User;
 use App\Modules\Crm\Models\Lead;
 use App\Modules\Crm\Requests\StoreLeadRequest;
+use App\Modules\Crm\Services\Discovery\Geo\PhilippinesBoundary;
+use App\Modules\Crm\Models\LeadWebsiteCandidate;
+use App\Modules\Crm\Services\Website\WebsiteEvidenceService;
+use App\Modules\Crm\Services\Website\WebsiteUrlClassifier;
+use App\Modules\Crm\Services\Import\LeadImportInProgressException;
 use App\Modules\Crm\Services\Import\XlsConverter;
+use App\Support\CurrentOrg;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
@@ -49,6 +56,26 @@ class LeadImportService
      * the name of a new feature (PO decision, 2026-08-14).
      */
     private const NOTE_MAX_LENGTH = 5000;
+
+    /**
+     * Lock key prefix for a lead-import COMMIT, per organization (CEO audit crm-06). A commit reads the
+     * dedup index, classifies the rows and only then writes, so two commits in one organization must not
+     * overlap: the second would read the index before the first had written and create every lead again.
+     * Leads are organization-scoped, so the organization is both the dedup domain and the lock granularity.
+     */
+    public const COMMIT_LOCK_PREFIX = 'crm:lead-import:commit:org:';
+
+    /** A safety net only: a normal commit releases the lock the moment its transaction ends. */
+    private const COMMIT_LOCK_SECONDS = 600;
+
+    /**
+     * Most data rows a single import may carry (CEO audit crm-06). A commit writes about seven statements
+     * per row inside one request and one transaction, so an uncapped 10 MB sheet (~60,000 rows) could hold
+     * the lead tables for minutes and outlive every client and proxy timeout. Enforced while the file is
+     * read — before preview, deduplication, the commit lock or any write — so an over-cap file costs one
+     * bounded read and writes nothing. The header row and wholly blank rows do not count.
+     */
+    public const MAX_IMPORT_ROWS = 5000;
 
     public function __construct(
         private readonly XlsConverter $xls = new XlsConverter,
@@ -245,17 +272,6 @@ class LeadImportService
         // The `string` check is kept; only the length ceiling moves to persist().
         $rules['note'] = ['nullable', 'string'];
 
-        /** @var list<array<string, string>> $newRows */
-        $newRows = [];
-        /** @var array<string, Lead> $toRestore  dedup key => soft-deleted lead to restore */
-        $toRestore = [];
-        /** @var list<array{row: int, email: string}> $duplicates */
-        $duplicates = [];
-        /** @var list<array{row: int, business: string}> $restored */
-        $restored = [];
-        /** @var list<array{row: int, messages: list<string>}> $errors */
-        $errors = [];
-
         // Parse + translate every non-blank row first.
         $parsed = [];
         /** @var array<string, array{field: string, value: string, rows: list<int>}> $unknownAgg */
@@ -276,6 +292,58 @@ class LeadImportService
             $data = $this->translateValues($data, $rowNumber, $unknownAgg);
             $parsed[] = ['rowNumber' => $rowNumber, 'data' => $data];
         }
+
+        // Dedup read → classification → commit is one unit. For a commit it runs under the organization's
+        // import lock, so no other commit can read the dedup index before this one has written. A preview
+        // writes nothing and never takes the lock.
+        [$newRows, $toRestore, $duplicates, $restored, $errors, $importedCount] = $dryRun
+            ? $this->classifyAndCommit($parsed, $rules, $userId, $assignedTo, commit: false)
+            : $this->underCommitLock(fn (): array => $this->classifyAndCommit($parsed, $rules, $userId, $assignedTo, commit: true));
+
+        return [
+            'dryRun' => $dryRun,
+            'fileName' => $file->getClientOriginalName(),
+            'summary' => [
+                'total' => count($parsed),
+                // "valid" = rows that will land as an active lead this import (new + restored), so the
+                // client's "Import N" affordance stays meaningful even for a restore-only file.
+                'valid' => count($newRows) + count($toRestore),
+                'restored' => count($toRestore),
+                'duplicates' => count($duplicates),
+                'errors' => count($errors),
+            ],
+            'mapping' => $this->mappingPreview($header, $map),
+            // Enterprise Smart Header Recognition: named header cells that matched no CRM field, so
+            // the importer can see exactly which spreadsheet columns were ignored (never a failure).
+            'unknownColumns' => $this->unknownColumns($header, $map),
+            'duplicates' => $duplicates,
+            'restored' => $restored,
+            'errors' => $errors,
+            'unknownValues' => $this->formatUnknowns($unknownAgg),
+            'importedCount' => $importedCount,
+        ];
+    }
+
+    /**
+     * Classify the parsed rows against the CRM-wide dedup index and, for a commit, write them. The import
+     * rules are unchanged; they are only gathered here so a commit can run them under {@see underCommitLock()}.
+     *
+     * @param  list<array{rowNumber: int, data: array<string, string>}>  $parsed
+     * @param  array<string, mixed>  $rules
+     * @return array{0: list<array<string, string>>, 1: array<string, Lead>, 2: list<array{row: int, email: string}>, 3: list<array{row: int, business: string}>, 4: list<array{row: int, messages: list<string>}>, 5: int}
+     */
+    private function classifyAndCommit(array $parsed, array $rules, int $userId, ?int $assignedTo, bool $commit): array
+    {
+        /** @var list<array<string, string>> $newRows */
+        $newRows = [];
+        /** @var array<string, Lead> $toRestore  dedup key => soft-deleted lead to restore */
+        $toRestore = [];
+        /** @var list<array{row: int, email: string}> $duplicates */
+        $duplicates = [];
+        /** @var list<array{row: int, business: string}> $restored */
+        $restored = [];
+        /** @var list<array{row: int, messages: list<string>}> $errors */
+        $errors = [];
 
         // CRM-wide, ownership-independent deduplication index (Tier 1 email, Tier 2 business+phone,
         // Tier 3 business+address). Includes soft-deleted leads so a matching archived lead is
@@ -319,7 +387,7 @@ class LeadImportService
         }
 
         $importedCount = 0;
-        if (! $dryRun) {
+        if ($commit) {
             DB::transaction(function () use ($newRows, $userId, $assignedTo, $toRestore, &$importedCount): void {
                 if ($newRows !== []) {
                     $importedCount = $this->persist($newRows, $userId, $assignedTo);
@@ -334,28 +402,37 @@ class LeadImportService
             });
         }
 
-        return [
-            'dryRun' => $dryRun,
-            'fileName' => $file->getClientOriginalName(),
-            'summary' => [
-                'total' => count($parsed),
-                // "valid" = rows that will land as an active lead this import (new + restored), so the
-                // client's "Import N" affordance stays meaningful even for a restore-only file.
-                'valid' => count($newRows) + count($toRestore),
-                'restored' => count($toRestore),
-                'duplicates' => count($duplicates),
-                'errors' => count($errors),
-            ],
-            'mapping' => $this->mappingPreview($header, $map),
-            // Enterprise Smart Header Recognition: named header cells that matched no CRM field, so
-            // the importer can see exactly which spreadsheet columns were ignored (never a failure).
-            'unknownColumns' => $this->unknownColumns($header, $map),
-            'duplicates' => $duplicates,
-            'restored' => $restored,
-            'errors' => $errors,
-            'unknownValues' => $this->formatUnknowns($unknownAgg),
-            'importedCount' => $importedCount,
-        ];
+        return [$newRows, $toRestore, $duplicates, $restored, $errors, $importedCount];
+    }
+
+    /**
+     * Run a commit under the organization's lead-import lock (CEO audit crm-06).
+     *
+     * Taken BEFORE the dedup read and before any transaction opens — the lock row must be visible to other
+     * requests immediately — and released only after the transaction has committed or rolled back. It never
+     * waits: a commit that finds the lock taken is refused, and the same commit succeeds once the other
+     * import has finished.
+     *
+     * @template T
+     *
+     * @param  callable(): T  $commit
+     * @return T
+     *
+     * @throws LeadImportInProgressException
+     */
+    private function underCommitLock(callable $commit): mixed
+    {
+        $lock = Cache::lock(self::COMMIT_LOCK_PREFIX.(CurrentOrg::id() ?? 'none'), self::COMMIT_LOCK_SECONDS);
+
+        if (! $lock->get()) {
+            throw new LeadImportInProgressException;
+        }
+
+        try {
+            return $commit();
+        } finally {
+            $lock->release();
+        }
     }
 
     /**
@@ -368,7 +445,19 @@ class LeadImportService
     private const DISCOVERED_FIELDS = [
         'business_name', 'contact_name', 'email', 'phone', 'industry', 'website_status',
         'region', 'province', 'city', 'latitude', 'longitude', 'place_id', 'source', 'website',
+        // Where a discovered SOCIAL url is filed. The provider does not send these; the normalizer
+        // below routes them here after classifying the single URL the provider does send, so a
+        // Facebook page is kept as a Facebook page instead of being recorded as a website.
+        'facebook', 'instagram',
     ];
+
+    /**
+     * The storage ceiling for `crm_leads.website`, mirroring both the column and the ingest
+     * validator's own `max:2048`. Kept as a named constant because it is a DATA CONTRACT shared by
+     * three places (column, request rule, and the normalizer's defensive drop below) — when they
+     * disagree, a provider URL passes validation and then dies at the INSERT.
+     */
+    private const WEBSITE_MAX_LENGTH = 2048;
 
     /**
      * Programmatic enrichment ingest — lands a batch of normalized, discovered businesses as leads.
@@ -387,20 +476,58 @@ class LeadImportService
      *   importedCount: int
      * }
      */
-    public function ingestDiscovered(array $businesses, int $userId, bool $dryRun): array
+    public function ingestDiscovered(array $businesses, int $userId, bool $dryRun, ?\Closure $identityCheck = null): array
     {
         $total = count($businesses);
 
+        // IDENTITY BEFORE ANYTHING ELSE. A row whose provider identity cannot be vouched for — a
+        // Google place the CRM never returned to this caller, fields that differ from what Google
+        // said, an identity shape no provider produces — is refused here, counted, and never
+        // normalised, deduplicated or stored. See GooglePlacesAttestation.
+        $unverified = 0;
+        if ($identityCheck !== null) {
+            $businesses = array_values(array_filter($businesses, function (array $b) use ($identityCheck, &$unverified): bool {
+                if ($identityCheck($b) === true) {
+                    return true;
+                }
+                $unverified++;
+
+                return false;
+            }));
+        }
+
         /** @var list<array<string, mixed>> $rows */
         $rows = array_map(fn (array $b): array => $this->normalizeDiscovered($b), $businesses);
+
+        // THE NATIONAL BOUNDARY, ENFORCED AT THE ONLY DOOR. Every discovered business enters the CRM
+        // through this method, whichever provider found it and whichever process sent it, so this is
+        // where "Philippines only" is decided — not in the planner that drew the search box, and not
+        // in the engine that made the call. A bounded request is an instruction to a provider; this
+        // is a fact about the business, checked against the vendored national polygon with no
+        // tolerance. A row outside the country is REJECTED and counted, never stored and never
+        // silently dropped. Rows with no coordinates are untouched by this rule: absence of a
+        // position is not evidence of a foreign one, and pre-existing providers legitimately send
+        // businesses without one.
+        $rejected = 0;
+        $rows = array_values(array_filter($rows, function (array $row) use (&$rejected): bool {
+            if (! isset($row['latitude'], $row['longitude'])) {
+                return true;
+            }
+            if ($this->philippines()->contains((float) $row['latitude'], (float) $row['longitude'])) {
+                return true;
+            }
+            $rejected++;
+
+            return false;
+        }));
 
         $existingByPlaceId = $this->existingPlaceIdLeads($rows);
         $existingEmails = $this->existingDiscoveredEmailSet($rows);
 
         /** @var list<array<string, mixed>> $valid */
         $valid = [];
-        /** @var array<int, string> $websiteBackfills  lead id => website */
-        $websiteBackfills = [];
+        /** @var array<int, array{website: string, source: string}> $websiteCandidates  lead id => proposal */
+        $websiteCandidates = [];
         $duplicates = 0;
         $seenPlaceIds = [];
         $seenEmails = [];
@@ -411,10 +538,16 @@ class LeadImportService
             $website = isset($row['website']) && $row['website'] !== '' ? (string) $row['website'] : null;
 
             if ($placeId !== null && (isset($existingByPlaceId[$placeId]) || isset($seenPlaceIds[$placeId]))) {
-                // Existing business — backfill the website URL if the provider now has one and it changed.
+                // Existing business with a different provider URL. NEVER written to `website`
+                // directly: that bypassed Website Intelligence and could replace an audited URL or a
+                // confirmed absence. It is proposed as a candidate instead, and only the identity
+                // verifier can promote it (WebsiteEvidenceService).
                 $existing = $existingByPlaceId[$placeId] ?? null;
                 if ($existing !== null && $website !== null && $existing->website !== $website) {
-                    $websiteBackfills[(int) $existing->id] = $website;
+                    $websiteCandidates[(int) $existing->id] = [
+                        'website' => $website,
+                        'source' => (string) ($row['source'] ?? 'discovery'),
+                    ];
                 }
                 $duplicates++;
 
@@ -437,15 +570,24 @@ class LeadImportService
 
         $importedCount = 0;
         if (! $dryRun) {
-            DB::transaction(function () use ($valid, $userId, $websiteBackfills, &$importedCount): void {
+            DB::transaction(function () use ($valid, $userId, &$importedCount): void {
                 if ($valid !== []) {
                     // assigned_to = null: enrichment never assigns ownership (fit-data provider only).
                     $importedCount = $this->persist($valid, $userId, null);
                 }
-                foreach ($websiteBackfills as $leadId => $website) {
-                    Lead::query()->whereKey($leadId)->update(['website' => $website]);
-                }
             });
+
+            $evidence = app(WebsiteEvidenceService::class);
+            foreach ($websiteCandidates as $leadId => $proposal) {
+                $lead = Lead::query()->find($leadId);
+                if ($lead !== null) {
+                    $evidence->recordCandidates($lead, [[
+                        'url' => $proposal['website'],
+                        'source' => LeadWebsiteCandidate::SOURCE_SEARCH,
+                        'source_detail' => mb_substr('discovery:'.$proposal['source'], 0, 255),
+                    ]], []);
+                }
+            }
         }
 
         return [
@@ -454,7 +596,16 @@ class LeadImportService
                 'total' => $total,
                 'valid' => count($valid),
                 'duplicates' => $duplicates,
-                'updated' => count($websiteBackfills),
+                // Existing leads are no longer written by discovery; kept for response-shape stability.
+                'updated' => 0,
+                // Different provider URLs for existing leads, proposed to Website Intelligence.
+                'websiteCandidates' => count($websiteCandidates),
+                // Rows refused because their provider identity could not be vouched for.
+                'unverified' => $unverified,
+                // Businesses refused by the national boundary. Surfaced so a run can report honestly
+                // that a provider returned results the CRM would not accept, rather than showing an
+                // unexplained shortfall between "found" and "added".
+                'rejected' => $rejected + $unverified,
             ],
             'importedCount' => $importedCount,
         ];
@@ -475,6 +626,19 @@ class LeadImportService
      * @param  array<string, mixed>  $business
      * @return array<string, mixed>
      */
+    /**
+     * The national boundary, resolved lazily.
+     *
+     * Deliberately NOT a constructor dependency: this service is also constructed directly in places
+     * that have nothing to do with discovery (the spreadsheet import path), and the boundary parses a
+     * 160KB polygon on first use. Resolving it here means the CSV importer never pays for it, while
+     * the discovery ingest gets the container's shared instance.
+     */
+    private function philippines(): PhilippinesBoundary
+    {
+        return app(PhilippinesBoundary::class);
+    }
+
     private function normalizeDiscovered(array $business): array
     {
         $row = [];
@@ -494,6 +658,51 @@ class LeadImportService
 
         if (! isset($row['contact_name']) && isset($row['business_name'])) {
             $row['contact_name'] = $row['business_name'];
+        }
+
+        // THE BUSINESS SURVIVES ITS OWN BAD FIELD. A provider URL longer than the column can hold
+        // used to reach the INSERT and raise SQLSTATE[22001], which the endpoint returned as a 500
+        // and the scraper treated as a dead target — so one oversized URL discarded every other
+        // valid business discovered alongside it. The URL is DROPPED rather than cut: a truncated
+        // link is a broken link, and inventing a shortened one would be fabricating provider data.
+        // The lead itself is kept, and Website Intelligence will search for its site later exactly
+        // as it does for any discovered business that arrived without one.
+        if (isset($row['website']) && mb_strlen((string) $row['website']) > self::WEBSITE_MAX_LENGTH) {
+            unset($row['website']);
+        }
+
+        // A URL IS NOT AUTOMATICALLY A WEBSITE. Google Places returns one `websiteUri` per place and
+        // it is whatever the owner typed: measured on this pool, a third of them were Facebook or
+        // Instagram profiles. Storing those in `website` makes the board show a social profile under
+        // WEBSITE, and — far worse — offers the audit a page that will pass identity verification on
+        // its title and phone, because the page really is about the business. The lead then reads as
+        // "has a website" when its only web presence is somebody else's platform, which is the exact
+        // inverse of the prospect signal it was discovered for.
+        //
+        // Classified by HOST, which needs no fetch and so can happen here at the door. Social URLs
+        // are MOVED, never dropped — the Lead has had `facebook` and `instagram` columns all along.
+        // Directory listings and link-in-bio hubs have no column and are simply not recorded as the
+        // website; the business, its place_id and its coordinates are untouched, and Website
+        // Intelligence will look for a real site later exactly as it does for any lead without one.
+        if (isset($row['website'])) {
+            $classifier = app(WebsiteUrlClassifier::class);
+            $url = (string) $row['website'];
+
+            if (! $classifier->isOwnWebsiteCandidate($url)) {
+                $column = $classifier->socialColumn($url);
+                // Never overwrite a social handle the record already carries: a spreadsheet import or
+                // a BD may have filled it in, and their value is the better-attested one.
+                //
+                // `socialColumn()` returns null when there is nowhere to file the URL — a TikTok
+                // link, or a Facebook link-shim longer than the 255-char column. The URL is then
+                // dropped rather than left in `website`, which is exactly what this path already
+                // does for an over-long website URL: an unusable link is not worth recording as the
+                // wrong kind of fact, and the business itself is kept in full either way.
+                if ($column !== null && ! isset($row[$column])) {
+                    $row[$column] = $url;
+                }
+                unset($row['website']);
+            }
         }
 
         // Not a passthrough — a refusal. See the docblock.
@@ -839,17 +1048,34 @@ class LeadImportService
         $reader->open($path);
 
         $rows = [];
-        foreach ($reader->getSheetIterator() as $sheet) {
-            foreach ($sheet->getRowIterator() as $row) {
-                $cells = [];
-                foreach ($row->toArray() as $value) {
-                    $cells[] = $this->stringify($value);
+        $dataRows = 0;
+        try {
+            foreach ($reader->getSheetIterator() as $sheet) {
+                foreach ($sheet->getRowIterator() as $row) {
+                    $cells = [];
+                    foreach ($row->toArray() as $value) {
+                        $cells[] = $this->stringify($value);
+                    }
+
+                    // Row cap ({@see MAX_IMPORT_ROWS}), counted as the sheet streams in so an over-cap file is
+                    // refused before the rest of it is ever loaded. The first row is the header, and a wholly
+                    // blank row is not data; both are still kept, so reported row numbers do not shift.
+                    if ($rows !== [] && trim(implode('', $cells)) !== '' && ++$dataRows > self::MAX_IMPORT_ROWS) {
+                        throw ValidationException::withMessages([
+                            'file' => sprintf(
+                                'This file has more than %s rows. Split it into smaller files.',
+                                number_format(self::MAX_IMPORT_ROWS),
+                            ),
+                        ]);
+                    }
+
+                    $rows[] = $cells;
                 }
-                $rows[] = $cells;
+                break; // MVP: first sheet only
             }
-            break; // MVP: first sheet only
+        } finally {
+            $reader->close();
         }
-        $reader->close();
 
         return $rows;
     }

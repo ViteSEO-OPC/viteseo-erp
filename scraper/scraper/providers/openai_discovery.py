@@ -103,7 +103,19 @@ class OpenAiDiscoveryProvider(DiscoveryProvider):
         self._client = httpx.Client(timeout=timeout)
         self._stats: dict[str, Any] = {}
 
-    def discover(self, *, area: str, category: str, limit: int) -> list[RawBusiness]:
+    def discover(
+        self,
+        *,
+        area: str,
+        category: str,
+        limit: int,
+        bbox: Optional[tuple[float, float, float, float]] = None,
+    ) -> list[RawBusiness]:
+        # `bbox` is accepted for the provider contract and deliberately unused here: this lane
+        # resolves proposed NAMES within an area, and the resolver's own Overpass query is already
+        # bounded by that area. Narrowing it to a partition cell would drop businesses whose OSM node
+        # sits just outside the cell while still being the business the model named — a name lane is
+        # not a geographic sweep, so a cell is not the right bound for it.
         ask = min(limit * PROPOSAL_OVERSAMPLE, MAX_PROPOSALS)
         proposals, usage, status, error = self._propose(area=area, category=category, count=ask)
 

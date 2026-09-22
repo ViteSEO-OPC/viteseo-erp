@@ -61,8 +61,22 @@ export type WebsiteSignals = {
 };
 
 /** Compact, BD-facing Website Intelligence summary attached to a discovered business. */
+/**
+ * What kind of link the record actually holds.
+ *
+ * `own` is the only kind that may be presented as WEBSITE. The rest are real, useful links about the
+ * business that are hosted on somebody else's platform — and a business whose only web presence is a
+ * Facebook page is the prospect this CRM exists to find, so showing that page as its website inverts
+ * the signal it was discovered for.
+ */
+export type WebsiteUrlKind = "own" | "social" | "directory" | "link_in_bio" | "invalid";
+
 export type WebsiteSummary = {
+  /** Null unless the stored URL could actually be the business's own site. */
   url: string | null;
+  urlKind: WebsiteUrlKind | null;
+  /** Social profiles, kept and labelled as such — never shown under WEBSITE. */
+  social: { facebook?: string; instagram?: string };
   status: WebsiteStatus | null;
   audited: boolean;
   auditedAt: string | null;
@@ -95,11 +109,37 @@ export type NearbyClient = {
   /** Lead status enum, e.g. "new". */
   status: string;
   /**
-   * Which discovery LANE found this business — the deterministic OpenStreetMap sweep, or the
-   * AI-assisted expansion that runs beside it. A closed set decided server-side from per-record
-   * provenance; never a vendor name, and nothing in the UI branches on it beyond the filter.
+   * Which discovery LANE found this business — the deterministic OpenStreetMap sweep, the
+   * AI-assisted expansion beside it, or the Google Places search. A closed set decided server-side
+   * from per-record provenance; nothing in the UI branches on it beyond the filter.
+   *
+   * `unknown` is a provenance value the server could not place in a lane. It is surfaced rather than
+   * folded into `openstreetmap`, so a lane is never credited with a lead it did not find.
    */
-  foundBy: "openstreetmap" | "ai-assisted";
+  foundBy: "openstreetmap" | "ai-assisted" | "google-places" | "unknown";
+  /**
+   * Is this business inside the Philippines, per the same national boundary discovery enforces?
+   *
+   * `null` means it has no coordinates, which is NOT the same as "foreign" — a third of the pool has
+   * no position, and absence of one is not evidence of a foreign one. A Philippines-only view keeps
+   * `true` and `null` and hides only `false`.
+   */
+  inPhilippines: boolean | null;
+  /**
+   * CLAIM STATE — read-only, derived server-side from the qualification columns.
+   *
+   * The Nearby board is a SHARED pool: a prospect stays listed after a BD accepts it into the CRM,
+   * so every BD can see the pool moved rather than watching rows silently disappear. These three
+   * fields are what let the UI say so — mark the row, name the claimant, and stop offering an
+   * Accept the API would refuse with a 409.
+   */
+  qualified: boolean;
+  qualifiedAt: string | null;
+  /**
+   * Who claimed it. Optional because the API sends it via `whenLoaded`, and absent for an
+   * unclaimed prospect — so read it only alongside `qualified`, never as the claim test itself.
+   */
+  qualifiedBy?: { id: string; name: string } | null;
   /** Coordinate-derived distance in km — computed by the Interactive Map milestone (absent now). */
   distanceKm?: number;
   /** Coordinate-derived map layout position (%) — computed by the Interactive Map milestone (absent now). */

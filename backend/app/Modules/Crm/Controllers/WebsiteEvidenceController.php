@@ -58,6 +58,10 @@ class WebsiteEvidenceController extends Controller
                 ->where('c.verified', true))
             ->orderByRaw('s.last_searched_at IS NOT NULL')
             ->orderBy('s.last_searched_at')
+            // Same deterministic tiebreak as the audit queue, for the same reason: never-searched
+            // leads all tie on the two keys above, and an undefined order among them means a tick's
+            // slice is not reproducible.
+            ->orderBy('crm_leads.id')
             ->limit($limit)
             ->get(['crm_leads.*']);
 
@@ -71,6 +75,14 @@ class WebsiteEvidenceController extends Controller
                 'region' => $lead->region,
                 'industry' => $lead->industry,
                 'placeId' => $lead->place_id,
+                // WHERE THE BUSINESS IS. Tier 0 reads an OSM element, and a Google lead's
+                // `places/ChIJ…` is not an OSM id — so for that whole pool the tier had nothing to
+                // resolve and could never honestly report itself as run. These two columns are the
+                // other way to reach the same element: the resolver matches the lead's real
+                // coordinates and name against real OSM elements. Already captured at ingest,
+                // already shown on the map; sent here so the tier has somewhere to look.
+                'latitude' => $lead->latitude !== null ? (float) $lead->latitude : null,
+                'longitude' => $lead->longitude !== null ? (float) $lead->longitude : null,
             ])->all(),
         ]);
     }

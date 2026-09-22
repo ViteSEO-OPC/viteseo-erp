@@ -61,7 +61,22 @@ export function LeadFilesCard({ leadId }: Props) {
   }
 
   return (
-    <div className="rounded-2xl border border-border bg-card p-6 shadow-card">
+    // Its OWN height, not its row's (`xl:self-start`). From xl this card shares a subgrid row with the
+    // Email Conversation beside it, and a grid item stretches to its row by default — so it used to
+    // grow to whatever height the email history and composer reached, and showed a mostly empty
+    // card. Its intended size is its content: the header plus at most five file rows (FIVE_ROWS),
+    // after which the list scrolls, so a lead with 50 files is as tall as a lead with 5 and nothing
+    // beside it can make it taller. `xl:` ONLY: below xl this column is a flex column, where
+    // `self-start` aligns HORIZONTALLY and would shrink the card's width — the opposite of intended.
+    //
+    // `contain-inline-size`: the card's WIDTH never depends on what is inside it. Without it, a long
+    // filename widened the whole right-hand column — the row already truncates correctly, but a
+    // `truncate` line's min-content width is the full name, and that width climbed the tree to the
+    // page's `lg:grid-cols-[76fr_24fr]`, whose bare `fr` tracks cannot shrink below their content.
+    // Containment stops it at the card, at every breakpoint and in both the flex-column (below xl)
+    // and subgrid (xl) layouts of that column, so the parent grid alone decides the width and the
+    // name, not the card, is what gives way.
+    <div className="flex flex-col rounded-2xl border border-border bg-card p-6 shadow-card contain-inline-size xl:self-start">
       <h3 className="mb-5 text-lg font-bold text-card-foreground">
         Files &amp; Downloads
         {!isLoading && !isError && (
@@ -80,13 +95,31 @@ export function LeadFilesCard({ leadId }: Props) {
       {isError && <ErrorState message="Failed to load files" />}
 
       {!isLoading && !isError && count === 0 && (
-        <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border py-10 text-center">
-          <FolderOpen className="h-6 w-6 text-muted-foreground" aria-hidden />
-          <p className="text-sm font-semibold text-card-foreground">No files yet</p>
-          <p className="text-xs text-muted-foreground">
-            Use <span className="font-medium">Attachment</span> above to upload proposals,
-            quotations, or permits for this lead.
-          </p>
+        // The frame keeps its natural size. The card now sizes to its content at every width (see
+        // `xl:self-start` above), so this `flex-1` wrapper has no spare height to fill and simply
+        // holds the frame; it stays so that, if the card is ever stretched again, the empty state
+        // centres in that height instead of becoming one enormous dashed rectangle.
+        <div className="flex flex-1 items-center">
+          {/* Horizontal padding is what keeps the text off the dashed border — the box used to have
+              vertical padding only. The hierarchy is icon → title → one short line of help, and the
+              description is capped at `max-w-xs` so on a full-width card (tablet, mobile) it stays a
+              readable block rather than one long line. */}
+          <div className="flex w-full flex-col items-center rounded-xl border border-dashed border-border px-6 py-10 text-center">
+            <span className="flex h-11 w-11 items-center justify-center rounded-full bg-muted">
+              <FolderOpen className="h-5 w-5 text-muted-foreground" aria-hidden />
+            </span>
+            <p className="mt-3 text-sm font-semibold text-card-foreground">No files yet</p>
+            {/* "Supported files", deliberately not a list. What the viewer can render is decided by
+                previewKindFor in lib/attachment-preview.ts: images, PDF, TXT, CSV and XLS/XLSX
+                everywhere, DOC/DOCX/PPT/PPTX only where the SERVER can convert them (the attachment's
+                `documentPreview` flag), and ZIP never. Naming Office formats here would promise a
+                preview a server without LibreOffice cannot give — only the ZIP rule is universal. */}
+            <p className="mt-1.5 max-w-xs text-xs leading-5 text-balance text-muted-foreground">
+              Use <span className="font-medium text-card-foreground">Attachment</span> above to add
+              proposals, contracts, and screenshots. Supported files open in preview; ZIP files are
+              download-only.
+            </p>
+          </div>
         </div>
       )}
 

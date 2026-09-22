@@ -2,6 +2,7 @@
 
 namespace App\Modules\Hr\Providers;
 
+use App\Modules\Hr\Console\Commands\ApplySeparations;
 use App\Modules\Hr\Console\Commands\GenerateManagementAttendance;
 use App\Modules\Hr\Console\Commands\RecomputeViolations;
 use App\Modules\Hr\Console\Commands\RunLeaveAccrual;
@@ -31,10 +32,24 @@ class HrServiceProvider extends ServiceProvider
         // routes/console.php, so HR owns its own jobs.
         if ($this->app->runningInConsole()) {
             $this->commands([
+                ApplySeparations::class,
                 GenerateManagementAttendance::class,
                 RecomputeViolations::class,
                 RunLeaveAccrual::class,
             ]);
+
+            /*
+             * A resignation is filed in advance and worked out. This is what closes
+             * the account when the last working day arrives — early, before the
+             * working day starts, so nobody signs in on a day they no longer work
+             * here. A termination does not wait for this; separate() closes it there
+             * and then.
+             */
+            Schedule::command(ApplySeparations::class)
+                ->dailyAt('00:20')
+                ->timezone(config('app.timezone_local'))
+                ->withoutOverlapping()
+                ->onOneServer();
 
             // Management is exempt from the time clock, so the platform writes their
             // rows instead — late enough in the Manila day that the shift is over.

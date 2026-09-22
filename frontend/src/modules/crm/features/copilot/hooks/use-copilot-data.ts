@@ -58,9 +58,3 @@ export function useCopilotData() {
     status: MOCK_STATUS,
   };
 }
-
-export function useCopilotState() {
-  return {
-    isOpen: false,
-  };
-}

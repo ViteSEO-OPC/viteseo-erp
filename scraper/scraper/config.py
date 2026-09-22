@@ -46,6 +46,26 @@ class Config:
     # must not become a breaking change to the config contract.
     openai_timeout: float = 30.0
 
+    # Where the scheduled command's discovery targets come from. Empty (the default) means the
+    # version-controlled targets file, which is the behaviour that predates this setting. A URL points
+    # at a managed registry instead — see `scraper.target_sources`. Kept as configuration rather than
+    # a flag because it describes an environment, not one run.
+    targets_url: str = ""
+
+    # Whether the optional AI SEARCH PLANNER may be consulted during discovery. FALSE by default and
+    # opt-in by design: Google Places is a factual provider and a Google-only run must make no model
+    # call at all. The AI strategist itself stays fully built and reachable — this only decides
+    # whether a run is allowed to ask for it. Set DISCOVERY_AI_STRATEGY=1 for the future AI phase.
+    use_ai_strategy: bool = False
+
+    # The ISO 3166-1 alpha-2 country discovery is restricted to. Empty means unrestricted, which is
+    # the pre-existing behaviour and stays reachable for callers that predate the country control.
+    #
+    # It is enforced at the GEOCODER (see OpenStreetMapProvider._geocode_area), so a location outside
+    # the country cannot resolve and therefore cannot become a provider request. That is deliberately
+    # upstream of every provider: the fence has to stop the search, not just discard its results.
+    discovery_country: str = ""
+
     @classmethod
     def load(cls) -> "Config":
         _load_dotenv()
@@ -64,6 +84,16 @@ class Config:
             # Shorter than REQUEST_TIMEOUT: a slow proposal should cost one target a few seconds and
             # then yield nothing, rather than stall a scheduled run behind it.
             openai_timeout=float(os.environ.get("OPENAI_TIMEOUT", "30")),
+            # Empty by default: the version-controlled targets file stays the source until an
+            # environment names a managed one.
+            targets_url=os.environ.get("DISCOVERY_TARGETS_URL", ""),
+            # Off unless an environment explicitly turns it on — see the field docstring.
+            use_ai_strategy=os.environ.get("DISCOVERY_AI_STRATEGY", "").strip().lower()
+            in ("1", "true", "yes", "on"),
+            # Unset means unrestricted here; the CRM passes --country explicitly on every run it
+            # starts, so the restriction travels with the request rather than depending on the
+            # engine's environment being configured correctly.
+            discovery_country=os.environ.get("DISCOVERY_COUNTRY", "").strip(),
         )
 
 

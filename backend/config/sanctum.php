@@ -50,9 +50,13 @@ return [
     |
     */
 
-    // 30 days by default — a leaked bearer token must not live forever. The
-    // frontend already handles 401 by clearing the token and re-logging-in.
-    'expiration' => env('SANCTUM_TOKEN_EXPIRATION', 43200),
+    // Off: every token carries its own expires_at instead (MachineTokens, and a
+    // 30-day default for any minted without one -- AppServiceProvider). Despite the
+    // stock comment above, this rule is checked ALONGSIDE expires_at, not instead of
+    // it, so a 90-day machine token would still have died at 30. Migration
+    // 2026_09_10_010000 wrote the expiry this rule implied into every existing row
+    // before it was switched off, so nothing it had killed came back.
+    'expiration' => env('SANCTUM_TOKEN_EXPIRATION'),
 
     /*
     |--------------------------------------------------------------------------
@@ -68,6 +72,19 @@ return [
     */
 
     'token_prefix' => env('SANCTUM_TOKEN_PREFIX', ''),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Route Prefix
+    |--------------------------------------------------------------------------
+    |
+    | Where Sanctum mounts /csrf-cookie. Under /api because nginx sends /api/*
+    | to Laravel and everything else to Next.js, so the default /sanctum/ would
+    | 404 -- and with it every browser sign-in, which needs that cookie first.
+    |
+    */
+
+    'prefix' => 'api/sanctum',
 
     /*
     |--------------------------------------------------------------------------

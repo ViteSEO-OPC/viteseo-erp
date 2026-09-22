@@ -32,7 +32,8 @@ return [
     |
     */
 
-    'lifetime' => (int) env('SESSION_LIFETIME', 120),
+    // Two days idle. EndSessionsPastTheirCeiling ends it at thirty however busy.
+    'lifetime' => (int) env('SESSION_LIFETIME', 2880),
 
     'expire_on_close' => env('SESSION_EXPIRE_ON_CLOSE', false),
 

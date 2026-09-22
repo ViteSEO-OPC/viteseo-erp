@@ -80,10 +80,23 @@ class AiAssistedDiscoveryProvider(DiscoveryProvider):
         self._ai = ai
         self._stats: dict[str, Any] = {}
 
-    def discover(self, *, area: str, category: str, limit: int) -> list[RawBusiness]:
+    def discover(
+        self,
+        *,
+        area: str,
+        category: str,
+        limit: int,
+        bbox: tuple[float, float, float, float] | None = None,
+    ) -> list[RawBusiness]:
+        # `bbox` travels ONLY when there is one. An optional parameter that is always sent is not
+        # optional: a collaborator written before the partitioning contract — a third-party provider,
+        # or a test double — must still be callable exactly as it always was.
+        bounded = {"bbox": bbox} if bbox is not None else {}
+
         # THE BASELINE, UNCHANGED AND UNCONDITIONAL. The exact call a plain OpenStreetMap run makes,
         # against the same untouched `discover()`. Everything after this point can only add.
-        baseline = self._osm.discover(area=area, category=category, limit=limit)
+        # A partition cell reaches the baseline sweep, which is the lane a box actually bounds.
+        baseline = self._osm.discover(area=area, category=category, limit=limit, **bounded)
         for business in baseline:
             business.discovered_by = LANE_BASELINE
 
@@ -114,7 +127,7 @@ class AiAssistedDiscoveryProvider(DiscoveryProvider):
         # of what it resolves will duplicate what is already held, and truncating it to the gap first
         # would throw away the resolutions that were the net-new ones.
         try:
-            extra = self._ai.discover(area=area, category=category, limit=limit)
+            extra = self._ai.discover(area=area, category=category, limit=limit, **bounded)
             ai_stats = self._ai_stats()
         except Exception as exc:  # noqa: BLE001 - the baseline must survive anything the AI lanes do.
             print(

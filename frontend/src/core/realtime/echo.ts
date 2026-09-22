@@ -1,11 +1,12 @@
 import Echo from 'laravel-echo';
 import Pusher from 'pusher-js';
-import { getToken } from '@/core/tokens';
+import { xsrfToken } from '@/core/csrf';
 
 /**
  * Lazily-constructed, SSR-safe Laravel Echo singleton talking to Laravel Reverb
  * (Pusher protocol). Private channels are authorized through the API's
- * /broadcasting/auth endpoint carrying the Sanctum Bearer token. We use `fetch`
+ * /broadcasting/auth endpoint on the browser's session cookie -- httpOnly, so it
+ * rides along by itself, with the XSRF header added by hand. We use `fetch`
  * (not apiClient) here to avoid an import cycle with the axios client, which
  * itself reads this module's socket id for the `X-Socket-Id` header.
  *
@@ -62,10 +63,12 @@ export function getEcho(): Echo<'reverb'> | null {
       ) => {
         fetch(`${apiOrigin()}/broadcasting/auth`, {
           method: 'POST',
+          // fetch sends no cookie across ports (local dev) and no XSRF header unless told.
+          credentials: 'include',
           headers: {
             'Content-Type': 'application/json',
             Accept: 'application/json',
-            Authorization: `Bearer ${getToken() ?? ''}`,
+            'X-XSRF-TOKEN': xsrfToken() ?? '',
           },
           body: JSON.stringify({
             socket_id: socketId,

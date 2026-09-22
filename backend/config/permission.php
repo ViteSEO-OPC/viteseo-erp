@@ -123,7 +123,8 @@ return [
      *
      * To enable, set to true, and then create listeners to watch these events.
      */
-    'events_enabled' => false,
+    // On: AccessLifecycle listens for these (AppServiceProvider).
+    'events_enabled' => true,
 
     /*
      * Teams Feature.

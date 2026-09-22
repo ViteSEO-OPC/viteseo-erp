@@ -1,12 +1,14 @@
 <?php
 
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\SessionController;
 use App\Http\Controllers\ConnectionController;
 use App\Http\Controllers\CustomRoleController;
 use App\Http\Controllers\EntitlementController;
 use App\Http\Controllers\OrgController;
 use App\Http\Controllers\PasswordResetController;
 use App\Http\Controllers\TeamController;
+use App\Modules\Crm\Controllers\CallingOverviewController;
 use Illuminate\Support\Facades\Route;
 
 // This file is auto-mounted under the `api` prefix (see bootstrap/app.php),
@@ -34,6 +36,12 @@ Route::prefix('v1')->group(function () {
             Route::get('me', [AuthController::class, 'me']);
             Route::post('logout', [AuthController::class, 'logout']);
             Route::post('change-password', [AuthController::class, 'changePassword'])->middleware('throttle:10,1');
+
+            // The devices you are signed in on, and ending any of them. Keys are SHA-256
+            // of the session id -- never the id, which is the cookie's content.
+            Route::get('sessions', [SessionController::class, 'index']);
+            Route::delete('sessions', [SessionController::class, 'destroyOthers']);
+            Route::delete('sessions/{key}', [SessionController::class, 'destroy'])->where('key', '[0-9a-f]{64}');
         });
     });
 
@@ -75,6 +83,20 @@ Route::prefix('v1')->group(function () {
             Route::post('admin/orgs/{org}/adjust', [OrgController::class, 'adjust']);
             Route::get('admin/orgs/{org}/payments', [OrgController::class, 'payments']);
             Route::post('admin/payments/{payment}/reverse', [OrgController::class, 'reversePayment']);
+            /*
+             | Calling across every organization — READ-ONLY, and the only cross-tenant view of it.
+             |
+             | Zerem has no organization switcher, and Settings → Integrations → Calling resolves the
+             | organization from the signed-in user's own membership, so "is this client's calling set
+             | up, and what is missing?" could previously only be answered from a database session.
+             |
+             | Deliberately GET-only. A client's Twilio account is their property and their bill: being
+             | able to SEE a configuration is not a reason to be able to change it, so every write stays
+             | with that organization's own admin on its own settings screen. No credential and no
+             | account identifier is in the payload — verdicts only (see CallingOverviewService).
+             */
+            Route::get('admin/calling', CallingOverviewController::class);
+
             Route::get('admin/features', [EntitlementController::class, 'catalog']);
             Route::get('admin/orgs/{org}/features', [EntitlementController::class, 'show']);
             Route::put('admin/orgs/{org}/features', [EntitlementController::class, 'update']);

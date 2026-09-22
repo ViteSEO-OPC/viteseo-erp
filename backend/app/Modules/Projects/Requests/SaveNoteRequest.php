@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Modules\Projects\Requests;
 
-use App\Modules\Projects\Support\TiptapDocument;
+use App\Support\TiptapDocument;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Validator;
 

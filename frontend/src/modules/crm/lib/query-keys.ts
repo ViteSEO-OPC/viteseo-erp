@@ -39,6 +39,10 @@ export const queryKeys = {
     // prefix match, so the counts can never drift from the table they describe.
     statusSummary: (filters: Record<string, unknown>) =>
       [...queryKeys.leads.lists(), "status-summary", filters] as const,
+    // How many leads "Archive all leads" would affect. Under leads.all but NOT under lists(), so
+    // the list's own filter-keyed invalidations leave it alone — it is a scope count, not a view of
+    // the current filters. The archive mutation invalidates leads.all, which covers it.
+    deletableCount: () => [...queryKeys.leads.all, "deletable-count"] as const,
     details: () => [...queryKeys.leads.all, "detail"] as const,
     detail: (id: string) => [...queryKeys.leads.details(), id] as const,
     // Per-lead activity timeline. Nested under detail(id) so the existing
@@ -61,6 +65,10 @@ export const queryKeys = {
     // active-call session. Nested under detail(id), like activities/notes, so lead-detail invalidations
     // cascade and call writes touch only this lead's data by prefix.
     calls: (id: string) => [...queryKeys.leads.detail(id), "calls"] as const,
+    // What this deployment's calling can do for one lead (browser calling on/off, and whether the
+    // lead's phone is dialable). Nested under detail(id) like the rest, so editing the lead's phone
+    // re-asks the question by prefix rather than needing its own invalidation.
+    callingCapability: (id: string) => [...queryKeys.leads.detail(id), "calling-capability"] as const,
   },
   niches: {
     // Business Niche registry (GET /niches) — the vocabulary behind the shared Business Niche
@@ -71,9 +79,6 @@ export const queryKeys = {
   },
   followUps: {
     all: ["follow-ups"] as const,
-    lists: () => [...queryKeys.followUps.all, "list"] as const,
-    list: (filters: Record<string, unknown>) =>
-      [...queryKeys.followUps.lists(), filters] as const,
   },
   activityLogs: {
     all: ["activity-logs"] as const,
@@ -90,6 +95,18 @@ export const queryKeys = {
     all: ["nearby-clients"] as const,
     // Discovered-business prospect pool (GET /nearby-clients).
     list: () => [...queryKeys.nearbyClients.all, "list"] as const,
+    // Which discovery provider is actually running — read by the board to choose its MAP. Kept under
+    // the Nearby namespace rather than `integrations` because this is the BD-readable effective-state
+    // endpoint, not the super-admin settings resource.
+    discoveryConfig: () => [...queryKeys.nearbyClients.all, "discovery-config"] as const,
+    // Advanced Lead Discovery — the on-demand Stage 2 runs that FILL the pool above.
+    //
+    // Nested under the Nearby namespace because a finished run changes what the board shows, so an
+    // invalidation of `nearbyClients.all` should sweep these too. The run poller deliberately
+    // invalidates `list()` and not `all`, so refreshing the board never cancels the poll that is
+    // still watching the run.
+    discoveryRuns: () => [...queryKeys.nearbyClients.all, "discovery-runs"] as const,
+    discoveryRun: (runId: string) => [...queryKeys.nearbyClients.all, "discovery-runs", runId] as const,
   },
   websiteEvidence: {
     all: ["website-evidence"] as const,
@@ -136,8 +153,6 @@ export const queryKeys = {
     lists: () => [...queryKeys.users.all, "list"] as const,
     list: (filters: Record<string, unknown>) =>
       [...queryKeys.users.lists(), filters] as const,
-    details: () => [...queryKeys.users.all, "detail"] as const,
-    detail: (id: string) => [...queryKeys.users.details(), id] as const,
     // Email-first Create Account: "does this address already belong to a centralized user?"
     // Keyed by email so re-typing an address the admin already checked is served from cache.
     lookup: (email: string) => [...queryKeys.users.all, "lookup", email] as const,
@@ -182,6 +197,11 @@ export const queryKeys = {
     // effective one in a single payload, and splitting it would let the switch and a provider's
     // credential state be cached at different ages and disagree on screen.
     nerby: () => [...queryKeys.integrations.all, "nerby"] as const,
+    // Calling — the org's own Twilio account, and whether browser calling is on. One key for the
+    // whole screen, same reasoning as `nerby`: the API answers with the stored configuration AND
+    // what is actually in force in a single payload, and splitting them would let the two be cached
+    // at different ages and disagree on screen.
+    calling: () => [...queryKeys.integrations.all, "calling"] as const,
   },
   businessRules: {
     // Settings → Business Rules (Business Rules Administration). Keyed by module so the reserved
@@ -192,5 +212,31 @@ export const queryKeys = {
     draft: (module: string) => [...queryKeys.businessRules.all(module), "draft"] as const,
     versions: (module: string) => [...queryKeys.businessRules.all(module), "versions"] as const,
     audit: (module: string) => [...queryKeys.businessRules.all(module), "audit"] as const,
+  },
+  emailTemplates: {
+    // Settings → Email Templates (GET /settings/email-templates): every template, active or not, with
+    // its catalog. The Outreach composer's rendered per-lead copies stay under leads.emailTemplates(id).
+    all: ["email-templates"] as const,
+    admin: () => [...queryKeys.emailTemplates.all, "admin"] as const,
+    // Built-in + custom purposes and tones with usage (GET /settings/email-template-options).
+    options: () => [...queryKeys.emailTemplates.all, "options"] as const,
+    // The designers' server previews (POST /settings/email-templates/preview and /settings/email-designs/
+    // preview), keyed by endpoint and what was sent. They write nothing; saving a template or a design
+    // invalidates `all`, which includes these.
+    preview: (endpoint: string, body: string) => [...queryKeys.emailTemplates.all, "preview", endpoint, body] as const,
+  },
+  emailDesigns: {
+    // Settings → Email Designs (GET /settings/email-designs): the reusable looks designed templates use,
+    // each with how many templates use it.
+    all: ["email-designs"] as const,
+    list: () => [...queryKeys.emailDesigns.all, "list"] as const,
+    // What "Apply to all templates" would change for a design (null: one not saved yet). Always refetched.
+    applySummary: (designId: string | null) => [...queryKeys.emailDesigns.all, "apply-summary", designId ?? "new"] as const,
+  },
+  emailBranding: {
+    // Settings → Email Designs → Organization logo (GET /settings/email-branding). A logo change also
+    // invalidates emailTemplates.all, whose preview cache would otherwise keep showing the old logo.
+    all: ["email-branding"] as const,
+    detail: () => [...queryKeys.emailBranding.all, "detail"] as const,
   },
 } as const;

@@ -6,6 +6,7 @@ use App\Models\User;
 use App\Modules\Crm\Models\Lead;
 use App\Modules\Crm\Models\LeadWebsiteCandidate;
 use App\Modules\Crm\Models\LeadWebsiteSearch;
+use App\Modules\Crm\Services\WebsiteIdentityVerdict;
 use App\Modules\Crm\Services\WebsiteIdentityVerifier;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
@@ -157,6 +158,74 @@ class WebsiteEvidenceService
     }
 
     /**
+     * Refile a URL the ORDINARY AUDIT conclusively refused, so the lead can rejoin the evidence path.
+     *
+     * THE EXACT MIRROR OF {@see promoteVerifiedWebsite()}. That method writes `crm_leads.website`
+     * when the evidence chain proves a URL, moving the lead into the audit queue where page findings
+     * get made. This one clears the column when the audit disproves a URL, moving the lead back into
+     * the evidence queue where a search for its real site can finally happen. `website` is what
+     * ROUTES a lead between the two, and until now it only ever moved one way: a lead holding a
+     * refused URL was offered forever to the audit that had already judged it, and was invisible to
+     * the tiers. Measured on the live pool: 412 leads holding a refused URL, none of them reachable
+     * by any path that could conclude an absence.
+     *
+     * ONLY A CONCLUSIVE REFUSAL MAY COME THROUGH HERE, and the caller decides that — see
+     * {@see LeadWebsiteCandidate::REJECTED_PLATFORM}. A refusal that merely failed to CONFIRM
+     * ownership must never reach this method: stripping a URL on "we could not tell" would delete a
+     * genuine website on weak evidence, which is the one error {@see recordDeterminedAbsence()}
+     * already refuses to make from the other direction.
+     *
+     * THE CANDIDATE ARRIVES ALREADY CHECKED, which is why this does not go through
+     * {@see recordCandidates()}: that method records material still to be examined and reopens an
+     * exhausted search because of it. There is nothing here left to examine — the audit has just
+     * finished examining it — so `checked_at` is set now, `tiers_run` is untouched (this was never a
+     * tier), and an exhausted search stays exhausted.
+     *
+     * IT WRITES NO VERDICT. `website_status` is the caller's to derive, exactly as before, and
+     * `website` is deliberately absent from LeadObserver's scoring inputs, so moving a URL out of it
+     * cannot move a Lead Score any more than promotion moving one in could.
+     */
+    public function recordRefusedWebsite(
+        Lead $lead,
+        string $url,
+        string $reason,
+        WebsiteIdentityVerdict $verdict,
+    ): ?LeadWebsiteCandidate {
+        $url = trim($url);
+        if ($url === '') {
+            return null;
+        }
+
+        return DB::transaction(function () use ($lead, $url, $reason, $verdict): LeadWebsiteCandidate {
+            $candidate = LeadWebsiteCandidate::query()->updateOrCreate(
+                [
+                    'lead_id' => $lead->id,
+                    'url_hash' => LeadWebsiteCandidate::hashFor($url),
+                    'source' => LeadWebsiteCandidate::SOURCE_AUDIT,
+                ],
+                [
+                    'url' => $url,
+                    'confidence' => $verdict->confidence,
+                    'signals' => $verdict->signals,
+                    'verified' => false,
+                    'rejection_reason' => $reason,
+                    'checked_at' => now(),
+                ],
+            );
+
+            // The search row is the evidence chain's ledger, and the counts below are read by the
+            // UI. Created if the lead never had one — a lead that arrived holding a URL never
+            // entered the evidence path, so usually it has not.
+            $search = $this->searchFor($lead);
+            $search->lead_id = $lead->id;
+            $search->save();
+            $this->refreshCounts($search->refresh());
+
+            return $candidate;
+        });
+    }
+
+    /**
      * Adjudicate one candidate against the audit findings the discovery service observed.
      *
      * The division mirrors the existing audit exactly: the crawler reports what it SAW (title,
@@ -169,7 +238,17 @@ class WebsiteEvidenceService
     public function recordVerification(LeadWebsiteCandidate $candidate, array $findings): LeadWebsiteCandidate
     {
         $lead = $candidate->lead;
-        $verdict = $this->verifier->verify($lead, $findings);
+
+        // A PROBE CANDIDATE'S HOST WAS WRITTEN FROM THE BUSINESS NAME, so "the domain matches the
+        // name" is true by construction and is not evidence about this candidate. Told to the
+        // verifier rather than recomputed here: identity matching stays in one place, and this call
+        // site simply reports where the URL came from. Every other tier ASSERTED its URL — an OSM
+        // tag, a Wikidata entity, a person — so their domain evidence is independent and still counts.
+        $verdict = $this->verifier->verify(
+            $lead,
+            $findings,
+            domainDerivedFromName: $candidate->source === LeadWebsiteCandidate::SOURCE_PROBE,
+        );
 
         $reachable = (bool) ($findings['website_reachable'] ?? false);
 
@@ -475,6 +554,43 @@ class WebsiteEvidenceService
     private function recordDeterminedAbsence(Lead $lead, LeadWebsiteSearch $search): void
     {
         if ($lead->website_status !== 'website-unknown') {
+            return;
+        }
+
+        // A REFUSED CANDIDATE IS NOT AN ABSENT ONE. Exhaustion says every tier ran and nothing was
+        // VERIFIED; it does not say nothing was FOUND. Those come apart exactly here, and the
+        // difference is the whole conclusion:
+        //
+        //   * `not_reachable` / `invalid_url` — a name resolved but nothing answered, or the string
+        //     was never a URL. Neither is a website, and neither weakens an absence claim.
+        //   * `identity_unverified` / `insufficient_margin` — a LIVE PAGE answered, bearing this
+        //     business's name closely enough for a tier to propose it, and the verifier could not
+        //     confirm it belonged to them. That is "we do not know", not "there is nothing".
+        //
+        // MEASURED, and why this guard exists: of the first 41 automatic determinations on this pool,
+        // 12 held a live name-matching domain refused on identity alone — Matabungkay Beach Hotel was
+        // told it had no website while `matabungkaybeachhotel.com` was answering. Writing `no-website`
+        // there asserts something the evidence contradicts, and it is the same overreach the tier
+        // rule already refuses, wearing a different hat: there, a tier that could not look; here, a
+        // candidate we could not judge.
+        //
+        // The SEARCH still exhausts. This withholds only the machine's own conclusion, so the lead
+        // stays `website-unknown` — the honest state for insufficient evidence — while the trail
+        // remains complete and a human can still confirm absence against it through
+        // {@see confirmAbsent()}, which is exactly the division of labour this class already draws.
+        $inconclusive = LeadWebsiteCandidate::query()
+            ->where('lead_id', $lead->id)
+            ->whereIn('rejection_reason', [
+                LeadWebsiteCandidate::REJECTED_IDENTITY,
+                LeadWebsiteCandidate::REJECTED_MARGIN,
+            ])
+            ->exists();
+
+        if ($inconclusive) {
+            Log::info('Automatic absence withheld: a live candidate was refused on identity, not absence', [
+                'lead_id' => $lead->id,
+            ]);
+
             return;
         }
 

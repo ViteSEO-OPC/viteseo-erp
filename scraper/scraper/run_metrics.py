@@ -118,6 +118,15 @@ def build_record(
         "valid": summary.get("valid"),
         "duplicates": summary.get("duplicates"),
         "updated": summary.get("updated"),
+        # Businesses the CRM REFUSED on geography — outside the national boundary it enforces at
+        # ingest. Recorded as its own number rather than left to be inferred from
+        # `total - valid - duplicates`, because that residual also contains rows that failed ordinary
+        # validation, and the two are different findings: one says a provider returned a business in
+        # another country, the other says a row was malformed. A feature whose headline promise is
+        # "nothing outside the Philippines is stored" has to be able to show the count it rejected.
+        # `None` from a CRM that predates the field — absent, never zero, so "no rejections" and "this
+        # CRM cannot say" stay distinguishable.
+        "rejected": summary.get("rejected"),
         "imported": imported,
     }
 
@@ -152,6 +161,21 @@ def build_record(
         record["expansion_duplicates"] = int(stats.get("expansion_duplicates", 0))
         record["expansion_net_new"] = int(stats.get("expansion_net_new", 0))
         record["expansion_by_selector"] = stats.get("expansion_by_selector") or {}
+
+    # AI SEARCH PLANNING, when the provider consulted it. Absent otherwise — an OSM run or a Google
+    # run with planning off never asked, and a `false` here would claim a plan was sought and unused.
+    # `strategy_applied` is whether a returned plan actually shaped the request; `strategy_status` is
+    # how the planning call itself ended (`ok`, `insufficient_credit`, ...). The CRM reads both to
+    # decide whether a run may be called AI-planned.
+    if "strategy_applied" in stats:
+        record["strategy_applied"] = bool(stats["strategy_applied"])
+    if stats.get("strategy_status"):
+        record["strategy_status"] = str(stats["strategy_status"])
+
+    # A RATE REFUSAL'S SUGGESTED WAIT, when the refusing server gave one. Absent otherwise; the CRM's
+    # orchestrator uses it to pace a retry instead of guessing.
+    if isinstance(stats.get("retry_after"), int):
+        record["retry_after"] = int(stats["retry_after"])
 
     # Cost, when the provider spends money. Absent for OSM rather than zero — "free" and "not
     # measured" are different claims, and a null says which one this is.

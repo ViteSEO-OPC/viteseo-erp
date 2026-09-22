@@ -3,6 +3,7 @@
 namespace App\Modules\Crm\Console\Commands;
 
 use App\Models\User;
+use App\Support\MachineTokens;
 use Illuminate\Console\Command;
 use Illuminate\Support\Str;
 use Spatie\Permission\Models\Permission;
@@ -39,11 +40,12 @@ class N8nTokenCommand extends Command
             $user->tokens()->delete();
         }
 
-        $token = $user->createToken('n8n')->plainTextToken;
+        $token = MachineTokens::issue($user, 'n8n');
 
         $this->info('n8n service account: '.$user->email);
         $this->line('Scoped permissions: '.implode(', ', $cfg['permissions']));
-        $this->warn('Token (shown once — store it securely in the n8n credential store):');
+        $this->warn('Token (shown once — store it securely in the n8n credential store), expires '
+            .now()->addDays(MachineTokens::DEFAULT_DAYS)->toDateString().':');
         $this->line($token);
         $this->newLine();
         $this->comment('Note: cross-lead actions also require lead visibility per your authorization policy (assign a management role or scope to owned leads). n8n never sends email directly and never owns a schedule.');

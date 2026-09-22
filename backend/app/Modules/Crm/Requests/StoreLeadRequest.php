@@ -33,7 +33,8 @@ class StoreLeadRequest extends FormRequest
             'cold_calling' => ['sometimes', Rule::enum(LeadColdCalling::class)],
             'status' => ['sometimes', Rule::in(['interested', 'awaiting-reply', 'declined', 'call-back-req', 'new'])],
             'last_activity' => ['nullable', 'date'],
-            'score' => ['nullable', 'integer', 'min:0', 'max:100'],
+            // NOTE: `score` is deliberately NOT accepted. LeadScorer is its only writer (R-4); the
+            // observer scores every new non-prospect lead on create.
             // Estimated Deal Value (prospect-stage). NOT revenue — never merged with deals.amount.
             'amount' => ['nullable', 'numeric', 'min:0'],
             // Lead Acquisition Channel — the business "Source" (Referral, Facebook, Website, Cold
@@ -69,12 +70,25 @@ class StoreLeadRequest extends FormRequest
             'lazada' => ['nullable', 'string', 'max:255'],
             'tiktok_shop' => ['nullable', 'string', 'max:255'],
             'other_marketplace' => ['nullable', 'string', 'max:255'],
-            // Required for Admin/SA (they must pick the owning BD); optional for a BD creator
-            // (auto-assigned to self in the controller). LeadImportService reuses these rules via
-            // `new StoreLeadRequest` with NO bound user — the `(bool) $this->user()` guard keeps
-            // the closure from calling hasRole() on null there (assignment is applied per-import).
+            // OPTIONAL for every creator — a lead may be created unassigned.
+            //
+            // This was `Rule::requiredIf(... ! hasRole('crm_bd'))`, which made an Admin or Super
+            // Admin unable to create a lead at all without naming an owning BD. That is a real
+            // workflow: a lead arrives before anyone has been chosen to work it, and the alternative
+            // — parking it on an arbitrary BD — is worse than leaving it unowned, because it puts
+            // the lead in someone's pipeline and their performance figures.
+            //
+            // Nothing else about assignment changed. A BD creator is still auto-assigned to self in
+            // {@see \App\Modules\Crm\Services\LeadCreator}, so a BD cannot create a lead they do
+            // not own. When a value IS supplied it is validated exactly as before: OrgUserRule fences
+            // it to the current tenant, and MustBeBusinessDeveloper still refuses an admin, a
+            // suspended account, or anyone who does not carry leads. `assigned_to` has always been a
+            // nullable column with a nullOnDelete foreign key, so no migration is involved and
+            // unassigned is a state the schema and the read paths already understood.
+            //
+            // LeadImportService reuses these rules via `new StoreLeadRequest` with no bound user;
+            // dropping the closure removes that binding's only significance here.
             'assigned_to' => [
-                Rule::requiredIf(fn (): bool => (bool) $this->user() && ! $this->user()->hasRole('crm_bd')),
                 'nullable', 'integer', OrgUserRule::exists(), new MustBeBusinessDeveloper,
             ],
         ];

@@ -1,5 +1,7 @@
 <?php
 
+$origins = array_map('trim', explode(',', (string) env('CORS_ALLOWED_ORIGINS', '*')));
+
 return [
 
     /*
@@ -24,7 +26,7 @@ return [
 
     // Comma-separated list in production (e.g. "https://erp.kiplo.com").
     // Defaults open for local dev where the frontend port moves around.
-    'allowed_origins' => array_map('trim', explode(',', (string) env('CORS_ALLOWED_ORIGINS', '*'))),
+    'allowed_origins' => $origins,
 
     'allowed_origins_patterns' => [],
 
@@ -34,6 +36,12 @@ return [
 
     'max_age' => 0,
 
-    'supports_credentials' => false,
+    // Credentials only to origins named on purpose. With '*' the CORS package
+    // would echo back whatever Origin asked, and Lax cookies ride same-site
+    // requests -- so any other viteseo.ph subdomain could read a signed-in user's
+    // API responses. Production needs none (one origin); local dev names
+    // http://localhost:3000 in CORS_ALLOWED_ORIGINS so the Next dev server's
+    // requests carry the session cookie.
+    'supports_credentials' => ! in_array('*', $origins, true),
 
 ];

@@ -36,15 +36,30 @@ class NoteController extends Controller
      */
     public function store(StoreNoteRequest $request, Lead $lead, LeadNoteCreator $notes): JsonResponse
     {
-        $note = $notes->create($lead, (string) $request->validated()['body'], $request->user());
+        $note = $notes->create(
+            $lead,
+            (string) $request->validated()['body'],
+            $request->user(),
+            $request->noteDocument(),
+        );
 
         return (new NoteResource($note->load('author')))->response()->setStatusCode(201);
     }
 
-    /** Edit a note (author/Admin/SA). Route scopes {note} to {lead}. Logs `note.updated`. */
-    public function update(UpdateNoteRequest $request, Lead $lead, Note $note): JsonResponse
-    {
-        $note->update(['body' => (string) $request->validated()['body']]);
+    /**
+     * Edit a note (author/Admin/SA). Route scopes {note} to {lead}. Logs `note.updated`.
+     *
+     * Routed through {@see LeadNoteCreator::apply()} rather than a bare `update()` so the create and
+     * edit paths share ONE definition of how a document becomes stored columns — in particular the
+     * rule that `body` is re-derived server-side and never taken from the client.
+     */
+    public function update(
+        UpdateNoteRequest $request,
+        Lead $lead,
+        Note $note,
+        LeadNoteCreator $notes,
+    ): JsonResponse {
+        $notes->apply($note, (string) $request->validated()['body'], $request->noteDocument());
 
         return (new NoteResource($note->load('author')))->response();
     }

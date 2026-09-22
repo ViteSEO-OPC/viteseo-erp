@@ -67,7 +67,7 @@ export function useAuth() {
   const login = useCallback(
     async (credentials: { email: string; password: string }) => {
       const res = await platformLogin(credentials.email, credentials.password);
-      return { user: res.user, token: res.token };
+      return { user: res.user };
     },
     [platformLogin],
   );

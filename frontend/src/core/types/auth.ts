@@ -45,9 +45,11 @@ export interface AuthEmployee {
   is_management: boolean;
 }
 
-/** Response body of POST /auth/login (the inside of the `data` envelope). */
+/**
+ * Response body of POST /auth/login (the inside of the `data` envelope). The
+ * session itself arrives as an httpOnly cookie, never in the body.
+ */
 export interface LoginResponse {
-  token: string;
   user: AuthUser;
   roles: Role[];
   employee: AuthEmployee | null;
@@ -58,4 +60,17 @@ export interface MeResponse {
   user: AuthUser;
   roles: Role[];
   employee: AuthEmployee | null;
+}
+
+/** One browser the user is signed in on (GET /auth/sessions). */
+export interface SignedInDevice {
+  /** SHA-256 of the session id. The id itself is a credential and never leaves the server. */
+  key: string;
+  /** "Chrome on Windows" -- enough to recognise a device, not to fingerprint one. */
+  device: string;
+  user_agent: string | null;
+  ip_address: string | null;
+  last_active_at: string;
+  /** The browser asking. */
+  current: boolean;
 }

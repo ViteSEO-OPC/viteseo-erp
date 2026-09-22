@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { profileSchema, useValidatedForm } from "@/core/forms";
 import { useAuth } from "@/core/auth/AuthProvider";
 import { Avatar, Badge, Button, Card, Field, Input, Select } from "@/core/ui";
+import { SignedInDevices } from "@/core/components/signed-in-devices";
 import type { BadgeTone } from "@/core/ui";
 import type { UserRole } from "@/core/types";
 
@@ -118,6 +119,11 @@ export function ProfileView() {
           </Button>
         </form>
       </Card>
+
+      {/* Where this account is signed in */}
+      <div className="mt-6">
+        <SignedInDevices />
+      </div>
     </div>
   );
 }

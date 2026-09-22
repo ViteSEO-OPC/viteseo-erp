@@ -8,7 +8,6 @@ use App\Modules\Crm\Enums\PerformanceTargetPeriod;
 use App\Modules\Crm\Models\Deal;
 use App\Modules\Crm\Models\Lead;
 use App\Modules\Crm\Models\PlannerEvent;
-use Illuminate\Database\Eloquent\Builder;
 
 /**
  * The headline performance figures for one reporting subject — the single owner of the numbers

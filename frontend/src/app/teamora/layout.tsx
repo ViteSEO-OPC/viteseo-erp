@@ -3,6 +3,7 @@
 import { usePathname } from "next/navigation";
 
 import { RequireAuth, useAuth } from "@/core/auth-context";
+import { RequireModule } from "@/core/require-module";
 import { TeamoraShell } from "@/modules/hr/components/teamora-shell";
 import { ViewModeProvider } from "@/modules/hr/components/view-mode-context";
 
@@ -40,9 +41,11 @@ export default function TeamoraLayout({
 
   return (
     <RequireAuth role={requiredRole}>
-      <ViewModeProvider isManager={isManager}>
-        <TeamoraShell>{children}</TeamoraShell>
-      </ViewModeProvider>
+      <RequireModule module="hris">
+        <ViewModeProvider isManager={isManager}>
+          <TeamoraShell>{children}</TeamoraShell>
+        </ViewModeProvider>
+      </RequireModule>
     </RequireAuth>
   );
 }

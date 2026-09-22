@@ -23,6 +23,7 @@ import {
 import { cn } from "@/lib/utils";
 import { CredentialsCard } from "@/core/team/team-accounts-manager";
 import { useDepartments } from "@/modules/hr/hooks/use-departments";
+import { GrantAccessSection } from "@/modules/hr/components/grant-access-section";
 import { useCreateEmployee, useEmployees } from "@/modules/hr/hooks/use-employees";
 import { SiblingsFields } from "@/modules/hr/components/siblings-fields";
 import {
@@ -105,6 +106,9 @@ const schema = z
     hire_date: requiredDate("Hire date"),
     base_salary: requiredMoney("Base salary"),
     is_management: z.boolean(),
+    // Access in the other modules, given as the person is hired. The backend
+    // re-checks every value against GrantableRoles, so this stays a plain list.
+    grant_roles: z.array(z.string()),
     bank_name: optionalText(),
     bank_account: optionalText(100),
     bank_account_name: optionalText(),
@@ -148,7 +152,7 @@ const EMPTY: FormValues = {
   emergency_contact_relationship: "", emergency_contact_phone: "",
   department_id: "", manager_id: "", job_title: "",
   employment_status: "regular", work_location: "", employee_role: "",
-  hire_date: "", base_salary: "", is_management: false, bank_name: "",
+  hire_date: "", base_salary: "", is_management: false, grant_roles: [], bank_name: "",
   bank_account: "", height: "", weight: "", health_condition: "",
   pay_frequency: "semi_monthly", currency: "PHP", bank_account_type: "",
   bank_account_name: "",
@@ -212,6 +216,7 @@ export function EmployeeFormDialog({
       hire_date: v.hire_date,
       base_salary: Number(v.base_salary),
       is_management: v.is_management,
+      grant_roles: v.grant_roles.length ? v.grant_roles : undefined,
       phone: s(v.phone),
       address_house_no: s(v.address_house_no),
       address_street: s(v.address_street),
@@ -592,6 +597,18 @@ export function EmployeeFormDialog({
               </Field>
             </div>
 
+            <Controller
+              control={control}
+              name="grant_roles"
+              render={({ field }) => (
+                <GrantAccessSection
+                  value={field.value}
+                  onChange={field.onChange}
+                  employmentStatus={watch("employment_status")}
+                />
+              )}
+            />
+            
             {/* Compensation */}
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field label="Base salary (₱ / month)" error={errors.base_salary?.message}>

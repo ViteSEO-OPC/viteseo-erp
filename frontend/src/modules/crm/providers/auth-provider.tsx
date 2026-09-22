@@ -12,7 +12,6 @@
  * isLoading, login, logout }).
  */
 
-import type { ReactNode } from "react";
 import { useCallback, useMemo } from "react";
 
 import { useAuth as usePlatformAuth } from "@/core/auth-context";
@@ -31,14 +30,6 @@ type CrmUser = {
   status: string;
   lastLoginAt: string | null;
 };
-
-/**
- * CRM already lives under the root platform <AuthProvider>, so this is a
- * pass-through kept only for import compatibility with the original module.
- */
-export function AuthProvider({ children }: { children: ReactNode }) {
-  return <>{children}</>;
-}
 
 export function useAuth() {
   const {

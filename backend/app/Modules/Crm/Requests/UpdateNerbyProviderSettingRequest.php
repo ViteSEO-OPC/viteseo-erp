@@ -4,7 +4,6 @@ namespace App\Modules\Crm\Requests;
 
 use App\Modules\Crm\Enums\NerbyProvider;
 use Illuminate\Foundation\Http\FormRequest;
-use Illuminate\Validation\Rule;
 
 /**
  * Validation for a Nearby provider-configuration change (enablement, credential, options).

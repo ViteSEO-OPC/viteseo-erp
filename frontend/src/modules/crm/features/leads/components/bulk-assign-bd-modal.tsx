@@ -13,6 +13,11 @@ import { Button } from "@/modules/crm/components/ui/button";
 import { FormField } from "@/modules/crm/components/forms/form-field/form-field";
 import { RelationshipSelect } from "@/modules/crm/components/shared/relationship-select/relationship-select";
 import { useBdUsers } from "@/modules/crm/hooks/use-bd-users";
+import {
+  bdOptionsWithUnassigned,
+  UNASSIGNED_BD,
+  UNASSIGNED_BD_LABEL,
+} from "@/modules/crm/lib/bd-assignment";
 
 const closeButtonClass =
   "flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
@@ -22,7 +27,10 @@ type Props = {
   onOpenChange: (open: boolean) => void;
   /** How many selected leads the chosen BD will take ownership of. */
   count: number;
-  /** Fires with the chosen BD once the user confirms — the page owns the mutation and the selection. */
+  /**
+   * Fires with the chosen owner once the user confirms — the page owns the mutation and the
+   * selection. `bdId` is {@link UNASSIGNED_BD} when the user chose to clear the assignment.
+   */
   onConfirm: (bdId: string, bdName: string) => void;
   /** True while the fan-out is in flight; locks the picker and both buttons. */
   pending: boolean;
@@ -45,7 +53,15 @@ export function BulkAssignBdModal({ open, onOpenChange, count, onConfirm, pendin
   const { bdUsers, isLoading } = useBdUsers();
   const [assignedTo, setAssignedTo] = useState<string>("");
 
+  // Chosen "Unassigned" — a clear, not a handover. Tracked separately from the empty placeholder,
+  // so the confirm button can stay disabled until the user has actually answered the question.
+  const clearing = assignedTo === UNASSIGNED_BD;
+
   const handleAssign = () => {
+    if (clearing) {
+      onConfirm(UNASSIGNED_BD, UNASSIGNED_BD_LABEL);
+      return;
+    }
     const bd = bdUsers.find((user) => user.id === assignedTo);
     if (!bd) return;
     onConfirm(bd.id, bd.name);
@@ -71,18 +87,33 @@ export function BulkAssignBdModal({ open, onOpenChange, count, onConfirm, pendin
         </DialogHeader>
 
         <div className="flex flex-col gap-4 px-6 py-5">
+          {/* The sentence follows the choice, because "This replaces any current owner" is not what
+              clearing does and reading it while unassigning would be actively misleading. */}
           <p className="text-sm text-muted-foreground">
-            Assign the{" "}
-            <span className="font-semibold text-foreground">
-              {count} selected lead{count === 1 ? "" : "s"}
-            </span>{" "}
-            to a Business Development Manager. This replaces any current owner.
+            {clearing ? (
+              <>
+                Remove the owner from the{" "}
+                <span className="font-semibold text-foreground">
+                  {count} selected lead{count === 1 ? "" : "s"}
+                </span>
+                . They stay in the pipeline with no Business Development Manager until one is
+                assigned.
+              </>
+            ) : (
+              <>
+                Assign the{" "}
+                <span className="font-semibold text-foreground">
+                  {count} selected lead{count === 1 ? "" : "s"}
+                </span>{" "}
+                to a Business Development Manager. This replaces any current owner.
+              </>
+            )}
           </p>
           <FormField label="Business Development Manager" required>
             <RelationshipSelect
               value={assignedTo}
               onValueChange={setAssignedTo}
-              options={bdUsers.map((u) => ({ value: u.id, label: u.name }))}
+              options={bdOptionsWithUnassigned(bdUsers)}
               placeholder={isLoading ? "Loading…" : "Select a BD"}
               disabled={pending}
               triggerClassName="w-full"
@@ -97,7 +128,7 @@ export function BulkAssignBdModal({ open, onOpenChange, count, onConfirm, pendin
             Cancel
           </Button>
           <Button variant="default" size="sm" onClick={handleAssign} disabled={!assignedTo || pending}>
-            {pending ? "Assigning…" : "Assign"}
+            {pending ? (clearing ? "Unassigning…" : "Assigning…") : clearing ? "Unassign" : "Assign"}
           </Button>
         </DialogFooter>
       </DialogContent>

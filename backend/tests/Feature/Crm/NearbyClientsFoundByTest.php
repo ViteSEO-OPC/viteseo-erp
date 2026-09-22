@@ -18,10 +18,12 @@ use Tests\TestCase;
  *
  * Two properties are load-bearing:
  *
- *  - **The partition is two-way and errs deterministic.** Only the AI lane's own provenance value
- *    counts as `ai-assisted`; everything else — including legacy `nearby` rows that predate the lane
- *    split — reads as `openstreetmap`. A lead can therefore never be labelled deterministic when AI
- *    found it, which is the direction that would actually mislead someone judging the capability.
+ *  - **The map is explicit, with no catch-all.** Each lane maps from its own provenance value:
+ *    `openstreetmap` (plus the legacy `nearby` alias) → `openstreetmap`, `openai` → `ai-assisted`,
+ *    `google_places` → `google-places`. A value this build does not know reads as `unknown`, NEVER
+ *    as `openstreetmap`. The earlier two-way partition folded everything else into the deterministic
+ *    bucket, which credited the OpenStreetMap sweep with every Google Places lead — a lane must
+ *    never be labelled as one that did not find the business.
  *  - **Nothing else about the payload moved.** This is an additive field on a frozen surface.
  */
 class NearbyClientsFoundByTest extends TestCase
@@ -92,12 +94,35 @@ class NearbyClientsFoundByTest extends TestCase
         $this->assertSame(['Hidden Garden' => 'openstreetmap'], $this->foundBy());
     }
 
-    public function test_a_mixed_pool_separates_cleanly_into_two_lanes(): void
+    public function test_a_business_the_google_places_lane_found_reads_as_google_places(): void
+    {
+        // The provenance the scraper stamps is the provider's own name, `google_places`; the board
+        // speaks the hyphenated lane value. Before this mapping existed the record read as
+        // `openstreetmap` — the bug this test exists to stop coming back.
+        $this->prospect('google_places', 'Mercury Drug Ayala Center');
+
+        $this->assertSame(['Mercury Drug Ayala Center' => 'google-places'], $this->foundBy());
+    }
+
+    public function test_an_unrecognised_provenance_value_is_not_labelled_openstreetmap(): void
+    {
+        // The whole point of dropping the catch-all: a lane nobody has taught this build about must
+        // stay visibly unplaced, not borrow the deterministic sweep's identity.
+        $this->prospect('some_future_provider', 'Unplaceable Trading');
+
+        $lanes = $this->foundBy();
+
+        $this->assertSame('unknown', $lanes['Unplaceable Trading']);
+        $this->assertNotSame('openstreetmap', $lanes['Unplaceable Trading']);
+    }
+
+    public function test_a_mixed_pool_separates_cleanly_into_its_lanes(): void
     {
         $this->prospect('openstreetmap', 'Cafe Leona');
         $this->prospect('openai', 'Jollibee');
         $this->prospect('nearby', 'Hidden Garden');
         $this->prospect('openai', 'sinanglawan');
+        $this->prospect('google_places', 'Southstar Drug');
 
         $lanes = $this->foundBy();
 
@@ -105,21 +130,25 @@ class NearbyClientsFoundByTest extends TestCase
         $this->assertSame('ai-assisted', $lanes['sinanglawan']);
         $this->assertSame('openstreetmap', $lanes['Cafe Leona']);
         $this->assertSame('openstreetmap', $lanes['Hidden Garden']);
+        $this->assertSame('google-places', $lanes['Southstar Drug']);
         // Every row carries a lane — the board's filter must never meet an undefined value.
-        $this->assertCount(4, array_filter($lanes, fn (string $v): bool => $v !== ''));
+        $this->assertCount(5, array_filter($lanes, fn (string $v): bool => $v !== ''));
     }
 
-    public function test_every_row_carries_one_of_exactly_two_values(): void
+    public function test_every_row_carries_a_value_from_the_closed_vocabulary(): void
     {
-        // A closed set. The UI offers both options unconditionally and maps them to labels, so a
-        // third value appearing here would silently fall into the deterministic bucket.
-        foreach (['openstreetmap', 'openai', 'nearby', 'manual'] as $i => $source) {
+        // A closed set the UI knows in full. `manual` is not a discovery lane at all, so it must land
+        // on `unknown` — the value that says "not placed" instead of borrowing a real lane's name.
+        foreach (['openstreetmap', 'openai', 'nearby', 'google_places', 'manual'] as $i => $source) {
             $this->prospect($source, "Business {$i}");
         }
 
-        foreach ($this->foundBy() as $business => $lane) {
-            $this->assertContains($lane, ['openstreetmap', 'ai-assisted'], $business);
+        $lanes = $this->foundBy();
+
+        foreach ($lanes as $business => $lane) {
+            $this->assertContains($lane, ['openstreetmap', 'ai-assisted', 'google-places', 'unknown'], $business);
         }
+        $this->assertSame('unknown', $lanes['Business 4']);
     }
 
     // --- the surface it was added to is otherwise unchanged ------------------
@@ -133,12 +162,14 @@ class NearbyClientsFoundByTest extends TestCase
 
         // `qualified` / `qualifiedAt` / `qualifiedBy` joined this surface when claimed businesses
         // began staying on the Nearby board instead of vanishing (see NearbyClaimedVisibilityTest).
-        // They are additive and read-only, exactly like `foundBy` before them — this assertion still
-        // exists to catch a field LEAVING, or one arriving without anyone deciding to add it.
+        // `inPhilippines` joined it so a Philippines-only VIEW could default sensibly over rows
+        // created before discovery was fenced (see NearbyClientsCountryViewTest). All are additive
+        // and read-only, exactly like `foundBy` before them — this assertion still exists to catch a
+        // field LEAVING, or one arriving without anyone deciding to add it.
         $this->assertSame([
             'id', 'business', 'initials', 'niche', 'area', 'contact', 'status', 'foundBy',
             'priority', 'active', 'qualified', 'qualifiedAt', 'qualifiedBy',
-            'latitude', 'longitude', 'website',
+            'latitude', 'longitude', 'inPhilippines', 'website',
         ], array_keys($row));
     }
 

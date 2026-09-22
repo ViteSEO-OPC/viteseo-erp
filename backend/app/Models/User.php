@@ -11,6 +11,7 @@ use App\Modules\Projects\Models\Link;
 use App\Modules\Projects\Models\Project;
 use App\Modules\Projects\Models\Subtask;
 use App\Modules\Projects\Models\Task;
+use App\Support\AccessLifecycle;
 use App\Support\CurrentOrg;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -37,6 +38,45 @@ class User extends Authenticatable
 {
     /** @use HasFactory<UserFactory> */
     use HasApiTokens, HasRoles, HasFactory, Notifiable, SoftDeletes;
+
+    /**
+     * Closing, reopening or deleting the account changes everything they may use at
+     * once, so their open sessions are judged again (AccessLifecycle).
+     */
+    protected static function booted(): void
+    {
+        static::updated(function (User $user): void {
+            if ($user->wasChanged('status')) {
+                AccessLifecycle::schedule($user, 'status');
+            }
+        });
+
+        static::deleted(fn (User $user) => AccessLifecycle::schedule($user, 'deleted'));
+    }
+
+    /**
+     * Platform-level account state — whether this person may sign in at all.
+     *
+     * NOT the CRM's notion of status. `Crm\Resources\UserResource` exposes a field
+     * of the same name computed from `CrmAccessService::isSuspended()`, which is
+     * CRM-scoped and lives in `crm_user_access`. This column is the whole account:
+     * inactive here and no module is reachable, because the account cannot
+     * authenticate. Keep the two apart when reading a payload.
+     *
+     * The column arrived with the CRM's additive users migration for exactly this
+     * purpose ("reversible user deactivate") and was never wired to anything; CRM
+     * solved its own case with a scoped table instead. Offboarding is the platform
+     * case it was made for.
+     */
+    public const STATUS_ACTIVE = 'active';
+
+    public const STATUS_INACTIVE = 'inactive';
+
+    /** May this account sign in and hold a session? */
+    public function isActive(): bool
+    {
+        return $this->status !== self::STATUS_INACTIVE;
+    }
 
     /**
      * Get the attributes that should be cast.

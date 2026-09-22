@@ -105,25 +105,54 @@ export function LeadDetailPage() {
           onAttachments={() => setAttachmentsOpen(true)}
         />
 
-        {/* Dominant left content region + a narrow right sidebar, matching the reference proportions. */}
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[76fr_24fr] lg:gap-6">
-          <div className="flex flex-col gap-6">
+        {/* Dominant left content region + a narrow right sidebar, matching the reference proportions.
+            From xl the two columns share the SAME THREE ROWS (`grid-rows-subgrid` below), which is
+            what keeps them in step: each column used to stack its own cards independently, so the
+            45px by which Quick Actions outgrew the Lead Overview pushed the whole rail 44px out of
+            alignment with the main column — the Activity Timeline started level with nothing, and
+            the offset persisted down the page. Sharing rows costs no markup and no fixed heights:
+            a row is as tall as the taller of the two cards in it, so every row STARTS on one line.
+            Only the first row stretches its shorter card (Quick Actions beside the Lead Overview);
+            everything below keeps its own height — Internal Notes and Call (`xl:items-start` below),
+            the Activity Timeline and Files & Downloads (`xl:self-start` in their cards).
+
+            Deliberately xl and not lg, even though the two columns appear at lg. Between lg and xl
+            the Notes/Call pair stacks instead of sitting side by side, which makes the middle row
+            766px tall against a 410px timeline — sharing rows there would buy alignment at the
+            price of a 356px hole inside the Activity Timeline. That band keeps its existing
+            independent columns. */}
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[76fr_24fr] xl:grid-rows-[auto_auto_auto]">
+          <div className="flex flex-col gap-6 xl:row-span-3 xl:grid xl:grid-rows-subgrid">
             <LeadSummaryCard lead={lead} />
             {/* Uploading stays behind the header's Attachment action; the page surfaces files only
                 as the read-only Files & Downloads card in the right rail. */}
             {/* Internal Notes + the Calling Workspace share a row (reference layout): Notes dominant
-                (~71%), Active Call a narrow console (~29%). Stretches to equal height. Below xl the two
-                stack (Notes above Call) — the tablet layout — and collapse into the single mobile column. */}
-            <div className="grid grid-cols-1 gap-6 xl:grid-cols-[71fr_29fr]">
+                (~71%), Active Call a narrow console (~29%). Below xl the two stack (Notes above Call)
+                — the tablet layout — and collapse into the single mobile column. */}
+            {/* Side by side from xl, but each card at its OWN height (`xl:items-start`). Grid items
+                default to `stretch`, which made the shorter card — usually Call, beside a long note
+                history — as tall as the other and left a large empty block inside it. They share a
+                top edge, not a bottom one. `items-start` is block-axis only: the 71/29 split and each
+                card's full column width are unchanged. Notes keeps its own internal scrolling
+                (`max-h-96`, `xl:max-h-44`). Stacked below xl, each card sits in its own row at its
+                natural height, as before. */}
+            <div className="grid grid-cols-1 gap-6 xl:grid-cols-[71fr_29fr] xl:items-start">
               <DiscussionNotes leadId={params.id} />
-              <ActiveCallPanel leadId={params.id} />
+              <ActiveCallPanel
+                leadId={params.id}
+                leadName={lead.business || lead.contact}
+                contactName={lead.contact}
+              />
             </div>
             {/* Email Conversation (outbound + inbound) with its reply box, full width of the main
                 column and BELOW the Notes/Call row. Reads GET /leads/{id}/emails and sends through
                 the existing Outreach pipeline — the same one the Follow-ups workspace uses. */}
             <EmailThread leadId={params.id} />
           </div>
-          <div className="flex flex-col gap-6">
+          {/* Same three shared rows as the column above, so Quick Actions / Activity Timeline /
+              Files line up with Lead Overview / Notes+Call / Email Conversation. Below xl this is
+              an ordinary flex column again and the cards simply stack. */}
+          <div className="flex flex-col gap-6 xl:row-span-3 xl:grid xl:grid-rows-subgrid">
             <QuickActionsCard
               actions={quickActions}
               onSelect={(key) => {

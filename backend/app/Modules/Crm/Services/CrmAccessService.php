@@ -6,6 +6,7 @@ namespace App\Modules\Crm\Services;
 
 use App\Models\User;
 use App\Modules\Crm\Models\CrmUserAccess;
+use App\Support\AccessLifecycle;
 use Illuminate\Database\Eloquent\Builder;
 
 /**
@@ -116,12 +117,6 @@ class CrmAccessService
         return $best;
     }
 
-    /** Whether the user can already enter Zerem (holds any CRM-relevant role). */
-    public function hasCrmAccess(User $user): bool
-    {
-        return $this->primaryCrmRole($user) !== null;
-    }
-
     // --- CRM access suspension ----------------------------------------------
     //
     // Suspension is ACCESS CONTROL ONLY. Nothing below reads or writes a role, a lead, a Planner
@@ -152,6 +147,9 @@ class CrmAccessService
         // Associated rather than mass-assigned — `user_id` is the row's identity, never request data.
         $access->user()->associate($user);
         $access->save();
+
+        // Their open CRM pages close now -- and if the CRM was all they had, they are signed out.
+        AccessLifecycle::schedule($user, 'crm-suspended');
     }
 
     /**
@@ -165,6 +163,8 @@ class CrmAccessService
     public function restore(User $user): void
     {
         CrmUserAccess::query()->where('user_id', $user->id)->delete();
+
+        AccessLifecycle::schedule($user, 'crm-restored');
     }
 
     /**
@@ -178,8 +178,8 @@ class CrmAccessService
      * Expressed as an anti-join against `crm_user_access` because absence of a row IS active: there
      * is no per-user flag to compare, and adding one would create a second source of truth.
      *
-     * @param  Builder<\App\Models\User>  $query
-     * @return Builder<\App\Models\User>
+     * @param  Builder<User>  $query
+     * @return Builder<User>
      */
     public function excludeSuspended(Builder $query): Builder
     {

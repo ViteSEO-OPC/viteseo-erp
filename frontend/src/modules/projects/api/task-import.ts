@@ -9,8 +9,8 @@ import type {
 /**
  * Download the Markdown brief for a project and hand it to the browser.
  *
- * Fetched through the api client rather than a plain link because the endpoint
- * is behind Sanctum and a bare `<a href>` carries no Authorization header.
+ * Fetched through the api client rather than a plain link so the filename comes
+ * from Content-Disposition and a refusal surfaces as an error, not a navigation.
  */
 export async function downloadImportBrief(
   projectId: string,

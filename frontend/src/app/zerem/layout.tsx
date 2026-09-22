@@ -5,6 +5,8 @@ import { usePathname, useRouter } from "next/navigation";
 
 import { useAuth } from "@/modules/crm/providers/auth-provider";
 import { RealtimeProvider } from "@/core/realtime/RealtimeProvider";
+import { AccessChangedListener } from "@/core/realtime/access-changed-listener";
+import { RequireModule } from "@/core/require-module";
 import { LeadRealtimeListener } from "@/modules/crm/features/leads/components/lead-realtime-listener";
 import { NotificationRealtimeListener } from "@/modules/crm/features/notifications/components/notification-realtime-listener";
 import { ProjectNotificationListener } from "@/modules/projects/components/projects/project-notification-listener";
@@ -79,11 +81,16 @@ export default function CrmLayout({ children }: { children: React.ReactNode }) {
               Mounted here so the CRM shell keeps caching them as it always has, now
               as a peer of the listener above rather than as a hidden side effect. */}
           <ProjectNotificationListener />
+          {/* A role taken, the CRM suspended, the account closed, this session ended from
+              another device: re-read who this is at once, and leave if the CRM is gone. */}
+          <AccessChangedListener />
           {/* `font-primary` (Exo) is scoped here so CRM keeps its typeface without
               changing the platform's global body font. */}
-          <div className="font-primary">
-            <AppShell>{children}</AppShell>
-          </div>
+          <RequireModule module="crm">
+            <div className="font-primary">
+              <AppShell>{children}</AppShell>
+            </div>
+          </RequireModule>
         </RealtimeProvider>
       </PermissionsProvider>
       </TableDensityProvider>
