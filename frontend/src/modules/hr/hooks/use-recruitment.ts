@@ -5,6 +5,7 @@ import type { QueueParams } from "@/modules/hr/api/queue";
 
 import {
   getRequisitions,
+  getRequisition,
   createRequisition,
   updateRequisition,
   deleteRequisition,
@@ -30,6 +31,18 @@ export function useRequisitions(params: QueueParams) {
     queryFn: () => getRequisitions(params),
     // Turning a page swaps the rows rather than emptying the table and rebuilding it.
     placeholderData: keepPreviousData,
+  });
+}
+
+/**
+ * The requisition the board is showing. Separate from the queue query on purpose — the queue
+ * is one filtered page, and the board must not blink out when its requisition leaves it.
+ */
+export function useRequisition(id: number | undefined) {
+  return useQuery({
+    queryKey: [...REQS_KEY, "one", id] as const,
+    queryFn: () => getRequisition(id as number),
+    enabled: typeof id === "number",
   });
 }
 

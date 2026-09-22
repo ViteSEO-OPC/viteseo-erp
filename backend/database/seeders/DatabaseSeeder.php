@@ -3,6 +3,7 @@
 namespace Database\Seeders;
 
 use App\Modules\Hr\Database\Seeders\AttendanceDemoSeeder;
+use App\Modules\Hr\Database\Seeders\AttendanceHistoryDemoSeeder;
 use App\Modules\Hr\Database\Seeders\AttritionDemoSeeder;
 use App\Modules\Hr\Database\Seeders\AuditDemoSeeder;
 use App\Modules\Hr\Database\Seeders\BenefitProgramSeeder;
@@ -13,6 +14,7 @@ use App\Modules\Hr\Database\Seeders\HeadcountMovementDemoSeeder;
 use App\Modules\Hr\Database\Seeders\HealthSafetyDemoSeeder;
 use App\Modules\Hr\Database\Seeders\HolidayDemoSeeder;
 use App\Modules\Hr\Database\Seeders\OfficeExpenseDemoSeeder;
+use App\Modules\Hr\Database\Seeders\OfficeExpenseHistoryDemoSeeder;
 use App\Modules\Hr\Database\Seeders\DepartmentSeeder;
 use App\Modules\Hr\Database\Seeders\DiversityDemoSeeder;
 use App\Modules\Hr\Database\Seeders\EmployeeDemoSeeder;
@@ -153,14 +155,23 @@ class DatabaseSeeder extends Seeder
                 // Approved leave history across months for the Absences & Leaves report.
                 LeaveReportDemoSeeder::class,
                 AttendanceDemoSeeder::class,
+                // Last month in full, behind this week's board data, so the Daily Time
+                // Record has a finished month to show and its "Late by" column has
+                // something to report. Runs after the week seeder, which owns today.
+                AttendanceHistoryDemoSeeder::class,
                 ReimbursementDemoSeeder::class,
                 PayrollDemoSeeder::class,
                 RecruitmentDemoSeeder::class,
+                // Three interns across two cutoffs, for Company → Intern Allowance and its payroll.
+                \App\Modules\Hr\Database\Seeders\InternPayrollDemoSeeder::class,
                 RequestsDemoSeeder::class,
                 ConcernsDemoSeeder::class,
                 // Safety concerns across months for the Health & Safety report.
                 HealthSafetyDemoSeeder::class,
                 OfficeExpenseDemoSeeder::class,
+                // A year of dated spending behind those five rows, so the ledger's month
+                // picker, spend cards and paging have twelve months to work on.
+                OfficeExpenseHistoryDemoSeeder::class,
                 FaqDemoSeeder::class,
                 HolidayDemoSeeder::class,
                 // Backfill representative audit-trail history for the Audit report.

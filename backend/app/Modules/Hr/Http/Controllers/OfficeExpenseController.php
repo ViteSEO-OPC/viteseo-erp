@@ -32,7 +32,13 @@ class OfficeExpenseController extends Controller
      */
     public function summary(Request $request): JsonResponse
     {
-        return response()->json(['data' => $this->service->summary($this->filters($request))]);
+        return response()->json(['data' => array_merge(
+            $this->service->summary($this->filters($request)),
+            // The month picker's options ride along with the cards it sits above, rather than
+            // costing a request of their own. They describe the WHOLE ledger on purpose — see
+            // OfficeExpenseService::months().
+            ['months' => $this->service->months()],
+        )]);
     }
 
     /**

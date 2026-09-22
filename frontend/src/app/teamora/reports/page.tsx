@@ -53,7 +53,7 @@ const REPORTS: {
   },
   {
     // Its own card rather than a panel inside Absences: this is an accounting figure that
-    // finance reconciles, not an HR utilisation chart, and it exports as a CSV of rows.
+    // finance reconciles, not an HR utilisation chart, and it exports as a workbook of rows.
     key: "leave_liability",
     title: "Leave Liability",
     description: "What unused paid leave would cost if it were paid out today — the accrued obligation behind every leave balance, per employee and by department.",

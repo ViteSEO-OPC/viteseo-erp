@@ -28,6 +28,11 @@ class Employee extends Model
         'photo_path',
         'job_title',
         'employment_status',
+        'ojt_required_hours',
+        // Interns only — their own allowance, overriding the company default.
+        'allowance_amount',
+        // The conversion's effective date: the last internship day is the day before.
+        'intern_converted_on',
         'employment_type',
         'work_location',
         'employee_role',
@@ -75,6 +80,8 @@ class Employee extends Model
         'sss_number',
         'philhealth_number',
         'pagibig_number',
+        // Any number of further IDs the four above do not name — a list of {type, number}.
+        'other_ids',
         'custom_workdays',
         'custom_start_time',
         'custom_end_time',
@@ -116,6 +123,8 @@ class Employee extends Model
 
         'date_of_birth' => 'date',
         'base_salary' => 'decimal:2',
+        'allowance_amount' => 'decimal:2',
+        'intern_converted_on' => 'date',
         'is_management' => 'boolean',
         'management_since' => 'date',
         'minimum_wage_exempt' => 'boolean',
@@ -136,6 +145,13 @@ class Employee extends Model
         'sss_number' => 'encrypted',
         'philhealth_number' => 'encrypted',
         'pagibig_number' => 'encrypted',
+        /*
+         * The further IDs, as ONE encrypted blob. Their numbers are the same class of data as the
+         * four above, and a list cannot encrypt just one field of each entry — so the whole list is
+         * encrypted together. That is also why the column is TEXT and not `json`: what is stored is
+         * a ciphertext string, which a json column would refuse.
+         */
+        'other_ids' => 'encrypted:array',
     ];
 
     /**
@@ -147,11 +163,28 @@ class Employee extends Model
     public const SENSITIVE_FIELDS = [
         'bank_account', 'bank_account_name', 'tin',
         'sss_number', 'philhealth_number', 'pagibig_number',
+        'other_ids',
     ];
 
-    /** A sensitive value reduced to its last four characters. */
-    public static function maskSensitive(?string $value): ?string
+    /**
+     * A sensitive value reduced to what a record may show.
+     *
+     * A string keeps its last four characters. A LIST of further IDs is the same job done per
+     * entry: each number is masked by this very rule, and the types are left as typed, because a
+     * label ("Passport") is not personal data.
+     *
+     * @param  string|array<int, array<string, mixed>>|null  $value
+     * @return string|array<int, array<string, mixed>>|null
+     */
+    public static function maskSensitive(string|array|null $value): string|array|null
     {
+        if (is_array($value)) {
+            return array_values(array_map(fn (array $id): array => [
+                'type' => $id['type'] ?? null,
+                'number' => self::maskSensitive(isset($id['number']) ? (string) $id['number'] : null),
+            ], $value));
+        }
+
         if ($value === null || $value === '') {
             return $value;
         }
@@ -171,11 +204,14 @@ class Employee extends Model
      * @return array<string, string|null>
      */
     /**
-     * The name as a roster lists it: "Dela Cruz Jr., Juan Santos".
+     * The name as a roster lists it: "Dela Cruz Jr., Juan S.".
      *
      * A suffix belongs to the surname, not to the given names — "Dela Cruz, Juan Jr." files the
      * Jr. under Juan and reads as a second given name. Records from before the name was split have
      * no `last_name` to file under, so they keep the composed name rather than being guessed at.
+     *
+     * The middle name is carried as an INITIAL. Someone with none is listed exactly as before —
+     * surname, then first name — because there is nothing to abbreviate.
      */
     public function listingName(): ?string
     {
@@ -189,11 +225,33 @@ class Employee extends Model
         $surname = $suffix === '' ? $last : "{$last} {$suffix}";
 
         $given = implode(' ', array_filter(
-            [trim((string) $this->first_name), trim((string) $this->middle_name)],
-            fn (string $part) => $part !== '',
+            [trim((string) $this->first_name), $this->middleInitial()],
+            fn (?string $part) => $part !== null && $part !== '',
         ));
 
         return $given === '' ? $surname : "{$surname}, {$given}";
+    }
+
+    /**
+     * The middle name as an initial — "Reyes" becomes "R." — or null when there is none.
+     *
+     * A middle name on a Philippine record is the mother's maiden surname, and a roster carries
+     * it as the M.I.: it is there to tell two Juan Dela Cruzes apart, not to be read. A compound
+     * one ("Dela Cruz") gives its first letter only, which is what the forms this mirrors do.
+     *
+     * `mb_` throughout — a name is the last place to assume one byte is one letter, and the
+     * first letter of "Ñ" truncated mid-sequence is not a letter at all.
+     */
+    private function middleInitial(): ?string
+    {
+        $middle = trim((string) $this->middle_name);
+
+        if ($middle === '') {
+            return null;
+        }
+
+        // A record already holding just "R" or "R." must not come back as "R..".
+        return mb_strtoupper(mb_substr($middle, 0, 1)) . '.';
     }
 
     /**
@@ -233,6 +291,27 @@ class Employee extends Model
     public function isManagement(): bool
     {
         return (bool) $this->is_management;
+    }
+
+    /** An intern today — paid an allowance under Company → Intern Allowance, not a salary. */
+    public function isIntern(): bool
+    {
+        return $this->employment_status === 'ojt';
+    }
+
+    /**
+     * Was this person an intern on $date (Manila, Y-m-d)? Payroll asks after the fact, when a
+     * converted intern's status already says otherwise — the conversion's effective date is
+     * their first day as staff.
+     */
+    public function isInternOn(string $date): bool
+    {
+        if ($this->isIntern()) {
+            return true;
+        }
+
+        return $this->intern_converted_on !== null
+            && $date < $this->intern_converted_on->toDateString();
     }
 
     /**

@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\Event;
 use Laravel\Sanctum\PersonalAccessToken;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Queue\Events\JobProcessing;
+use App\Modules\Hr\Services\InternAllowanceService;
 use App\Support\CurrentOrg;
 use App\Support\Mail\ModuleSenderResolver;
 use Illuminate\Auth\Notifications\ResetPassword;
@@ -33,6 +34,17 @@ class AppServiceProvider extends ServiceProvider
             ModuleSenderResolver::class,
             fn ($app): ModuleSenderResolver => new ModuleSenderResolver($app->make(Repository::class)),
         );
+
+        /*
+         * Company → Intern Allowance is resolved PER ROW in places like LeaveRequestResource, and
+         * every resolution was a fresh object whose per-request memo started cold — a version query
+         * for each intern's leave row. One instance lets that memo do its job.
+         *
+         * Safe only because the memo and the opening-version guard are keyed by org: the container
+         * outlives a single request in a queue worker, which is precisely where one instance does
+         * serve several tenants in turn.
+         */
+        $this->app->singleton(InternAllowanceService::class);
     }
 
     /**

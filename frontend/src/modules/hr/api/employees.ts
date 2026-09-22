@@ -96,6 +96,30 @@ export async function rehireEmployee(
   return res.data.data;
 }
 
+/** What the conversion dialog hands over at the end of an internship. */
+export interface ConvertInternInput {
+  employment_status: string;
+  effective_date: string;
+  base_salary: number;
+  job_title?: string;
+  reason?: string;
+  /** Set once HR has seen the warning about repricing a settled payroll run. */
+  acknowledge_repricing?: boolean;
+}
+
+/**
+ * Take an intern on as staff. Not the same as editing Employment status: this closes the
+ * internship on the employment timeline, opens the salary history at their first real
+ * salary, and raises leave credits from an intern's (zero) to the new status's.
+ */
+export async function convertIntern(
+  id: number,
+  input: ConvertInternInput,
+): Promise<Employee> {
+  const res = await apiClient.post(`/hr/employees/${id}/convert-intern`, input);
+  return res.data.data;
+}
+
 export async function getEmployee(id: number): Promise<Employee> {
   const res = await apiClient.get(`/hr/employees/${id}`);
   return res.data.data;

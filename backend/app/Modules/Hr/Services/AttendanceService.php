@@ -11,6 +11,7 @@ use App\Modules\Hr\Models\LeaveRequest;
 use App\Modules\Hr\Models\OvertimeRequest;
 use App\Modules\Hr\Models\WorkRequest;
 use App\Modules\Hr\Services\Concerns\PagesComputedRows;
+use App\Modules\Hr\Support\InternDay;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Carbon;
 use Illuminate\Validation\ValidationException;
@@ -559,6 +560,83 @@ class AttendanceService
         $this->violations->recompute($local->format('Y-m'), $employee->id);
 
         return $att;
+    }
+
+    /**
+     * RE-JUDGE ONE DAY'S STORED STATUSES against the grace now in force for it.
+     *
+     * `status` is a snapshot written at clock-in (see `arrivalStatus()` below), while the MONEY
+     * is derived from the punches every time payroll asks — through `effectiveFor()`, which
+     * already resolves the day's grace override. Those two answers agreed only as long as the
+     * grace could not move after the fact. Once HR can bend a PAST day's grace, a re-run makes
+     * the late deduction disappear while the row still reads "Late" and the per-N-lates ladder
+     * still counts it (`unpaidDaysDetailFor()` gates that counter on this column). The figure
+     * moves and the explanation does not, which is worse than either alone.
+     *
+     * So the snapshot is rebuilt from the same punches, under the same rule the money now uses.
+     * Deliberately narrow:
+     *   - `status_override` rows are left alone — a human asserting a status beats derivation.
+     *   - only `present`/`late` are re-judged; `absent`, `on_leave`, `rest_day`, `holiday` and
+     *     both suspensions mean something a clock-in time cannot contradict.
+     *   - management is exempt from the clock entirely, like everywhere else.
+     *   - a day the schedule does not cover, or cannot say the start of, declines to judge —
+     *     the same three-way guard `lateMinutesFor()` uses.
+     *
+     * @return int how many rows actually changed
+     */
+    public function restatusDate(string $date): int
+    {
+        $tz = config('app.timezone_local');
+        $day = Carbon::parse($date, $tz);
+
+        // `withTrashed`, for the reason payGroupEmployees() uses it: someone who has since
+        // been separated still has a payslip for the period this date sits in, and the derived
+        // side of their pay follows the new grace whether their record is soft-deleted or not.
+        // Leaving their row unjudged would reopen exactly the disagreement this method closes.
+        $rows = Attendance::with(['employee' => fn ($q) => $q->withTrashed()])
+            ->whereDate('work_date', $date)
+            ->whereNotNull('time_in')
+            ->where('status_override', false)
+            ->whereIn('status', ['present', 'late'])
+            ->get();
+
+        if ($rows->isEmpty()) {
+            return 0;
+        }
+
+        // One query for the day, like every other per-day map here.
+        $offHalves = $this->halfDays->offHalvesBetween($date, $date);
+        $changed = 0;
+
+        foreach ($rows as $row) {
+            $employee = $row->employee;
+
+            if (! $employee || $employee->isManagement()) {
+                continue;
+            }
+
+            $eff = $this->schedule->effectiveFor($employee, $day);
+
+            // No scheduled start to be late for. Not redundant with the workday test: a missing
+            // start time would otherwise be judged against expectedStart()'s 09:00 fallback, and
+            // an invented baseline is how somebody with no schedule reads as late every morning.
+            if (! ($eff['is_workday'] ?? false) || ($eff['start_time'] ?? null) === null) {
+                continue;
+            }
+
+            $status = $this->arrivalStatus(
+                $eff,
+                $row->time_in->copy()->setTimezone($tz),
+                $offHalves["{$employee->id}|{$date}"] ?? null,
+            );
+
+            if ($status !== $row->status) {
+                $row->update(['status' => $status]);
+                $changed++;
+            }
+        }
+
+        return $changed;
     }
 
     /**
@@ -2805,7 +2883,12 @@ class AttendanceService
         return $total === 0 ? 1.0 : round($employed / $total, 6);
     }
 
-    public function unpaidDaysDetailFor(Employee $employee, string $start, string $end, ?AttendancePolicy $policyOverride = null): UnpaidDaysResult
+    /**
+     * @param  ?string  $salaryFrom  the first day the salary pays, when that is later than the hire
+     *                               date — an intern converted inside this range, whose earlier
+     *                               days are paid as an allowance instead (Y-m-d)
+     */
+    public function unpaidDaysDetailFor(Employee $employee, string $start, string $end, ?AttendancePolicy $policyOverride = null, ?string $salaryFrom = null): UnpaidDaysResult
     {
         // Management staff are on a FIXED salary — they never accrue unpaid days,
         // regardless of the caller. Guarding here (not only in PayrollService) keeps
@@ -2925,6 +3008,15 @@ class AttendanceService
             if ($employmentStart !== null && $dateStr < $employmentStart) {
                 $unpaid += 1.0;
                 $charge($dateStr, 'not_employed', 1.0, 'Before hire date');
+
+                continue;
+            }
+            // An intern converted inside this range: the days before the conversion were an
+            // internship, paid as the intern allowance on the same slip, so the salary does not
+            // pay them a second time.
+            if ($salaryFrom !== null && $dateStr < $salaryFrom) {
+                $unpaid += 1.0;
+                $charge($dateStr, 'pre_conversion', 1.0, 'Before conversion — paid as intern allowance');
 
                 continue;
             }
@@ -3336,6 +3428,224 @@ class AttendanceService
     }
 
     /**
+     * Every date an INTERN's allowance is priced over, with the facts that decide its price and no
+     * verdict on any of them.
+     *
+     * The day is read the way unpaidDaysDetailFor() reads anyone's: the same employment window, the
+     * same HR-override-first rule, the same leave, half-day and early-out records, the same grace from
+     * the work schedule and the same handling of a missing clock-out. What differs is only who prices
+     * it — Company → Intern Allowance decides what each fact costs, which is why nothing here charges
+     * anything. Rest days appear only when worked or when a holiday falls on them: those are the only
+     * rest days a setting can pay for.
+     *
+     * @param  array<string, array{minutes:int, night?:int}>  $overtimeByDate  per the company's overtime mode
+     * @param  array<string, int>  $nightByDate  night-window minutes per date
+     * @return list<InternDay>
+     */
+    public function internDaysFor(
+        Employee $employee,
+        string $start,
+        string $end,
+        AttendancePolicy $policy,
+        array $overtimeByDate = [],
+        array $nightByDate = [],
+    ): array {
+        $tz = config('app.timezone_local');
+        $today = $this->today();
+        $last = Carbon::parse($end, $tz)->startOfDay();
+
+        $rows = $this->rowsBetween($employee, $start, $end)
+            ->keyBy(fn ($r) => $r->work_date->toDateString());
+        $leaves = LeaveRequest::with('leaveType')
+            ->where('employee_id', $employee->id)
+            ->where('status', 'approved')
+            ->whereDate('start_date', '<=', $end)
+            ->whereDate('end_date', '>=', $start)
+            ->get();
+        $halfDays = HalfDayRequest::where('employee_id', $employee->id)
+            ->where('status', 'approved')
+            ->whereBetween('work_date', [$start, $end])
+            ->get()
+            ->groupBy(fn ($h) => $h->work_date->toDateString());
+        $earlyOuts = EarlyOutRequest::where('employee_id', $employee->id)
+            ->where('status', 'approved')
+            ->whereBetween('work_date', [$start, $end])
+            ->get()
+            ->groupBy(fn ($e) => $e->work_date->toDateString());
+
+        // EVERY holiday type, special working days included: whether one of those is an ordinary day
+        // for an intern is itself a setting, so the pricer has to be told it was there.
+        $holidays = $this->holidays->typedHolidaysBetween(Carbon::parse($start, $tz), Carbon::parse($end, $tz));
+        $names = $holidays === [] ? [] : $this->holidays->namesBetween(Carbon::parse($start, $tz), Carbon::parse($end, $tz));
+        $suspensions = $this->suspensionsBetween($start, $end);
+
+        $employmentStart = $employee->hire_date?->toDateString();
+        $employmentEnd = $employee->separation_date?->toDateString();
+
+        // Late and undertime minutes are MEASURED here, never priced, so the company's deduction
+        // modes are switched on for the measurement whatever they are set to for employees.
+        $measure = (clone $policy)->forceFill([
+            'late_deduction_mode' => 'per_hour',
+            'undertime_deduction_mode' => 'per_hour',
+            'deduction_rounding' => 'exact',
+            'daily_deduction_cap' => 1.0,
+        ]);
+
+        $days = [];
+
+        for ($d = Carbon::parse($start, $tz)->startOfDay(); $d->lte($last); $d->addDay()) {
+            $date = $d->toDateString();
+            $eff = $this->schedule->effectiveFor($employee, $d);
+            $isWorkday = (bool) $eff['is_workday'];
+            $row = $rows->get($date);
+            $worked = (bool) $row?->time_in;
+            $holidayType = $holidays[$date] ?? null;
+
+            if (! $isWorkday && ! $worked && $holidayType === null) {
+                continue;
+            }
+
+            $facts = [
+                'date' => $date,
+                'isWorkday' => $isWorkday,
+                'isPast' => $date < $today,
+                'worked' => $worked,
+                'scheduledMinutes' => (int) ($eff['expected_minutes'] ?? 0),
+                'overtimeMinutes' => (int) ($overtimeByDate[$date]['minutes'] ?? 0),
+                'nightMinutes' => (int) ($nightByDate[$date] ?? 0),
+            ];
+
+            $beforeHire = $employmentStart !== null && $date < $employmentStart;
+            if ($beforeHire || ($employmentEnd !== null && $date > $employmentEnd)) {
+                if ($isWorkday) {
+                    $days[] = new InternDay(...[
+                        ...$facts,
+                        'kind' => InternDay::NOT_EMPLOYED,
+                        'detail' => $beforeHire ? 'Before hire date' : 'After last working day',
+                    ]);
+                }
+
+                continue;
+            }
+
+            $leave = $leaves->first(fn ($l) => $date >= Carbon::parse($l->start_date)->toDateString()
+                && $date <= Carbon::parse($l->end_date)->toDateString());
+            $halves = $halfDays[$date] ?? null;
+            $offHalf = match (true) {
+                $halves !== null => $halves->count() > 1 ? HalfDayWindowService::BOTH : (string) $halves->first()->period,
+                (bool) $leave?->is_half_day => (string) $leave->half_day_period,
+                default => null,
+            };
+
+            if ($worked) {
+                $facts = [...$facts, ...$this->internWorkedFacts($row, $eff, $isWorkday, $policy, $measure, $offHalf, $earlyOuts[$date] ?? collect())];
+            }
+
+            $leaveFacts = $leave === null ? [] : [
+                'isLeave' => true,
+                'leavePaid' => $leave->leaveType ? (bool) $leave->leaveType->is_paid : null,
+                'detail' => $leave->leaveType?->name,
+            ];
+
+            // HR's explicit status wins, then the calendar, then the person's own records — the
+            // order the payroll walk applies them in.
+            $override = $row?->status_override ? $row->status : null;
+            $class = match (true) {
+                $override === 'absent' => ['kind' => InternDay::ABSENT, 'byHr' => true, 'detail' => 'Marked absent by HR'],
+                $override === 'half_day' => ['kind' => InternDay::HALF_DAY, 'halves' => 1, 'byHr' => true, 'detail' => 'Marked half day by HR'],
+                in_array($override, ['rest_day', 'holiday'], true) => ['kind' => InternDay::DAY_OFF, 'byHr' => true, 'detail' => 'Marked not a working day by HR'],
+                $override === 'suspended_paid' => ['kind' => InternDay::SUSPENSION, 'suspensionPaid' => true, 'byHr' => true, 'detail' => 'Work suspended by HR (paid)'],
+                $override === 'suspended_unpaid' => ['kind' => InternDay::SUSPENSION, 'suspensionPaid' => false, 'byHr' => true, 'detail' => 'Work suspended by HR (unpaid)'],
+                $override === 'on_leave' => ['kind' => $leave?->is_half_day ? InternDay::HALF_DAY : InternDay::LEAVE, 'halves' => 1, 'byHr' => true, 'isLeave' => true, ...$leaveFacts],
+                $holidayType !== null => ['kind' => InternDay::HOLIDAY, 'holidayType' => $holidayType, 'holidayName' => $names[$date] ?? null],
+                $isWorkday && array_key_exists($date, $suspensions) => ['kind' => InternDay::SUSPENSION, 'suspensionPaid' => (bool) $suspensions[$date], 'detail' => 'Work suspended'],
+                ! $isWorkday => ['kind' => InternDay::REST_DAY],
+                (bool) $leave?->is_half_day => ['kind' => InternDay::HALF_DAY, 'halves' => 1, ...$leaveFacts],
+                $leave !== null && ! $worked => ['kind' => InternDay::LEAVE, ...$leaveFacts],
+                $halves !== null => ['kind' => InternDay::HALF_DAY, 'halves' => min(2, $halves->count()), 'detail' => 'Approved half-day request'],
+                $worked => ['kind' => InternDay::WORKED],
+                $row?->status === 'absent' => ['kind' => InternDay::ABSENT, 'detail' => 'Absent'],
+                $date < $today => ['kind' => InternDay::ABSENT, 'detail' => 'No time in recorded'],
+                default => ['kind' => InternDay::PENDING],
+            };
+
+            $days[] = new InternDay(...[...$facts, ...$class]);
+        }
+
+        return $days;
+    }
+
+    /**
+     * Minutes worked, late, short and left early on one day an intern clocked in.
+     *
+     * @param  array<string, mixed>  $eff
+     * @param  iterable<EarlyOutRequest>  $earlyOuts
+     * @return array<string, mixed>
+     */
+    private function internWorkedFacts(
+        Attendance $row,
+        array $eff,
+        bool $isWorkday,
+        AttendancePolicy $policy,
+        AttendancePolicy $measure,
+        ?string $offHalf,
+        iterable $earlyOuts,
+    ): array {
+        $flags = $row->time_out ? [] : ['missing_clockout'];
+
+        // A rest day has no schedule to measure against: the span worked, less the lunch taken —
+        // the same reading restDayWorkedMinutesFor() gives the rest-day premium.
+        if (! $isWorkday) {
+            $in = $this->clockToMinutes($row->time_in);
+            $out = $this->clockToMinutes($row->time_out);
+            if ($in === null || $out === null) {
+                return ['workedMinutes' => 0, 'flags' => $flags];
+            }
+            if ($out < $in) {
+                $out += 24 * 60;
+            }
+
+            return ['workedMinutes' => max(0, $out - $in - (int) $row->lunch_minutes), 'flags' => $flags];
+        }
+
+        // A missing clock-out is read exactly as it is for everyone else: an abandoned punch closes at
+        // the scheduled end, and one still inside its allowance is not docked either.
+        $ctx = $this->fullDayCreditCtx($row, $eff, false);
+        if ($ctx['time_out_min'] === null) {
+            $window = $this->resolveWorkedWindow($row, $eff, $policy, $offHalf)['window'];
+            $ctx['time_out_min'] = $window !== null
+                ? $window['out'] % (24 * 60)
+                : $this->hmToMinutes($eff['end_time'] ?? null);
+        }
+
+        $governedByEarlyOut = false;
+        $earlyOutMinutes = 0;
+        $minutesPerDeclaredDay = max(1, (int) $policy->hours_per_day_divisor * 60);
+        foreach ($earlyOuts as $earlyOut) {
+            $governedByEarlyOut = true;
+            $earlyOutMinutes += (int) round(
+                $this->earlyOutFraction((string) $earlyOut->early_out_time, $eff, $policy, $offHalf) * $minutesPerDeclaredDay,
+            );
+        }
+
+        $measured = $this->deduction->forDay(
+            $this->deductionCtx($row, $eff, $measure, $offHalf, 1.0, $governedByEarlyOut),
+            $measure,
+        );
+        $measuredPerDay = max(1, (int) $measure->hours_per_day_divisor * 60);
+
+        return [
+            'workedMinutes' => (int) ($this->fullDayCredit->workedMinutes($ctx) ?? 0),
+            'lateMinutes' => $measured->lateMinutes,
+            'lateChargeMinutes' => (int) round($measured->lateFraction * $measuredPerDay),
+            'undertimeMinutes' => $measured->undertimeMinutes,
+            'undertimeChargeMinutes' => (int) round($measured->undertimeFraction * $measuredPerDay),
+            'earlyOutMinutes' => $earlyOutMinutes,
+            'flags' => $flags,
+        ];
+    }
+
+    /**
      * Build the DeductionService context for one worked day: schedule window + break
      * facts + the clock times as Manila minute-of-day.
      *
@@ -3556,11 +3866,17 @@ class AttendanceService
      * Classify an arrival against the schedule: early (before start), on_time
      * (within grace), or late (past grace) with minutes past start.
      *
+     * PUBLIC because the Daily Time Record report judges the same arrivals, and a second
+     * implementation of "how late is late" is a second answer. The subtleties are not
+     * incidental — grace is a gate rather than a subtraction, a half day is judged against
+     * the half that was worked, and a schedule that cannot say when the day starts declines
+     * to judge at all — and the report, the board and the payslip line all have to agree.
+     *
      * @param  array<string, mixed>  $eff
      * @param  ?string  $offHalf  a HalfDayWindowService::AM|PM|BOTH value, or null for a full day
      * @return array{category:string, late_minutes:int}
      */
-    private function arrivalCategory(Carbon $timeInLocal, array $eff, Carbon $dateCarbon, ?string $offHalf = null): array
+    public function arrivalCategory(Carbon $timeInLocal, array $eff, Carbon $dateCarbon, ?string $offHalf = null): array
     {
         $start = $this->expectedStart($dateCarbon, $eff, $offHalf);
         if ($start === null) {

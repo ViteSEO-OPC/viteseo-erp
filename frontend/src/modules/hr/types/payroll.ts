@@ -417,6 +417,29 @@ export interface PayslipMonthSummary {
   already_paid: number;
 }
 
+/** How an intern's allowance was reached (PayslipResource::internBasis). */
+export interface PayslipInternBasis {
+  method: "per_day" | "per_hour" | "fixed_monthly";
+  amount: number;
+  /** "override" = the intern's own allowance; "default" = the company's. */
+  amount_source: "override" | "default";
+  daily_equivalent: number;
+  hourly_equivalent: number;
+  required_hours_per_day: number;
+  working_days: number;
+  rendered_minutes: number;
+  paid_minutes: number;
+  /** "11 days × ₱500.00" — printed beside the Allowance line. */
+  note: string;
+  effective_from: string | null;
+  /** On a converted intern's first salaried slip: the last internship day, and what it paid. */
+  until?: string;
+  paid_as_allowance?: number;
+  /** HR only. */
+  flags?: { date: string; code: string; detail: string | null }[];
+  settings?: Record<string, unknown>;
+}
+
 export interface Payslip {
   id: number;
   cycle_start: string;
@@ -438,6 +461,14 @@ export interface Payslip {
     philhealth_number: string | null;
     pagibig_number: string | null;
   };
+  /**
+   * An intern's payslip: `period_base` is the allowance, priced under Company → Intern Allowance,
+   * and the slip carries no government contributions or tax. Snapshot at run time, so a converted
+   * intern's old payslips still read as intern payslips.
+   */
+  is_intern: boolean;
+  /** How the allowance was reached. Set on intern slips, and on a converted intern's first slip. */
+  intern_basis: PayslipInternBasis | null;
   /** Full period basic BEFORE absences — what the payslip shows as "Basic Pay". */
   period_base: number;
   /** Basic pay after absences. `period_base - absence_deduction`. */

@@ -63,6 +63,9 @@ class EmployeeService
     /** The most siblings a record may name; the count field allows more than are named. */
     public const MAX_SIBLINGS = 20;
 
+    /** The most further IDs one record may carry, beyond the four named columns. */
+    public const MAX_OTHER_IDS = 10;
+
     /**
      * Editable profile columns on hr_employees (everything except the identity
      * name/email — which live on users — and the job/salary fields set explicitly).
@@ -79,6 +82,8 @@ class EmployeeService
         'current_address_house_no', 'current_address_street', 'current_address_barangay', 'current_address_city', 'current_address_province', 'current_address_zip',
         'mothers_maiden_name', 'fathers_name', 'siblings', 'number_of_siblings',
         'high_school', 'college_course', 'university',
+        // Interns only — the practicum hours their school requires.
+        'ojt_required_hours',
         'emergency_contact_name', 'emergency_contact_relationship', 'emergency_contact_phone',
         'bank_name', 'bank_account', 'height', 'weight', 'health_condition',
         'pay_frequency', 'currency', 'bank_account_type', 'bank_account_name',
@@ -86,7 +91,96 @@ class EmployeeService
         // in B1 and Company → Benefits is the catalogue now, so writing them only produced a
         // number on the profile that no payslip agreed with.
         'tin', 'sss_number', 'philhealth_number', 'pagibig_number',
+        // Any number of further IDs those four do not name.
+        'other_ids',
     ];
+
+    /**
+     * Drop sensitive values that are only the MASK coming back.
+     *
+     * A record never shows a bank account or an ID number in full — it shows ••••1234 — and every
+     * editor seeds its inputs from what it was shown. So saving a section without retyping would
+     * write the mask over the number and destroy it, with no way back: nothing stores what ••••1234
+     * used to be. A value we would only ever have DISPLAYED is therefore never a new value. It
+     * means "leave this one as it is".
+     *
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     */
+    private function keepUnchangedSecrets(array $data, Employee $employee): array
+    {
+        foreach (Employee::SENSITIVE_FIELDS as $field) {
+            if (! array_key_exists($field, $data)) {
+                continue;
+            }
+
+            if ($field === 'other_ids') {
+                $data[$field] = $this->resolveOtherIdSecrets($data[$field], $employee);
+
+                continue;
+            }
+
+            if (self::looksMasked($data[$field])) {
+                unset($data[$field]);
+            }
+        }
+
+        return $data;
+    }
+
+    /**
+     * The same rule for the ID list, where one masked number has to be matched to the entry it
+     * stands for: the row in the same position when that still fits, otherwise the single stored
+     * number whose mask it is. Ambiguous or gone, it is REFUSED rather than written as ••••1234 —
+     * a number quietly replaced by its own mask is the failure this whole method exists to stop.
+     */
+    private function resolveOtherIdSecrets(mixed $incoming, Employee $employee): mixed
+    {
+        if (! is_array($incoming)) {
+            return $incoming;
+        }
+
+        $stored = is_array($employee->other_ids) ? array_values($employee->other_ids) : [];
+        $maskOf = static fn (mixed $row): ?string => is_array($row)
+            ? Employee::maskSensitive((string) ($row['number'] ?? ''))
+            : null;
+
+        $out = [];
+
+        foreach (array_values($incoming) as $i => $row) {
+            if (! is_array($row) || ! self::looksMasked($row['number'] ?? null)) {
+                $out[] = $row;
+
+                continue;
+            }
+
+            $mask = $row['number'];
+
+            if (isset($stored[$i]) && $maskOf($stored[$i]) === $mask) {
+                $out[] = [...$row, 'number' => $stored[$i]['number']];
+
+                continue;
+            }
+
+            $matches = array_values(array_filter($stored, fn ($s) => $maskOf($s) === $mask));
+
+            if (count($matches) !== 1) {
+                throw ValidationException::withMessages([
+                    "other_ids.{$i}.number" => ['Re-enter this ID number — it was only ever shown masked.'],
+                ]);
+            }
+
+            $out[] = [...$row, 'number' => $matches[0]['number']];
+        }
+
+        return $out;
+    }
+
+    /** Is this the shape a masked value is shown in, rather than a value someone typed? */
+    private static function looksMasked(mixed $value): bool
+    {
+        return is_string($value) && str_starts_with($value, '••••');
+    }
 
     /** The users.name is composed from the split-name fields, falling back to `name`. */
     private function displayName(array $data): string
@@ -103,6 +197,9 @@ class EmployeeService
     private const CORE_COLUMNS = [
         'department_id', 'manager_id', 'job_title',
         'employment_status', 'onboarding_status', 'hire_date', 'base_salary',
+        // An intern's own allowance. Core, not profile: pay is HR's to set, and profile
+        // columns are also what an employee's change request may write.
+        'allowance_amount',
     ];
 
     /**
@@ -213,7 +310,9 @@ class EmployeeService
             return;
         }
 
-        $today = now(config('app.timezone_local'))->toDateString();
+        // The date the move ACTUALLY takes effect. A plain edit has none and means today;
+        // a conversion carries one, and its timeline must agree with its salary history.
+        $today = $data['effective_date'] ?? now(config('app.timezone_local'))->toDateString();
         $statusMap = ['promotion' => 'promoted', 'transfer' => 'transferred', 'lateral' => 'lateral'];
 
         $current?->update([
@@ -461,6 +560,10 @@ class EmployeeService
                 'onboarding_status' => $data['onboarding_status'] ?? null,
                 'hire_date' => $data['hire_date'],
                 'base_salary' => $data['base_salary'] ?? 0,
+                // An intern's own allowance; null reads the company default. Nobody else has one.
+                'allowance_amount' => ($data['employment_status'] ?? null) === 'ojt'
+                    ? ($data['allowance_amount'] ?? null)
+                    : null,
                 ...$this->profileData($data),
                 // A new hire flagged management is exempt from their first day, not from the
                 // day someone typed the record.
@@ -569,6 +672,9 @@ class EmployeeService
     public function update(Employee $employee, array $data): Employee
     {
         return DB::transaction(function () use ($employee, $data) {
+            // What came back masked was never retyped, so it is not a change — see the method.
+            $data = $this->keepUnchangedSecrets($data, $employee);
+
             $oldSalary = (float) $employee->base_salary;
             $oldTitle = $employee->job_title;
             $wasManagement = (bool) $employee->is_management;
@@ -581,6 +687,13 @@ class EmployeeService
             ]);
 
             $this->syncManagementExemption($employee, $wasManagement);
+
+            // An allowance describes an internship. Moved off intern by a plain status edit,
+            // there is nothing left for it to describe. A CONVERTED intern keeps theirs: payroll
+            // still pays the days before a conversion dated inside a cycle at that rate.
+            if (! $employee->isIntern() && $employee->intern_converted_on === null && $employee->allowance_amount !== null) {
+                $employee->update(['allowance_amount' => null]);
+            }
 
             $newSalary = (float) $employee->base_salary;
 
@@ -624,6 +737,147 @@ class EmployeeService
 
             return $employee->load(['user', 'department', 'manager.user']);
         });
+    }
+
+    /**
+     * The end of an internship: the intern is taken on as staff.
+     *
+     * Deliberately its own action rather than editing Employment status in the Job
+     * section. That field writes a status and nothing else, which is exactly what a
+     * conversion must not do -- the internship has to close on the employment timeline,
+     * the first real salary has to open the salary history, and the leave credits an
+     * intern was seeded with (zero, by allotment) have to be raised to what their new
+     * status is entitled to. Left to the plain edit, a converted regular kept an intern's
+     * zero leave and no record of when they stopped being one.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    public function convertIntern(Employee $employee, array $data): Employee
+    {
+        if ($employee->employment_status !== 'ojt') {
+            throw ValidationException::withMessages([
+                'employment_status' => ['Only an intern can be converted to an employee.'],
+            ]);
+        }
+        if ($employee->separation_date !== null || $employee->trashed()) {
+            throw ValidationException::withMessages([
+                'employment_status' => ['This employee has left the company.'],
+            ]);
+        }
+
+        /*
+         * A conversion sets the first real salary, so it carries the same hazard as any raise:
+         * dated back into a payroll run that is already settled, the run would reprice if
+         * re-run. Refused unless HR acknowledges it, then flagged as an amount owed -- exactly
+         * what a back-dated raise does in update(). Asked before anything is written, and on
+         * `effective_date`, the field the conversion screen sends and listens for.
+         */
+        $this->assertSalaryDateIsSafe($employee, $data['effective_date'], $data, 'effective_date');
+
+        return DB::transaction(function () use ($employee, $data) {
+            $effectiveDate = $data['effective_date'];
+            $newStatus = $data['employment_status'];
+            $title = $data['job_title'] ?? $employee->job_title;
+            $reason = $data['reason'] ?? 'Internship converted to ' . str_replace('_', ' ', $newStatus);
+
+            $employee->update([
+                'employment_status' => $newStatus,
+                'job_title' => $title,
+                'department_id' => $data['department_id'] ?? $employee->department_id,
+                'base_salary' => $data['base_salary'],
+                // The required-hours figure belonged to the practicum. It is not a fact
+                // about the employee they have become. The allowance stays on the record: a
+                // conversion dated inside a pay period still pays the days before it as an
+                // internship, at this intern's own rate.
+                'ojt_required_hours' => null,
+                // Payroll prices a cycle after the fact, when the status already says staff:
+                // this is how it still knows the days before were an internship.
+                'intern_converted_on' => $effectiveDate,
+            ]);
+
+            // Close the internship on the timeline and open the role they convert into.
+            // An unmapped change type lands as 'role_change', which is the honest reading
+            // of it and needs no new word in the timeline's vocabulary.
+            $this->recordRoleChange($employee, $title, [
+                'role_change_type' => 'conversion',
+                'role_change_reason' => $reason,
+                'effective_date' => $effectiveDate,
+            ]);
+
+            $history = SalaryHistory::create([
+                'employee_id' => $employee->id,
+                'base_salary' => $data['base_salary'],
+                'effective_date' => $effectiveDate,
+                'reason' => $reason,
+                'change_type' => 'adjustment',
+                'changed_by' => Auth::id(),
+            ]);
+
+            app(RetroFlagService::class)->flagIfSettled(
+                $history,
+                $employee->id,
+                $effectiveDate,
+                null,
+                RetroFlag::OWED,
+                'Converted from intern at ' . number_format((float) $data['base_salary'], 2)
+                    . ' effective ' . $effectiveDate
+                    . ' — the days already paid were priced as an internship',
+            );
+
+            $this->raiseLeaveEntitlements($employee);
+
+            $employee->load('user');
+            $this->audit->log(
+                'updated',
+                'People',
+                "Converted {$employee->user?->name} from intern to "
+                    . str_replace('_', ' ', $newStatus) . " effective {$effectiveDate}",
+                $employee,
+            );
+
+            return $employee->fresh(['user', 'department', 'manager.user', 'employmentHistories']);
+        });
+    }
+
+    /**
+     * Bring this year's leave credits up to what the employee's CURRENT status is entitled
+     * to. Raise only, never lower: HR can grant credits by hand, and a status change is not
+     * a reason to take those back. `seedLeaveBalances` cannot do this job -- it is
+     * firstOrCreate, so on an employee who already has rows it does nothing at all.
+     */
+    private function raiseLeaveEntitlements(Employee $employee): void
+    {
+        $year = now(config('app.timezone_local'))->year;
+
+        if (LeaveSetting::current()->allotment_mode === LeaveSetting::MODE_SHARED) {
+            $poolDays = (float) (SharedLeaveAllotment::where('employment_status', $employee->employment_status)
+                ->value('days_per_year') ?? 0);
+
+            $balance = SharedLeaveBalance::firstOrCreate(
+                ['employee_id' => $employee->id, 'year' => $year],
+                ['entitled_days' => $poolDays, 'used_days' => 0],
+            );
+            if ((float) $balance->entitled_days < $poolDays) {
+                $balance->update(['entitled_days' => $poolDays]);
+            }
+
+            return;
+        }
+
+        $allotments = LeaveTypeAllotment::where('employment_status', $employee->employment_status)
+            ->pluck('days_per_year', 'leave_type_id');
+
+        foreach (LeaveType::all() as $type) {
+            $days = (float) ($allotments[$type->id] ?? $type->days_per_year);
+
+            $balance = LeaveBalance::firstOrCreate(
+                ['employee_id' => $employee->id, 'leave_type_id' => $type->id, 'year' => $year],
+                ['entitled_days' => $days, 'used_days' => 0],
+            );
+            if ((float) $balance->entitled_days < $days) {
+                $balance->update(['entitled_days' => $days]);
+            }
+        }
     }
 
     /**
@@ -1074,10 +1328,19 @@ class EmployeeService
      * Refuse a back-dated salary change that reaches into finished payroll runs, unless HR says
      * so explicitly.
      *
+     * `$field` is the request field the date arrived in. The refusal is a QUESTION the screen
+     * answers by resending with `acknowledge_repricing`, and it can only recognise the question
+     * if it lands on the field the screen actually sent -- a conversion's date is
+     * `effective_date`, not the record edit's `salary_effective_date`.
+     *
      * @param  array<string, mixed>  $data
      */
-    private function assertSalaryDateIsSafe(Employee $employee, string $effectiveDate, array $data): void
-    {
+    private function assertSalaryDateIsSafe(
+        Employee $employee,
+        string $effectiveDate,
+        array $data,
+        string $field = 'salary_effective_date',
+    ): void {
         if ((bool) ($data['acknowledge_repricing'] ?? false)) {
             return;
         }
@@ -1094,7 +1357,7 @@ class EmployeeService
             ->implode(', ');
 
         throw ValidationException::withMessages([
-            'salary_effective_date' => [
+            $field => [
                 'This date falls inside ' . $affected->count() . ' completed payroll run'
                     . ($affected->count() === 1 ? '' : 's') . " ({$periods}). Those periods were "
                     . 'already paid at the old salary and there is no way to pay the difference '

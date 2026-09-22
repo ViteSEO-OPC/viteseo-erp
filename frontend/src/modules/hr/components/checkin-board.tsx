@@ -8,7 +8,6 @@ import { DataTable, type Column } from "@/core/components/data-table";
 import { formatTimeManila } from "@/core/lib/format";
 import { useAttendanceSummary, useHrAttendance } from "@/modules/hr/hooks/use-attendance";
 import { useLeaveTypes } from "@/modules/hr/hooks/use-leave";
-import { DayRulesButton } from "@/modules/hr/components/day-rules-button";
 import type { HrAttendanceRow } from "@/modules/hr/types/attendance";
 import {
   SoftBadge,
@@ -84,10 +83,7 @@ export function CheckinBoard() {
   return (
     <section>
       {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-h3 font-bold text-foreground">Employee Check-in Dashboard</h2>
-        <DayRulesButton />
-      </div>
+      <h2 className="text-h3 font-bold text-foreground">Employee Check-in Dashboard</h2>
 
       {/* Stat tiles (4×2) */}
       <div className="mt-4">

@@ -52,7 +52,7 @@ class WorkRequestService
         }
 
         return $this->paginateQueue(
-            $query,
+            $this->scopeToWindow($query, $filters, 'work_date'),
             $filters,
             ['type', 'reason'],
             priorityStatuses: ['pending'],

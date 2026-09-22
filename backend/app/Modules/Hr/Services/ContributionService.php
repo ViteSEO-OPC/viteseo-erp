@@ -352,6 +352,12 @@ class ContributionService
         // added N × types INSERTs and their locks to the critical path, and the first run after
         // someone activated a contribution enrolled the whole company as a side effect of computing
         // pay. The back-fill now happens where the change happens — see backfillEnrolments().
+        // An intern is paid an allowance, and an allowance is not compensation any statutory
+        // contribution is charged on — whatever the enrolment checklist says.
+        if ($employee->isIntern()) {
+            return [];
+        }
+
         $active = $this->enrolledActiveTypesFor($employee);
 
         if ($active === []) {

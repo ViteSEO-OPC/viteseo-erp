@@ -5,6 +5,7 @@ namespace App\Modules\Hr\Services;
 use App\Models\User;
 use App\Modules\Hr\Models\OfficeExpense;
 use App\Modules\Hr\Services\Concerns\PagesQueues;
+use Carbon\CarbonImmutable;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
@@ -89,6 +90,32 @@ class OfficeExpenseService
         arsort($byCategory);
 
         return ['total' => $total, 'by_category' => $byCategory];
+    }
+
+    /**
+     * The months the ledger has spend in, newest first — the options the month picker offers.
+     *
+     * Deliberately NOT windowed, unlike everything else on this screen. A picker built from the
+     * current window would offer only the month already chosen, and there would be no way back
+     * out of it. One row per month that has an expense, so the list is bounded by how long the
+     * company has been buying things rather than by how much it bought.
+     *
+     * @return list<array{value: string, label: string}>
+     */
+    public function months(): array
+    {
+        return OfficeExpense::query()
+            ->whereNotNull('expense_date')
+            ->selectRaw("date_format(expense_date, '%Y-%m') as ym")
+            ->groupBy('ym')
+            ->orderByDesc('ym')
+            ->toBase()
+            ->pluck('ym')
+            ->map(fn ($ym) => [
+                'value' => (string) $ym,
+                'label' => CarbonImmutable::createFromFormat('Y-m-d', "{$ym}-01")->format('F Y'),
+            ])
+            ->all();
     }
 
     /**

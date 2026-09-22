@@ -57,6 +57,7 @@ import { DeleteConfirmDialog } from "@/modules/hr/components/delete-confirm-dial
 import { CandidatesTable } from "@/modules/hr/components/candidates-table";
 import {
   useRequisitions,
+  useRequisition,
   useCandidates,
   useMoveCandidate,
   useDeleteRequisition,
@@ -181,7 +182,21 @@ export default function RecruitmentPage() {
   );
 
   const { data: candidates } = useCandidates(activeReqId);
-  const selected = requisitions?.find((r) => r.id === activeReqId);
+  /*
+   * The board's requisition is fetched BY ID, not picked out of the table above it.
+   * The table is one filtered, searched, paged slice, and the requisition whose board is
+   * open can leave that slice while the reader is still working in it — hiring the last
+   * candidate does precisely that: the seat fills, the requisition closes, and under the
+   * "Active" pill it drops out of the very list the board was reading itself from. The
+   * whole pipeline then unmounted mid-action, taking the "N hired — View in Employees"
+   * confirmation with it and leaving "Select a requisition" in its place.
+   *
+   * The row from the table is still used until the fetch lands, so opening a board is
+   * instant rather than flashing an empty state on every click.
+   */
+  const { data: fetchedReq } = useRequisition(activeReqId);
+  const rowReq = requisitions?.find((r) => r.id === activeReqId);
+  const selected = fetchedReq?.id === activeReqId ? fetchedReq : rowReq;
 
   const openReqs = (requisitions ?? []).filter((r) => r.stage === "active").length;
   const totalCandidates = (requisitions ?? []).reduce((s, r) => s + r.candidates_count, 0);

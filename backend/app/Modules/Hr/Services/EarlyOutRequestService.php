@@ -53,7 +53,7 @@ class EarlyOutRequestService
         }
 
         return $this->paginateQueue(
-            $query,
+            $this->scopeToWindow($query, $filters, 'work_date'),
             $filters,
             ['reason'],
             priorityStatuses: ['pending'],

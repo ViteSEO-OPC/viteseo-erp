@@ -21,11 +21,42 @@ export const EMPLOYMENT_TYPES = [
   { value: "temporary", label: "Temporary" },
 ] as const;
 
+/** How an OJT allowance is quoted. */
+export const ALLOWANCE_PERIODS = [
+  { value: "per_day", label: "Per day" },
+  { value: "per_hour", label: "Per hour" },
+  { value: "per_month", label: "Per month" },
+] as const;
+
 /** Common office locations offered in the recruitment dropdowns (free-text column). */
 export const LOCATIONS = ["Manila", "Cebu", "Davao", "Remote", "Hybrid"] as const;
 
 export function employmentTypeLabel(v: string | null): string {
   return EMPLOYMENT_TYPES.find((x) => x.value === v)?.label ?? "—";
+}
+
+/**
+ * OJT hires follow their own pipeline, quote an allowance instead of a salary, and are
+ * asked for a school and practicum hours. Takes either a requisition's `pipeline` or its
+ * `employment_type` — the pipeline is derived from the type, so both spell it "ojt".
+ */
+export function isOjt(pipelineOrType: string | null | undefined): boolean {
+  return pipelineOrType === "ojt";
+}
+
+/** "₱650.00 per day", or an em dash when the requisition quotes no allowance. */
+export function formatAllowance(
+  amount: number | null,
+  period: string | null,
+): string {
+  if (amount == null) return "—";
+  const money = new Intl.NumberFormat("en-PH", {
+    style: "currency",
+    currency: "PHP",
+  }).format(amount);
+  const label = ALLOWANCE_PERIODS.find((p) => p.value === period)?.label;
+
+  return label ? `${money} ${label.toLowerCase()}` : money;
 }
 
 /** Stages that expose the "send interview email" action (mirrors the backend). */
@@ -75,7 +106,10 @@ export interface Requisition {
   title: string;
   pipeline: string;
   employment_type: string | null;
+  /** Quoted on every employment type EXCEPT ojt, which carries an allowance instead. */
   salary_range: string | null;
+  allowance_amount: number | null;
+  allowance_period: string | null;
   location: string | null;
   job_description: string | null;
   target_start_date: string | null;
@@ -92,7 +126,7 @@ export interface Requisition {
 export interface Candidate {
   id: number;
   requisition_id: number;
-  requisition: { id: number; title: string } | null;
+  requisition: { id: number; title: string; pipeline: string } | null;
   name: string;
   email: string | null;
   phone: string | null;
@@ -104,6 +138,9 @@ export interface Candidate {
   /** Free-text salary range, e.g. "₱45,000 - 65,000". */
   expected_salary: string | null;
   location: string | null;
+  /** OJT applicants only — the school sending them and the hours it requires. */
+  school: string | null;
+  required_hours: number | null;
   feedback: string | null;
   notes: string | null;
   /** Email types already sent to this candidate (e.g. ["online_interview"]). */
