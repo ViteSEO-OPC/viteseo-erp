@@ -810,15 +810,34 @@ const aiRun = (status: DiscoveryRun["status"], ai: DiscoveryRun["ai"], isTermina
   if (!/"ai-assisted": "AI-assisted · OpenStreetMap"/.test(hook)) bad.push("the board no longer names the AI lane's factual source");
   if (/"ai-assisted": "AI-assisted",/.test(hook)) bad.push("the bare 'AI-assisted' label is back on the board");
 
-  // NEVER INVENTED. No surface may claim AI shaped a Google lead; the data cannot say so.
-  // Tested against CODE ONLY, with comments stripped: the documentation explaining why this label
-  // does not exist has to be able to name it, and two earlier drafts of this gate failed on their
-  // own prose before this stripping was added.
+  // EARNED, NEVER INVENTED. "AI-assisted · Google Places" may exist ONLY as the label of the
+  // `ai-assisted-google-places` lane — the one the server resolves from a per-lead
+  // `discovery_ai_assisted === true`. Any OTHER key carrying that label would be attribution the
+  // data does not support, which is exactly what this gate existed to forbid before the per-lead
+  // fact was recorded.
+  //
+  // Tested against CODE ONLY, with comments stripped: the documentation explaining how the label is
+  // earned has to be able to name it, and earlier drafts of this gate failed on their own prose.
   const code = (text: string): string =>
     text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
-  const inventedGoogleAi = /["']AI-assisted[^"']*Google Places["']/;
-  if (inventedGoogleAi.test(code(hook))) bad.push("the board invents AI attribution for Google Places leads");
-  if (inventedGoogleAi.test(code(card))) bad.push("the card invents AI attribution for Google Places leads");
+  const googleAiLabel = /(["'])([^"']*)\1:\s*(["'])AI-assisted · Google Places\3/g;
+  const misattributed = (text: string): boolean => {
+    for (const [, , key] of text.matchAll(googleAiLabel)) {
+      if (key !== "ai-assisted-google-places") return true;
+    }
+    return false;
+  };
+  if (misattributed(code(hook))) bad.push("the board attaches the Google AI label to a lane that did not earn it");
+  if (misattributed(code(card))) bad.push("the card attaches the Google AI label to a lane that did not earn it");
+
+  // THE LABEL MUST STILL BE REACHABLE, or the feature is silently dead.
+  if (!/"ai-assisted-google-places": "AI-assisted · Google Places"/.test(hook)) bad.push("the board can no longer name an AI-assisted Google lead");
+  if (!/"ai-assisted-google-places": "AI-assisted · Google Places"/.test(card)) bad.push("the card can no longer name an AI-assisted Google lead");
+
+  // NEVER FROM THE RUN. `ai_outcome` latches to `applied` for a whole run and cannot answer a
+  // per-lead question; no board surface may read it.
+  if (/ai_?[Oo]utcome/.test(code(hook))) bad.push("the board derives lead provenance from the run's ai_outcome");
+  if (/ai_?[Oo]utcome/.test(code(card))) bad.push("the card derives lead provenance from the run's ai_outcome");
 
   // Provenance is shown on the row, from data the payload already carries.
   if (!/FOUND_BY_CHIP/.test(card)) bad.push("the card no longer shows where the business came from");
@@ -840,7 +859,7 @@ const aiRun = (status: DiscoveryRun["status"], ai: DiscoveryRun["ai"], isTermina
   // renamed option would silently match nothing. This guards it staying put.
   if (!/PRIORITY_ORDER = \["High", "Medium", "Low"\]/.test(hook)) bad.push("the priority filter vocabulary changed, which silently breaks filtering");
 
-  report("AB the board names provenance and never invents it", 9 - bad.length, 9, bad);
+  report("AB the board names provenance and never invents it", 15 - bad.length, 15, bad);
 }
 
 console.log(failed === 0 ? "\nAll gates passed." : `\n${failed} gate(s) FAILED.`);

@@ -49,12 +49,13 @@ class NearbyClientsFoundByTest extends TestCase
     }
 
     /** A discovered prospect — unowned, unqualified, in the pool — found by the given lane. */
-    private function prospect(string $source, string $name): Lead
+    private function prospect(string $source, string $name, ?bool $aiAssisted = null): Lead
     {
         return Lead::factory()->create([
             'assigned_to' => null,
             'qualified_at' => null,
             'source' => $source,
+            'discovery_ai_assisted' => $aiAssisted,
             'business_name' => $name,
         ]);
     }
@@ -102,6 +103,52 @@ class NearbyClientsFoundByTest extends TestCase
         $this->prospect('google_places', 'Mercury Drug Ayala Center');
 
         $this->assertSame(['Mercury Drug Ayala Center' => 'google-places'], $this->foundBy());
+    }
+
+    // --- the AI dimension, composed with the provider rather than folded into it ---------------
+
+    public function test_an_ai_planned_google_search_reads_as_ai_assisted_google_places(): void
+    {
+        // The two facts are stored apart — `source` still says which provider answered — and joined
+        // only for display. That is what lets a Google lead carry the AI dimension without `source`
+        // ever gaining a value that would route it around GooglePlacesAttestation.
+        $lead = $this->prospect('google_places', 'Rose Pharmacy', true);
+
+        $this->assertSame(['Rose Pharmacy' => 'ai-assisted-google-places'], $this->foundBy());
+        // The provider fact is untouched.
+        $this->assertSame('google_places', $lead->fresh()->source);
+    }
+
+    public function test_a_plain_google_search_still_reads_as_google_places(): void
+    {
+        // A RECORDED not-AI. The lane must be indistinguishable from how it read before the column
+        // existed.
+        $this->prospect('google_places', 'Watsons Glorietta', false);
+
+        $this->assertSame(['Watsons Glorietta' => 'google-places'], $this->foundBy());
+    }
+
+    public function test_a_google_lead_with_no_recorded_ai_fact_is_never_called_ai_assisted(): void
+    {
+        // NULL is every lead discovered before the column existed. The fact was never captured and
+        // nothing can backfill it, so the honest label is the one that claims less — never AI, and
+        // never inferred from the run.
+        $this->prospect('google_places', 'Legacy Drug', null);
+
+        $this->assertSame(['Legacy Drug' => 'google-places'], $this->foundBy());
+    }
+
+    public function test_the_ai_flag_does_not_relabel_the_openstreetmap_lanes(): void
+    {
+        // The OSM AI lane already carries its AI-ness in `source` (`openai`), which is the shape it
+        // has always had. Composing the dimension twice would give one lead two provenance answers.
+        $this->prospect('openstreetmap', 'Cafe Leona', true);
+        $this->prospect('openai', 'Mang Inasal', true);
+
+        $lanes = $this->foundBy();
+
+        $this->assertSame('openstreetmap', $lanes['Cafe Leona']);
+        $this->assertSame('ai-assisted', $lanes['Mang Inasal']);
     }
 
     public function test_an_unrecognised_provenance_value_is_not_labelled_openstreetmap(): void

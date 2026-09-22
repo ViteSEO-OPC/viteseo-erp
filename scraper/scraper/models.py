@@ -88,6 +88,19 @@ class RawBusiness(BaseModel):
     # not set it can observe that it exists.
     discovered_by: Optional[str] = None
 
+    # WHETHER AN AI-PLANNED SEARCH FOUND THIS RECORD — a SECOND, independent dimension beside
+    # `discovered_by`.
+    #
+    # It is separate precisely because `discovered_by` becomes `source`, and `source` answers "which
+    # factual provider returned this business". AI planning is not a provider: a Google Places lead
+    # reached through an AI-phrased query is still a Google Places lead, and relabelling its source
+    # would both lose that fact and silently change what every existing `source` consumer sees.
+    # Carrying the two apart is what lets a lead say "AI-assisted AND Google Places" at once.
+    #
+    # Tri-state on purpose. None = the discovering lane does not record this (or predates the
+    # field); False = recorded, and AI did not shape the search; True = recorded, and it did.
+    ai_assisted: Optional[bool] = None
+
 
 class NormalizedBusiness(BaseModel):
     """Canonical CRM fit-data record. Serialized to the `/leads/discovered` ingest payload.
@@ -111,6 +124,13 @@ class NormalizedBusiness(BaseModel):
     longitude: Optional[float] = None
     place_id: Optional[str] = None
     source: str
+    # The AI dimension, carried BESIDE `source` rather than inside it — see `RawBusiness.ai_assisted`.
+    # Named for the CRM column it lands in, because this class is the wire contract.
+    #
+    # `to_payload()` drops None but KEEPS False, which is exactly the tri-state this needs: a lane
+    # that does not record the fact sends nothing and the column stays NULL, while a Google search
+    # that ran without AI sends an explicit `false`.
+    discovery_ai_assisted: Optional[bool] = None
 
     def to_payload(self) -> dict:
         """Ingest payload — drop ``None`` fields so the CRM applies its column defaults."""

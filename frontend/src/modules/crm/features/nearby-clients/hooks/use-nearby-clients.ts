@@ -279,7 +279,12 @@ function formatPriority(priority: string): string {
 
 // Discovery lanes, baseline first. Like PRIORITY_ORDER this is a CLOSED vocabulary the server
 // decides, not a set derived from whatever the pool currently contains.
-const FOUND_BY_ORDER = ["OpenStreetMap", "AI-assisted · OpenStreetMap", "Google Places"] as const;
+const FOUND_BY_ORDER = [
+  "OpenStreetMap",
+  "AI-assisted · OpenStreetMap",
+  "Google Places",
+  "AI-assisted · Google Places",
+] as const;
 
 // Server lane value → readable label. EXPLICIT, with no catch-all: a lane this build does not know
 // must stay visibly distinct rather than being folded into OpenStreetMap, which would credit the
@@ -291,16 +296,25 @@ const FOUND_BY_ORDER = ["OpenStreetMap", "AI-assisted · OpenStreetMap", "Google
 // were itself the factual source; naming the source keeps this answering "where did the business
 // come from".
 //
-// THERE IS DELIBERATELY NO "AI-assisted · Google Places". A Google lead carries no per-lead record of
-// whether AI shaped the search that found it — `foundBy` is derived from `leads.source` alone, and
-// `crm_leads` has no strategy or run column. The only AI fact available is the RUN's `ai_outcome`,
-// which rises to `applied` on the first AI-planned search and never comes back down: run 85 read
-// `applied` while 23% of its targets were AI-planned. Labelling Google leads from it would be wrong
-// about roughly three in four. Factual attribution is kept instead of an invented one.
+// "AI-assisted · Google Places" IS EARNED, NEVER INFERRED. It is shown only for a lead the server
+// resolved to the `ai-assisted-google-places` lane, which requires `crm_leads.discovery_ai_assisted`
+// to be exactly `true` — a per-lead fact the Google provider stamps at discovery time, and only when
+// an AI-derived value actually entered the Places request (a planned `textQueries`, or an
+// `includedType` the model supplied where the static table had none).
+//
+// It is NOT derived from the run's `ai_outcome`, which cannot support this: that flag rises to
+// `applied` on the first AI-planned search of a run and never comes back down, so run 85 read
+// `applied` while only 23% of its targets were AI-planned. Reading it per lead would be wrong about
+// roughly three in four.
+//
+// A lead discovered before that column existed carries NULL and stays plain "Google Places". The
+// fact was never captured for those rows and nothing can backfill it, so the honest label is the one
+// that claims less.
 const FOUND_BY_LABELS: Record<string, string> = {
   openstreetmap: "OpenStreetMap",
   "ai-assisted": "AI-assisted · OpenStreetMap",
   "google-places": "Google Places",
+  "ai-assisted-google-places": "AI-assisted · Google Places",
 };
 
 /** Readable label for a discovery lane ("openstreetmap" → "OpenStreetMap"). */

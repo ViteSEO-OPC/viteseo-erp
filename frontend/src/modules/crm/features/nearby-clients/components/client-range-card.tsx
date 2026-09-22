@@ -23,6 +23,7 @@ const PRIORITY: Record<NearbyPriority, { dot: string; text: string; cls: string 
  */
 const FOUND_BY_CHIP: Record<string, string> = {
   "google-places": "Google Places",
+  "ai-assisted-google-places": "AI-assisted · Google Places",
   "ai-assisted": "AI-assisted · OpenStreetMap",
   openstreetmap: "OpenStreetMap",
 };

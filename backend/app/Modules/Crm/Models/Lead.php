@@ -49,6 +49,10 @@ use Illuminate\Support\Carbon;
     'longitude',
     'place_id',
     'source',
+    // Per-lead AI provenance, BESIDE `source` rather than inside it: a lead found through an
+    // AI-phrased Google query is still a Google Places lead. NULL on every lead discovered before
+    // the column existed — see the migration for the tri-state.
+    'discovery_ai_assisted',
     // Lead Acquisition Channel — the business "Source" (Referral, Facebook, Website, Cold Outreach,
     // …). SEPARATE from `source` (discovery provenance); pure metadata, no business computation.
     'acquisition_channel',
@@ -121,6 +125,9 @@ class Lead extends Model
             // fixed-precision strings. Stored only; the coordinate map is a later milestone.
             'latitude' => 'float',
             'longitude' => 'float',
+            // Nullable on purpose — `boolean` preserves NULL, so "never recorded" stays
+            // distinguishable from a recorded false.
+            'discovery_ai_assisted' => 'boolean',
         ];
     }
 
