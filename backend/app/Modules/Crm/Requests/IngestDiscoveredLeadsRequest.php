@@ -50,6 +50,15 @@ class IngestDiscoveredLeadsRequest extends FormRequest
             'businesses.*.longitude' => ['nullable', 'numeric', 'between:-180,180'],
             'businesses.*.place_id' => ['nullable', 'string', 'max:255'],
             'businesses.*.source' => ['required', 'string', 'max:255'],
+            // PROVENANCE, NOT A CRM DECISION — which is why it belongs in this allowlist: it records
+            // how the search that found the business was planned, and nothing downstream branches on
+            // it beyond the label the board shows.
+            //
+            // `nullable` and never `required`: a lane that does not record the fact simply omits it
+            // and the column stays NULL. `boolean` accepts the JSON `false` the Google lane sends to
+            // say "recorded, and AI did not shape this search", which is a different claim from
+            // saying nothing at all.
+            'businesses.*.discovery_ai_assisted' => ['nullable', 'boolean'],
             // The website URL (fit-data) — the input the Website Intelligence service later audits.
             //
             // LENGTH IS NORMALIZED, NOT REJECTED — the same reasoning as `website_status` above. A

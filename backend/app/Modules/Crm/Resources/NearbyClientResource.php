@@ -129,13 +129,29 @@ class NearbyClientResource extends JsonResource
      * `nearby` is the ONE deliberate alias: it is the legacy provenance value written before the
      * lanes were split, and those rows genuinely came from the OpenStreetMap sweep. It is mapped
      * because it is known, not as a fallback.
+     *
+     * TWO FACTS, COMPOSED HERE RATHER THAN STORED PRE-COMBINED. The factual provider (`source`) and
+     * whether an AI-planned search found the business (`discovery_ai_assisted`) are independent, so
+     * they are kept in their own columns and joined only for display. That is what lets Google carry
+     * the AI dimension without `source` ever gaining a value that would route those rows around
+     * GooglePlacesAttestation's `google_places` comparison.
+     *
+     * STRICTLY `=== true`. NULL means the fact was never recorded — every lead discovered before the
+     * column existed, and nothing can backfill it — so a NULL must read as the plain lane, never as
+     * "not AI" inferred and never as AI. `false` is a recorded not-AI and reads the same way.
+     *
+     * The AI dimension is composed for Google ONLY. The OpenStreetMap AI lane already carries it in
+     * `source` (`openai`), which is the shape that lane has always had; mapping it twice would give
+     * the same lead two different provenance answers.
      */
     private function discoveryLane(): string
     {
+        $aiAssisted = $this->discovery_ai_assisted === true;
+
         return match ($this->source) {
             NerbyProvider::OPENSTREETMAP->value, 'nearby' => 'openstreetmap',
             NerbyProvider::OPENAI->value => 'ai-assisted',
-            NerbyProvider::GOOGLE_PLACES->value => 'google-places',
+            NerbyProvider::GOOGLE_PLACES->value => $aiAssisted ? 'ai-assisted-google-places' : 'google-places',
             default => 'unknown',
         };
     }

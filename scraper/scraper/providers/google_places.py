@@ -218,11 +218,17 @@ class GooglePlacesProvider(DiscoveryProvider):
         # Consulted once per task and still ONE Google request: this adds no provider calls.
         plan = self._strategy(area=area, category=category, limit=limit)
 
+        # WHETHER AN AI VALUE REACHED THE REQUEST, recorded on the assignment line itself rather than
+        # recomputed from the branch conditions — so it cannot drift out of step if these branches
+        # change. See `ai_shaped_request` below for why this is not `strategy_applied`.
+        ai_included_type = False
+
         if included_type:
             payload["includedType"] = included_type
         elif plan is not None and plan.place_types:
             # Only where the table has nothing. AI fills a gap; it never overrides a known mapping.
             payload["includedType"] = plan.place_types[0]
+            ai_included_type = True
 
         planned_queries: list[str] = []
         if plan is not None and plan.queries:
@@ -234,6 +240,21 @@ class GooglePlacesProvider(DiscoveryProvider):
             payload["textQueries"] = planned_queries
 
         strategy_applied = plan is not None and bool(plan.queries or plan.place_types)
+
+        # DID AI GENUINELY SHAPE *THIS* SEARCH — the per-task fact each discovered business is
+        # stamped with below.
+        #
+        # DELIBERATELY NOT `strategy_applied`. That flag reports whether a usable plan came BACK, and
+        # is true even when the static `INCLUDED_TYPES` table won and the model's `place_types` were
+        # discarded unused — so a lead stamped from it would claim an AI influence that never touched
+        # the request. This asks the narrower question the label has to answer: did an AI-derived
+        # value actually enter the payload? Those are exactly two keys, `textQueries` and the AI
+        # branch of `includedType`, and nothing else here is model-derived.
+        #
+        # `planned_queries` is trustworthy as written: `strategy._clean()` has already trimmed,
+        # de-duplicated and dropped every blank, so a non-empty list always reaches the CRM as at
+        # least one real phrase, and the CRM always runs the first one.
+        ai_shaped_request = bool(planned_queries) or ai_included_type
 
         try:
             response = self._client.post(
@@ -280,6 +301,21 @@ class GooglePlacesProvider(DiscoveryProvider):
             return self._failed(EXECUTION_INVALID_RESPONSE, "missing_businesses")
 
         businesses = [b for b in (self._to_raw(row) for row in rows) if b is not None][:limit]
+
+        # PER-RECORD AI PROVENANCE. Stamped for every business this task returned, because for the
+        # Google lane "was the search AI-planned" is a property of the whole task: only `textQueries`
+        # is ever sent (never `textQuery`), so the CRM runs either the AI plan or the single
+        # category-derived phrase — never a mix within one task. Every record here therefore came
+        # from the same kind of search.
+        #
+        # ALWAYS WRITTEN, including `False`. A business discovered by a plain Google search is a
+        # RECORDED not-AI, which is a different fact from the NULL carried by every lead discovered
+        # before this field existed and which nothing can backfill.
+        #
+        # This is its own field, NOT `discovered_by`: that one becomes `source` in the normalizer,
+        # and `source` must keep meaning exactly which factual provider answered.
+        for business in businesses:
+            business.ai_assisted = ai_shaped_request
         self._stats = {
             "execution_status": EXECUTION_OK,
             "error_reason": data.get("errorReason"),

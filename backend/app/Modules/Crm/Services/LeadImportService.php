@@ -445,6 +445,8 @@ class LeadImportService
     private const DISCOVERED_FIELDS = [
         'business_name', 'contact_name', 'email', 'phone', 'industry', 'website_status',
         'region', 'province', 'city', 'latitude', 'longitude', 'place_id', 'source', 'website',
+        // Per-lead AI provenance. Carried beside `source`, never folded into it.
+        'discovery_ai_assisted',
         // Where a discovered SOCIAL url is filed. The provider does not send these; the normalizer
         // below routes them here after classifying the single URL the provider does send, so a
         // Facebook page is kept as a Facebook page instead of being recorded as a website.

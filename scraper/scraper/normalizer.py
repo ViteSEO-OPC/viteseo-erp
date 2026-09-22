@@ -55,4 +55,7 @@ def normalize(raw: RawBusiness, source: str) -> NormalizedBusiness:
         longitude=raw.longitude,
         place_id=raw.provider_id or None,
         source=raw.discovered_by or source,
+        # Passed straight through, including False. `or` would be wrong here: it collapses a
+        # recorded False into None and loses the distinction the field exists to carry.
+        discovery_ai_assisted=raw.ai_assisted,
     )

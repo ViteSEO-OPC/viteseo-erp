@@ -292,7 +292,7 @@ export function countryLabel(code: string): string {
 const PROVIDER_LABELS: Record<string, string> = {
   google_places: "Google Places",
   openstreetmap: "OpenStreetMap",
-  openai: "AI-assisted OpenStreetMap",
+  openai: "AI-assisted · OpenStreetMap",
 };
 
 export function providerLabel(id: string | null): string {

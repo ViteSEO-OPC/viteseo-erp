@@ -333,6 +333,75 @@ def test_the_run_records_whether_ai_actually_shaped_the_search(monkeypatch):
     assert provider2.stats()["strategy_applied"] is False
 
 
+def test_a_lead_is_ai_assisted_only_when_an_ai_value_reached_the_request(monkeypatch):
+    # THE CONDITION THE "AI-assisted · Google Places" LABEL RESTS ON.
+    #
+    # Per-record, and narrower than `strategy_applied` on purpose: a plan that came back usable is
+    # not the same as a plan that actually shaped the search. Google is only ever sent two
+    # AI-derived values — `textQueries`, and `includedType` where the static table had none — so
+    # those are exactly the cases that earn the stamp.
+    from scraper.strategy import DiscoveryStrategy
+
+    # AI PHRASED THE SEARCH. `textQueries` travelled, so every business this task returned came from
+    # an AI-planned query.
+    plans(monkeypatch, DiscoveryStrategy(queries=["24-hour drugstore"]))
+    provider, _, _ = build(monkeypatch, respond=ok([row(), row("places/ChIJ-2", "Second")]), use_strategy=True)
+    found = provider.discover(area="Anywhere", category="pharmacy", limit=10)
+    assert [b.ai_assisted for b in found] == [True, True]
+
+
+def test_ignored_ai_place_types_never_make_a_lead_ai_assisted(monkeypatch):
+    # THE CASE THAT MAKES THIS DISTINCT FROM `strategy_applied`.
+    #
+    # `pharmacy` IS in the static table, so the table wins and the model's `place_types` are
+    # discarded unused. The plan came back usable — `strategy_applied` is True and stays True — but
+    # nothing the model said reached Google, so no lead may claim AI found it. Reusing
+    # `strategy_applied` for the label would be wrong here, which is the whole reason it is not.
+    from scraper.strategy import DiscoveryStrategy
+
+    assert "pharmacy" in INCLUDED_TYPES
+
+    plans(monkeypatch, DiscoveryStrategy(place_types=["drugstore"]))
+    provider, _, calls = build(monkeypatch, respond=ok([row()]), use_strategy=True)
+
+    (business,) = provider.discover(area="Anywhere", category="pharmacy", limit=10)
+
+    assert business.ai_assisted is False
+    assert provider.stats()["strategy_applied"] is True
+    # The static type is what actually travelled, and no AI query did.
+    payload = calls[0][1]["json"]
+    assert payload["includedType"] == INCLUDED_TYPES["pharmacy"]
+    assert "textQueries" not in payload
+
+
+def test_an_ai_place_type_that_fills_a_gap_does_make_a_lead_ai_assisted(monkeypatch):
+    # The other half: where the table has NOTHING, the model's type is what Google was asked for, so
+    # AI genuinely shaped this search even though no query was planned.
+    from scraper.strategy import DiscoveryStrategy
+
+    category = "artisan soap maker"
+    assert category not in INCLUDED_TYPES
+
+    plans(monkeypatch, DiscoveryStrategy(place_types=["store"]))
+    provider, _, calls = build(monkeypatch, respond=ok([row()]), use_strategy=True)
+
+    (business,) = provider.discover(area="Anywhere", category=category, limit=10)
+
+    assert business.ai_assisted is True
+    assert calls[0][1]["json"]["includedType"] == "store"
+
+
+def test_a_search_with_planning_off_records_a_verified_not_ai(monkeypatch):
+    # NOT SILENCE. A Google search that ran without AI records `False` — a fact — which is what
+    # separates it from every lead discovered before the field existed, whose provenance is unknown
+    # and stays NULL in the CRM.
+    provider, _, _ = build(monkeypatch, respond=ok([row()]))
+
+    (business,) = provider.discover(area="Anywhere", category="pharmacy", limit=10)
+
+    assert business.ai_assisted is False
+
+
 def test_every_included_type_is_keyed_by_an_existing_osm_category():
     # The Places mapping must not invent a category the OSM provider does not know.
     assert set(INCLUDED_TYPES) <= set(CATEGORY_SELECTORS)
@@ -357,6 +426,9 @@ def test_rows_become_raw_businesses(monkeypatch):
         region="National Capital Region",
         province="Metro Manila",
         city="Makati City",
+        # Stamped on every record the Google lane returns. This build made no AI plan, so the
+        # provenance recorded is an explicit "not AI-assisted" rather than silence.
+        ai_assisted=False,
     )
 
 
@@ -403,7 +475,13 @@ def test_missing_optional_fields_stay_empty(monkeypatch):
 
     (business,) = provider.discover(area="Makati City, Philippines", category="pharmacy", limit=5)
 
-    assert business == RawBusiness(provider_id="places/ChIJ-bare", name="Bare Pharmacy")
+    assert business == RawBusiness(
+        provider_id="places/ChIJ-bare",
+        name="Bare Pharmacy",
+        # Provenance is recorded even for a row that carries nothing else: "no AI planned this
+        # search" is a finding, not a missing optional field.
+        ai_assisted=False,
+    )
 
 
 def test_the_existing_normalizer_takes_google_records_unchanged(monkeypatch):
