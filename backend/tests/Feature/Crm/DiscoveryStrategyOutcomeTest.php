@@ -123,9 +123,9 @@ class DiscoveryStrategyOutcomeTest extends TestCase
         $this->assertSame([], $this->outcomes()->recent('pharmacy', 'never-searched'));
     }
 
-    // --- a cached refusal is still a refusal ---------------------------------
+    // --- every refusal is recorded, and none of them is pinned ---------------
 
-    public function test_a_cached_empty_plan_is_recorded_and_marked_apart_from_a_live_one(): void
+    public function test_a_repeated_empty_plan_is_recorded_again_and_reaches_the_model_again(): void
     {
         $this->actingAsRole();
         $this->aiConfigured();
@@ -133,14 +133,19 @@ class DiscoveryStrategyOutcomeTest extends TestCase
 
         $this->plan(['selectors' => [], 'queries' => [], 'placeTypes' => [], 'subAreas' => []]);
 
-        // Same question again: the permanent cache answers, the model is never reached.
+        // THE SAME QUESTION AGAIN REACHES THE MODEL. An empty query plan is no longer pinned, so the
+        // repeat is a fresh consultation rather than a permanent cached answer. That is the whole
+        // point: while it was cached, the plan carried no phrase, so no phrase executed, so the
+        // ledger could not change, so the fingerprint could not change — and this target was
+        // answered from that one entry forever without the model being asked again.
         app(OpenAiDiscoveryStrategist::class)->plan('pharmacy', 'bacolod');
 
         $entries = $this->outcomes()->recent('pharmacy', 'bacolod');
+        // BOTH consultations are recorded. A saturated target must not look busy once and silent
+        // afterwards, whichever path answered it.
         $this->assertCount(2, $entries);
         $this->assertSame(StrategyOutcomeLog::SOURCE_LIVE, $entries[0]['source']);
-        // Without this, a saturated target would look busy once and silent forever after.
-        $this->assertSame(StrategyOutcomeLog::SOURCE_CACHE, $entries[1]['source']);
+        $this->assertSame(StrategyOutcomeLog::SOURCE_LIVE, $entries[1]['source']);
     }
 
     // --- the saturation signal -----------------------------------------------
