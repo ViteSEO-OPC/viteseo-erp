@@ -62,7 +62,7 @@ use App\Modules\Crm\Services\Mail\MailboxOauthTokenStore;
 use App\Modules\Crm\Services\Inbound\Adapters\InboundAdapterRegistry;
 use App\Modules\Crm\Services\Outbound\Adapters\OutboundAdapterRegistry;
 use App\Modules\Crm\Services\Outbound\Contracts\ProviderCredentialResolver;
-use App\Modules\Crm\Services\Outbound\Credentials\NullProviderCredentialResolver;
+use App\Modules\Crm\Services\Outbound\Credentials\DatabaseProviderCredentialResolver;
 use App\Modules\Crm\Services\Mail\MailboxSyncManager;
 use App\Modules\Crm\Services\Mail\Providers\SmtpEmailProvider;
 use App\Modules\Crm\Services\Ranking\RankingConfig;
@@ -178,11 +178,13 @@ class CrmServiceProvider extends ServiceProvider
             return new OutboundAdapterRegistry($app);
         });
 
-        // The credential boundary. Phase 3F.1 binds the null implementation ON PURPOSE: every other
-        // part of the outbound path can be exercised end to end, and the run still stops one step
-        // short of a network call because there is nothing to authenticate with. Phase 3F.2 swaps
-        // this binding for a real store and that swap is the whole review.
-        $this->app->bind(ProviderCredentialResolver::class, NullProviderCredentialResolver::class);
+        // The credential boundary. Phase 3F.2 swaps the Phase 3F.1 null object for the real store,
+        // which changes nothing about what the system can do: the credential table is empty, so the
+        // resolver returns null for every org exactly as the null object did. What it changes is
+        // that the table is now load-bearing — a synthetic credential in a test travels the real
+        // lookup path. Sending still cannot happen, because no Meta adapter has a transport.
+        // NullProviderCredentialResolver is kept as the documented "nothing configured" stand-in.
+        $this->app->bind(ProviderCredentialResolver::class, DatabaseProviderCredentialResolver::class);
     }
 
     public function boot(): void

@@ -52,6 +52,18 @@ abstract class AbstractMetaOutboundAdapter implements OutboundProviderAdapter
         return $provider === self::PROVIDER && $channel === $this->channel();
     }
 
+    /**
+     * False, and hard-coded rather than configurable.
+     *
+     * There is no Meta transport in this codebase. A flag that could turn this true would be a flag
+     * that turns on code which does not exist; when Phase 3F.3 writes the transport, this method
+     * changes with it, in the same review.
+     */
+    public function canTransmit(): bool
+    {
+        return false;
+    }
+
     public function resourceTypeFor(string $channel): ?string
     {
         return $channel === $this->channel() ? $this->resourceType() : null;

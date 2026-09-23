@@ -296,10 +296,37 @@ class MetaAccountMappingTest extends TestCase
             $this->assertStringNotContainsString('secret', (string) $option);
         }
 
+        $columns = Schema::getColumnListing('crm_provider_accounts');
+
+        // Phase 3F.2 added `connection_id`, a plaintext foreign key to the grant a mapping came
+        // from. It is not a credential and carries no secret; the enumeration is updated rather
+        // than relaxed so that a future column still has to be argued for here.
+        //
+        // COMPARED SORTED, because column ORDER is not a portable fact: the migration places
+        // `connection_id` after `org_id`, which MariaDB honours and SQLite — the engine this suite
+        // runs on — ignores, appending it instead. Asserting the order would make this test a
+        // statement about the test database rather than about the schema.
+        $expected = ['id', 'org_id', 'connection_id', 'provider', 'resource_type', 'external_id', 'label', 'is_active', 'created_at', 'updated_at'];
+        sort($expected);
+        $actual = $columns;
+        sort($actual);
+
         $this->assertSame(
-            ['id', 'org_id', 'provider', 'resource_type', 'external_id', 'label', 'is_active', 'created_at', 'updated_at'],
-            Schema::getColumnListing('crm_provider_accounts'),
+            $expected,
+            $actual,
             'the mapping table holds ownership only — no credential column exists',
         );
+
+        // The property the enumeration is really protecting, asserted directly so that it survives
+        // the next time someone updates the list without thinking about why it is there.
+        foreach ($columns as $column) {
+            foreach (['token', 'secret', 'password', 'credential'] as $forbidden) {
+                $this->assertStringNotContainsString(
+                    $forbidden,
+                    $column,
+                    "crm_provider_accounts must never hold a secret; [$column] looks like one.",
+                );
+            }
+        }
     }
 }

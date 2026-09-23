@@ -27,6 +27,7 @@ use Illuminate\Database\Eloquent\Relations\MorphMany;
 #[Fillable([
     'provider',
     'channel',
+    'provider_account_id',
     'external_conversation_id',
     'external_contact_id',
     'status',
@@ -64,6 +65,20 @@ class Conversation extends Model
     public function lead(): BelongsTo
     {
         return $this->belongsTo(Lead::class);
+    }
+
+    /**
+     * The connected resource this thread arrived on — which Page, which Instagram account.
+     *
+     * Recorded once at ingest and never rewritten, because it is a fact about where the thread
+     * lives rather than about its latest message. Null on the conversations that predate the
+     * column; those still resolve a sender through the Phase 3F.1 inference path.
+     *
+     * @return BelongsTo<ProviderAccount, $this>
+     */
+    public function providerAccount(): BelongsTo
+    {
+        return $this->belongsTo(ProviderAccount::class, 'provider_account_id');
     }
 
     /** Thread order follows the PROVIDER's clock, falling back to ours when it gave none. */

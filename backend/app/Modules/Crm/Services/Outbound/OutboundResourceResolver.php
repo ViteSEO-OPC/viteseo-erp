@@ -16,7 +16,12 @@ use App\Modules\Crm\Services\Inbound\Meta\MetaAccountResolver;
  * that into a tenant. Replying reverses the question — we must pick a sender — and a wrong pick is
  * not a failed send but a message delivered to a real customer from the wrong business.
  *
- * TWO ROUTES, PREFERRED ORDER.
+ * THREE ROUTES, PREFERRED ORDER.
+ *
+ *  0. The conversation's own `provider_account_id`, recorded at ingest from the signed payload.
+ *     Added in Phase 3F.2 and the reason the other two are now fallbacks rather than the design:
+ *     the answer is written down once, when it is known for certain, instead of being inferred on
+ *     every send. Conversations created before that column existed have null here and fall through.
  *
  *  1. The thread's own history. An inbound row records `recipient_external_id`, which for Messenger
  *     is the Page that received the message and for Instagram the business account. That value was
@@ -61,6 +66,24 @@ final class OutboundResourceResolver
         $orgId = (int) $conversation->org_id;
         $provider = (string) $conversation->provider;
 
+        if ($conversation->provider_account_id !== null) {
+            $recorded = ProviderAccount::query()
+                ->where('id', $conversation->provider_account_id)
+                ->where('org_id', $orgId)
+                ->where('provider', $provider)
+                ->where('resource_type', $resourceType)
+                ->first();
+
+            // A recorded resource that no longer belongs to this org, or no longer matches the
+            // channel, is a refusal rather than a reason to look for another one: something has
+            // been re-provisioned underneath a live thread and a human should see that.
+            if ($recorded === null) {
+                return OutboundFailureCode::ResourceUnmapped;
+            }
+
+            return $this->usable($recorded);
+        }
+
         $recipient = $this->recipientFromThread($conversation);
 
         if ($recipient !== null) {
@@ -76,7 +99,7 @@ final class OutboundResourceResolver
             // some other Page — it means the mapping was removed or moved to another tenant.
             return $account === null
                 ? OutboundFailureCode::ResourceUnmapped
-                : $this->toResource($account);
+                : $this->usable($account);
         }
 
         $candidates = ProviderAccount::query()
@@ -90,8 +113,22 @@ final class OutboundResourceResolver
         return match (true) {
             $candidates->isEmpty() => OutboundFailureCode::ResourceUnmapped,
             $candidates->count() > 1 => OutboundFailureCode::ResourceAmbiguous,
-            default => $this->toResource($candidates->first()),
+            default => $this->usable($candidates->first()),
         };
+    }
+
+    /**
+     * The resource, unless the grant behind it has been withdrawn.
+     *
+     * A disconnected connection blocks NEW sends and nothing else: the mapping row stays, the
+     * conversations that point at it stay, and their history stays readable. Only the ability to
+     * speak through it goes away, which is exactly what an operator means by "disconnect".
+     */
+    private function usable(ProviderAccount $account): ResolvedProviderResource|OutboundFailureCode
+    {
+        return $account->isUsableForOutbound()
+            ? $this->toResource($account)
+            : OutboundFailureCode::ResourceUnavailable;
     }
 
     /**

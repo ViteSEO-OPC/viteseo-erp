@@ -48,6 +48,7 @@ final class OutboundMessageService
         private readonly OutboundResourceResolver $resources,
         private readonly ProviderCredentialResolver $credentials,
         private readonly OutboundIdempotency $idempotency,
+        private readonly OutboundMessagePersister $persister,
     ) {}
 
     /**
@@ -98,6 +99,9 @@ final class OutboundMessageService
         if ($resource instanceof OutboundFailureCode) {
             return $this->refuse($request, $resource, match ($resource) {
                 OutboundFailureCode::ResourceAmbiguous => 'The organization owns several connected accounts of this type and the thread names none.',
+                // Distinct wording matters: "you never connected a Page" and "the Page you
+                // connected has been disconnected" send an operator to two different screens.
+                OutboundFailureCode::ResourceUnavailable => 'The connected account for this thread has been disconnected or its grant has expired.',
                 default => 'No active connected account of this type belongs to the organization.',
             }, $key);
         }
@@ -126,9 +130,57 @@ final class OutboundMessageService
                 'The credential for the resolved account has expired.', $key);
         }
 
-        // Unreachable while NullProviderCredentialResolver is wired. Present so the success path is
-        // designed under review rather than added beside the first transport.
-        return $adapter->send($request, $resource->externalId, $credential);
+        /*
+         * OPTION B, AND WHY THE GATE SITS HERE AND NOT EARLIER. Phase 3F.2 was asked to choose
+         * between persisting a pending row that nothing can deliver, and refusing before anything
+         * durable exists. A pending row is a promise that a message is on its way to a named
+         * customer; with no Meta transport in the codebase every such row would be a promise
+         * nothing can keep, accumulating in a real tenant's database until someone shipped a sender
+         * and it tried to deliver a month of stale replies.
+         *
+         * It is the LAST check rather than the first because every check above it is a security
+         * check — permission, tenancy, which Page may speak, which credential applies — and those
+         * must run and be exercised whether or not a transport exists. Putting the cheap gate first
+         * would have made them unreachable, and unreachable security checks rot. It also gives the
+         * operator the most specific refusal available: "your org has two Pages and the thread names
+         * neither" is more use than "no transport".
+         *
+         * The persister is fully built and directly tested; what is gated is the ORCHESTRATION
+         * reaching it.
+         */
+        if (! $adapter->canTransmit()) {
+            return $this->refuse($request, OutboundFailureCode::NotConfigured, sprintf(
+                'Adapter [%s] has no transport; refusing before a pending message is written.',
+                $adapter->name(),
+            ), $key);
+        }
+
+        /*
+         * Durable from here on. The row is written PENDING before the provider is called, so that a
+         * response we never see — a timeout, a crash between call and commit — leaves evidence that
+         * an attempt was made rather than silence. A repeated client request id finds this same row
+         * instead of creating a second one.
+         */
+        $persisted = $this->persister->pending($request, $key);
+
+        if ($persisted->delivery_status === OutboundMessagePersister::SENT) {
+            // A retry of something the provider already accepted. Report the original outcome
+            // rather than sending again.
+            return OutboundMessageResult::accepted(
+                (string) $persisted->external_message_id,
+                $key,
+            );
+        }
+
+        $result = $adapter->send($request, $resource->externalId, $credential);
+
+        if ($result->accepted && $result->providerMessageId !== null) {
+            $this->persister->markSent($persisted, $result->providerMessageId);
+        } else {
+            $this->persister->markFailed($persisted, $result->failure ?? OutboundFailureCode::NotConfigured);
+        }
+
+        return $result;
     }
 
     /** Record the refusal in identifiers only, then return it. */

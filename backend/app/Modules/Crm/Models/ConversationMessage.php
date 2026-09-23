@@ -29,6 +29,12 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  *     already run, so nothing outside the processor may declare it done.
  */
 #[Fillable([
+    // Phase 3F.2 delivery state. Fillable because the outbound persister builds a whole row in one
+    // create() and these are part of that row; they are meaningless on inbound (see the migration)
+    // and no inbound code path sets them.
+    'delivery_status',
+    'failure_code',
+    'delivered_at',
     'provider',
     'channel',
     'external_message_id',
@@ -63,6 +69,7 @@ class ConversationMessage extends Model
             'occurred_at' => 'datetime',
             'received_at' => 'datetime',
             'processed_at' => 'datetime',
+            'delivered_at' => 'datetime',
         ];
     }
 

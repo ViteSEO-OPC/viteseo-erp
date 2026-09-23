@@ -54,6 +54,20 @@ interface OutboundProviderAdapter
     public function validate(OutboundMessageRequest $request): ?OutboundMessageResult;
 
     /**
+     * Whether this adapter can actually reach its provider today.
+     *
+     * EXISTS SO THE SERVICE CAN REFUSE BEFORE IT WRITES. Phase 3F.2 persists a `pending` row for
+     * every send it attempts, and a pending row is a promise: something is expected to deliver it.
+     * With no transport written, every such row would be a promise nothing can keep — a permanent
+     * queue of messages a customer is waiting for and will never receive. Asking the adapter first
+     * means the refusal happens before anything durable exists.
+     *
+     * Separate from `supports()`, which answers "is this my channel?". An adapter can own a channel
+     * and still have no way to speak on it, which is precisely the state of both Meta adapters.
+     */
+    public function canTransmit(): bool;
+
+    /**
      * Hand the message to the provider.
      *
      * Reached only with a resolved resource and a real credential, which in Phase 3F.1 never

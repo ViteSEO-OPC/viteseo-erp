@@ -41,6 +41,14 @@ enum OutboundFailureCode: string
     case ResourceAmbiguous = 'resource_ambiguous';
 
     /**
+     * The resource exists and belongs to this org, but its grant has been withdrawn.
+     *
+     * Distinct from ResourceUnmapped on purpose: "you never connected a Page" and "the Page you
+     * connected has been disconnected" send an operator to two different screens.
+     */
+    case ResourceUnavailable = 'resource_unavailable';
+
+    /**
      * No credential is available for the resolved resource.
      *
      * This is the case Phase 3F.1 always ends on, because the only credential resolver wired in

@@ -10,7 +10,7 @@ use App\Modules\Crm\Models\Conversation;
 use App\Modules\Crm\Models\ConversationMessage;
 use App\Modules\Crm\Models\ProviderAccount;
 use App\Modules\Crm\Services\Outbound\Contracts\ProviderCredentialResolver;
-use App\Modules\Crm\Services\Outbound\Credentials\NullProviderCredentialResolver;
+use App\Modules\Crm\Services\Outbound\Credentials\DatabaseProviderCredentialResolver;
 use App\Modules\Crm\Services\Outbound\Credentials\ProviderCredential;
 use App\Modules\Crm\Services\Outbound\OutboundFailureCode;
 use App\Modules\Crm\Services\Outbound\OutboundIdempotency;
@@ -226,7 +226,10 @@ class OutboundFoundationTest extends TestCase
 
         $this->assertTrue($result->wasRefused());
         $this->assertSame(OutboundFailureCode::NotConfigured, $result->failure);
-        $this->assertInstanceOf(NullProviderCredentialResolver::class, app(ProviderCredentialResolver::class));
+        // Phase 3F.2 swapped the null object for the real store. With no rows in the credential
+        // table the answer is identical — null for every org — which is the point: the binding
+        // changed, the capability did not.
+        $this->assertInstanceOf(DatabaseProviderCredentialResolver::class, app(ProviderCredentialResolver::class));
     }
 
     /** 7 — an unsupported provider/channel pair fails closed. */
@@ -244,7 +247,7 @@ class OutboundFoundationTest extends TestCase
         $this->assertSame(OutboundFailureCode::UnsupportedChannel, $result->failure);
     }
 
-    /** 8 — even when a credential IS available, the real Meta adapters make no network call. */
+    /** 8 — even with a credential in hand, a Meta reply stops before anything is written or sent. */
     public function test_the_meta_adapters_refuse_rather_than_call_meta(): void
     {
         $org = $this->pinnedTenant();

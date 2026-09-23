@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Modules\Crm\Services\Inbound;
 
 use App\Modules\Crm\Models\Conversation;
+use App\Modules\Crm\Models\ProviderAccount;
+use App\Support\CurrentOrg;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Carbon;
 use RuntimeException;
@@ -156,12 +158,59 @@ final class ConversationResolver
         return Conversation::create([
             'provider' => $message->provider,
             'channel' => $message->channel,
+            'provider_account_id' => $this->resourceFor($message),
             'external_conversation_id' => $message->externalConversationId,
             'external_contact_id' => $this->trimmedOrNull($message->senderExternalId),
             'status' => 'open',
             'started_at' => $happenedAt,
             'last_message_at' => null,
         ]);
+    }
+
+    /**
+     * Which of the tenant's connected resources this thread arrived on.
+     *
+     * WHY THE RECIPIENT IS THE RIGHT SOURCE. For an inbound message the recipient IS us — the Page
+     * or Instagram account the customer wrote to. The Meta adapter already refuses any item whose
+     * `recipient.id` disagrees with the resource the envelope was grouped under, so for anything
+     * that reaches this point the two are the same value, and it is the one the signed payload
+     * carried. No request field can set it.
+     *
+     * WRITTEN ONLY HERE, ON CREATE. `advance()` never touches the column: a thread's resource is
+     * where it lives, not a property of its newest message, and rewriting it would let one
+     * misrouted delivery move an existing conversation to a different Page.
+     *
+     * DELIBERATELY PROVIDER-NEUTRAL. The lookup does not name a resource type, because this class
+     * knows nothing about Meta's vocabulary and should not start now. Matching on
+     * (org, provider, external_id) is enough: a resource id is unique per provider in practice, and
+     * anything ambiguous or unmapped yields null rather than a guess.
+     *
+     * NULL IS A FINE ANSWER. An unmapped recipient means outbound falls back to the Phase 3F.1
+     * inference path, which is exactly where it was before this column existed.
+     */
+    private function resourceFor(InboundConversationMessage $message): ?int
+    {
+        $recipient = $this->trimmedOrNull($message->recipientExternalId);
+
+        if ($recipient === null) {
+            return null;
+        }
+
+        $orgId = CurrentOrg::id();
+
+        if ($orgId === null) {
+            return null;
+        }
+
+        $matches = ProviderAccount::query()
+            ->where('org_id', $orgId)
+            ->where('provider', $message->provider)
+            ->where('external_id', $recipient)
+            ->where('is_active', true)
+            ->limit(2)
+            ->get(['id']);
+
+        return $matches->count() === 1 ? (int) $matches->first()->id : null;
     }
 
     private function trimmedOrNull(?string $value): ?string

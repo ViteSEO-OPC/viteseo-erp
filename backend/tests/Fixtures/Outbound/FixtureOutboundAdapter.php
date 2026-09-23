@@ -23,6 +23,7 @@ final class FixtureOutboundAdapter implements OutboundProviderAdapter
     public static function reset(): void
     {
         self::$sent = false;
+        self::$canTransmit = true;
     }
 
     public function name(): string
@@ -33,6 +34,14 @@ final class FixtureOutboundAdapter implements OutboundProviderAdapter
     public function supports(string $provider, string $channel): bool
     {
         return $provider === 'fixture' && $channel === 'fixture_channel';
+    }
+
+    /** Configurable, so one fixture can play both "no transport" and "transport present". */
+    public static bool $canTransmit = true;
+
+    public function canTransmit(): bool
+    {
+        return self::$canTransmit;
     }
 
     public function resourceTypeFor(string $channel): ?string

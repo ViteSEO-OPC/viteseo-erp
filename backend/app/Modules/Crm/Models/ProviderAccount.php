@@ -28,6 +28,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * incidental.
  */
 #[Fillable([
+    'connection_id',
     'provider',
     'resource_type',
     'external_id',
@@ -37,6 +38,45 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 class ProviderAccount extends Model
 {
     protected $table = 'crm_provider_accounts';
+
+    /**
+     * The grant this mapping came from, when it came from one.
+     *
+     * NULL for the resources an operator provisioned by hand before connections existed, which
+     * reads correctly as "mapped by a person, not by an OAuth flow". Nothing on the inbound path
+     * follows this relation: webhook ownership must stay answerable when a tenant's outbound grant
+     * has lapsed, so tying delivery to a connection's health is precisely the coupling avoided.
+     *
+     * NAMED `providerConnection`, NOT `connection`. Eloquent's Model already defines a protected
+     * `$connection` property holding the database connection name, so a relation of that name is
+     * shadowed: `$account->connection` returns the string "mysql", and any method call on it is a
+     * fatal error at runtime rather than a failure a type checker would catch.
+     *
+     * @return BelongsTo<ProviderConnection, $this>
+     */
+    public function providerConnection(): BelongsTo
+    {
+        return $this->belongsTo(ProviderConnection::class, 'connection_id');
+    }
+
+    /**
+     * Whether this resource may be used to START a new outbound send.
+     *
+     * A hand-provisioned resource with no connection is usable — that is how the two production
+     * mappings work today. A resource whose connection is disconnected, errored or expired is not.
+     */
+    public function isUsableForOutbound(): bool
+    {
+        if (! $this->is_active) {
+            return false;
+        }
+
+        if ($this->connection_id === null) {
+            return true;
+        }
+
+        return $this->providerConnection?->isUsableForOutbound() ?? false;
+    }
 
     protected function casts(): array
     {
