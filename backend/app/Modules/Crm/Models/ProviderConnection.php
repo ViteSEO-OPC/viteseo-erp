@@ -43,6 +43,20 @@ class ProviderConnection extends Model
     /** The provider rejected our credential. Needs a human, not a retry. */
     public const ERROR = 'error';
 
+    /**
+     * How the connection came to exist. Recorded in `metadata.origin`.
+     *
+     * TWO LEGITIMATE ORIGINS, AND THE DISTINCTION IS NOT COSMETIC. Meta will not let the Business
+     * Portfolio that owns an app onboard itself through Facebook Login for Business — it disables
+     * that portfolio in the consent screen and says so. So the platform's own Page and Instagram
+     * account reach the CRM through the documented first-party mechanism instead: a System User
+     * token generated in Business Settings. Everything downstream treats the two identically; what
+     * differs is how the credential is renewed, which is why the row says which it is.
+     */
+    public const ORIGIN_PLATFORM_BOOTSTRAP = 'platform_bootstrap';
+
+    public const ORIGIN_CLIENT_OAUTH = 'client_oauth';
+
     protected $table = 'crm_provider_connections';
 
     protected function casts(): array
@@ -80,6 +94,14 @@ class ProviderConnection extends Model
      * `token_expires_at` has passed will be refused by the provider, and discovering that by
      * sending is worse than refusing here.
      */
+    /** How this connection was established. Null for rows written before origins were recorded. */
+    public function origin(): ?string
+    {
+        $origin = ($this->metadata ?? [])['origin'] ?? null;
+
+        return is_string($origin) && $origin !== '' ? $origin : null;
+    }
+
     public function isUsableForOutbound(): bool
     {
         if ($this->status !== self::CONNECTED) {

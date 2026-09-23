@@ -178,6 +178,130 @@ final class GraphMetaOAuthClient implements MetaOAuthClient
     }
 
     /**
+     * Read the business back with the credential that claims to speak for it.
+     *
+     * THE READ IS THE PROOF. A Business Portfolio ID is not a secret — it is printed in Business
+     * Settings and anyone could type one. What cannot be faked is a token that can fetch that
+     * business, so verification is simply `GET /{business_id}?fields=id,name` authenticated by the
+     * credential under test, with the returned id compared to the one supplied. A mismatch, a 404
+     * or a permission error are all the same answer: this pairing is not proven.
+     */
+    public function verifyBusiness(ProviderCredential $credential, string $businessId): MetaBusinessVerification
+    {
+        $businessId = trim($businessId);
+
+        if ($businessId === '' || ! ctype_digit($businessId)) {
+            // Meta business ids are numeric. Refusing here keeps a typo or an injected value from
+            // becoming a Graph path segment.
+            return MetaBusinessVerification::failed(MetaConnectFailureCode::BusinessVerificationFailed);
+        }
+
+        $response = $this->getWithRetry($this->graph($businessId), ['fields' => 'id,name'], $credential);
+
+        if ($response instanceof MetaConnectFailureCode) {
+            $this->diagnose('verify_business', $response, null);
+
+            return MetaBusinessVerification::failed($response);
+        }
+
+        if (! $response->successful()) {
+            $failure = $this->classify($response, MetaConnectFailureCode::BusinessVerificationFailed);
+            $this->diagnose('verify_business', $failure, $this->metaErrorCode($response));
+
+            return MetaBusinessVerification::failed($failure);
+        }
+
+        $body = $this->decode($response);
+        $returnedId = $body['id'] ?? null;
+
+        // Compared as strings, and compared at all: a 200 that names a DIFFERENT business is the
+        // exact case this method exists to catch.
+        if (! is_string($returnedId) || $returnedId !== $businessId) {
+            $this->diagnose('verify_business', MetaConnectFailureCode::BusinessVerificationFailed, null);
+
+            return MetaBusinessVerification::failed(MetaConnectFailureCode::BusinessVerificationFailed);
+        }
+
+        $name = is_string($body['name'] ?? null) && $body['name'] !== '' ? $body['name'] : null;
+
+        return MetaBusinessVerification::verified($returnedId, $name);
+    }
+
+    /**
+     * Tokens for the Pages that were chosen, and only those.
+     *
+     * READ FROM `/me/accounts`, NOT PER PAGE. One call returns every Page the grant covers with
+     * its `access_token`, so selecting three Pages costs one request rather than three — and more
+     * importantly, a Page absent from that list cannot have a token invented for it. The requested
+     * ids are used to FILTER what Meta returned; they are never used to address a Page directly.
+     *
+     * A REQUESTED PAGE MISSING FROM THE ANSWER IS A FAILURE, not a smaller map: it means the grant
+     * does not actually cover something the caller believed it did, and silently returning fewer
+     * credentials would leave an account connected with no way to speak.
+     *
+     * @param  list<string>  $pageExternalIds
+     */
+    public function pageCredentials(ProviderCredential $credential, array $pageExternalIds): MetaPageCredentials
+    {
+        $wanted = array_values(array_unique(array_filter(array_map('trim', $pageExternalIds), static fn (string $v): bool => $v !== '')));
+
+        if ($wanted === []) {
+            return MetaPageCredentials::success([]);
+        }
+
+        $response = $this->getWithRetry($this->graph('me/accounts'), [
+            'fields' => 'id,access_token',
+            'limit' => max(1, (int) config('meta.oauth.http.page_size', 50)),
+        ], $credential);
+
+        if ($response instanceof MetaConnectFailureCode) {
+            $this->diagnose('page_credentials', $response, null);
+
+            return MetaPageCredentials::failed($response);
+        }
+
+        if (! $response->successful()) {
+            $failure = $this->classify($response, MetaConnectFailureCode::PageCredentialUnavailable);
+            $this->diagnose('page_credentials', $failure, $this->metaErrorCode($response));
+
+            return MetaPageCredentials::failed($failure);
+        }
+
+        $body = $this->decode($response);
+
+        if ($body === null || ! isset($body['data']) || ! is_array($body['data'])) {
+            $this->diagnose('page_credentials', MetaConnectFailureCode::MalformedProviderResponse, null);
+
+            return MetaPageCredentials::failed(MetaConnectFailureCode::MalformedProviderResponse);
+        }
+
+        $found = [];
+
+        foreach ($body['data'] as $row) {
+            if (! is_array($row)) {
+                continue;
+            }
+
+            $id = $row['id'] ?? null;
+            $token = $row['access_token'] ?? null;
+
+            if (is_string($id) && in_array($id, $wanted, true) && is_string($token) && $token !== '') {
+                $found[$id] = new ProviderCredential(token: $token, resourceExternalId: $id);
+            }
+        }
+
+        foreach ($wanted as $id) {
+            if (! isset($found[$id])) {
+                $this->diagnose('page_credentials', MetaConnectFailureCode::PageCredentialUnavailable, null);
+
+                return MetaPageCredentials::failed(MetaConnectFailureCode::PageCredentialUnavailable);
+            }
+        }
+
+        return MetaPageCredentials::success($found);
+    }
+
+    /**
      * One Page, plus the Instagram account attached to it when there is one.
      *
      * @param  array<string, mixed>  $row

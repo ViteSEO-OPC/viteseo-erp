@@ -29,4 +29,14 @@ final class UnconfiguredMetaOAuthClient implements MetaOAuthClient
     {
         return MetaAssetDiscovery::failed(MetaConnectFailureCode::NotConfigured);
     }
+
+    public function verifyBusiness(ProviderCredential $credential, string $businessId): MetaBusinessVerification
+    {
+        return MetaBusinessVerification::failed(MetaConnectFailureCode::NotConfigured);
+    }
+
+    public function pageCredentials(ProviderCredential $credential, array $pageExternalIds): MetaPageCredentials
+    {
+        return MetaPageCredentials::failed(MetaConnectFailureCode::NotConfigured);
+    }
 }

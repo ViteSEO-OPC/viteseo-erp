@@ -626,6 +626,22 @@ Route::middleware(['auth:sanctum', 'set-current-org', 'subscription-active', 'fe
             Route::post('/settings/integrations/meta/authorization', [MetaConnectController::class, 'store'])
                 ->middleware('throttle:10,1');
 
+            /*
+             * Flow A — platform bootstrap. Connects the CRM's OWN Meta business with a System User
+             * token, because Meta will not let the Business Portfolio that owns an app onboard
+             * itself through Facebook Login for Business.
+             *
+             * GATED TO super_admin ALONE, one level tighter than the rest of this group. The other
+             * three endpoints let a crm_admin connect their own tenant through a consent screen
+             * they control; this one accepts a long-lived credential typed in by hand and attaches
+             * live messaging assets, which is a platform-operator act rather than a tenant one.
+             *
+             * Throttled hard: a correct bootstrap happens once, and a loop against it is either a
+             * mistake or someone testing tokens.
+             */
+            Route::post('/settings/integrations/meta/bootstrap', [MetaConnectController::class, 'bootstrap'])
+                ->middleware(['role:super_admin', 'throttle:5,1']);
+
             // Settings → Integrations → Nearby Lead Generation: which engine fills the discovered-
             // business pool. A Business Development Manager is refused here at the route, so the UI
             // hiding these controls is presentation rather than protection.

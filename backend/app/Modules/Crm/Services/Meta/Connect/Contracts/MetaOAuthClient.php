@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace App\Modules\Crm\Services\Meta\Connect\Contracts;
 
 use App\Modules\Crm\Services\Meta\Connect\MetaAssetDiscovery;
+use App\Modules\Crm\Services\Meta\Connect\MetaBusinessVerification;
 use App\Modules\Crm\Services\Meta\Connect\MetaExchangeResult;
+use App\Modules\Crm\Services\Meta\Connect\MetaPageCredentials;
 use App\Modules\Crm\Services\Meta\Connect\UnconfiguredMetaOAuthClient;
 use App\Modules\Crm\Services\Outbound\Credentials\ProviderCredential;
 
@@ -42,4 +44,26 @@ interface MetaOAuthClient
      * storing credentials for Pages nobody chose is holding secrets for no reason.
      */
     public function discoverAssets(ProviderCredential $userCredential): MetaAssetDiscovery;
+
+    /**
+     * Prove a credential really speaks for a named Business Portfolio.
+     *
+     * ONLY THE PLATFORM BOOTSTRAP PATH NEEDS THIS. Facebook Login for Business names the
+     * authorizing business itself, so Flow B never asks. Flow A takes a portfolio id from an
+     * operator's keyboard, and a typed id paired with a pasted token proves nothing on its own —
+     * so the server reads the business back USING that token and accepts the id only if Meta
+     * returns the same one.
+     */
+    public function verifyBusiness(ProviderCredential $credential, string $businessId): MetaBusinessVerification;
+
+    /**
+     * Fetch access tokens for Pages that have actually been selected.
+     *
+     * The second half of the promise made on `discoverAssets()`: assets come back without tokens
+     * so a discovery list can be rendered safely, and the tokens are fetched here once somebody
+     * has chosen. Pages nobody connected never have a credential stored for them.
+     *
+     * @param  list<string>  $pageExternalIds
+     */
+    public function pageCredentials(ProviderCredential $credential, array $pageExternalIds): MetaPageCredentials;
 }

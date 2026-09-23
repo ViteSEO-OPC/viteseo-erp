@@ -75,6 +75,27 @@ enum MetaConnectFailureCode: string
     case TenantMismatch = 'tenant_mismatch';
 
     /**
+     * The supplied credential does not speak for the named Business Portfolio.
+     *
+     * Platform bootstrap only: the operator typed a portfolio id and pasted a token, and reading
+     * the business back with that token did not return that id. Refusing is the whole point of
+     * asking — an unverified pairing would put a token under the wrong business forever.
+     */
+    case BusinessVerificationFailed = 'business_verification_failed';
+
+    /**
+     * The Meta business is already connected to a different CRM organization.
+     *
+     * The mirror of {@see self::AssetOwnedByAnotherOrg}, one level up. A Meta business belongs to
+     * one customer, and two tenants claiming it is a provisioning mistake that must surface rather
+     * than be settled by whoever connected most recently.
+     */
+    case BusinessOwnedByAnotherOrg = 'business_owned_by_another_org';
+
+    /** Meta returned no usable access token for a Page that was selected. */
+    case PageCredentialUnavailable = 'page_credential_unavailable';
+
+    /**
      * Whether a person should simply try again.
      *
      * NotConfigured and the two asset refusals are not retryable by the person: they need an

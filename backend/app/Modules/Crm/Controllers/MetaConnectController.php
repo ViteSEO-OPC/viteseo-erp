@@ -5,7 +5,10 @@ declare(strict_types=1);
 namespace App\Modules\Crm\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\Crm\Requests\MetaPlatformBootstrapRequest;
 use App\Modules\Crm\Services\Meta\Connect\MetaConnectException;
+use App\Modules\Crm\Services\Meta\Connect\MetaConnectFailureCode;
+use App\Modules\Crm\Services\Meta\Connect\MetaPlatformBootstrap;
 use App\Modules\Crm\Services\Meta\Connect\MetaConnectFlow;
 use App\Support\CurrentOrg;
 use Illuminate\Http\JsonResponse;
@@ -63,6 +66,76 @@ class MetaConnectController extends Controller
                 $e->failure->value === 'not_configured' ? 503 : 422,
             );
         }
+    }
+
+    /**
+     * Flow A — connect the platform's OWN Meta business with a System User token.
+     *
+     * SEPARATE FROM `store()` BECAUSE THE TWO ARE NOT THE SAME ACT. `store()` issues a consent
+     * link for a CLIENT to authorize us; this accepts a credential the platform generated for
+     * itself, because Meta refuses to let the portfolio that owns an app onboard itself through
+     * Login for Business. Gated harder than the rest of this controller — see the route.
+     *
+     * The token is read from the request once and never returned. The response carries the
+     * connection, the attached resources and the discovered assets, all identifiers only.
+     */
+    public function bootstrap(MetaPlatformBootstrapRequest $request, MetaPlatformBootstrap $bootstrap): JsonResponse
+    {
+        $validated = $request->validated();
+
+        try {
+            $result = $bootstrap->connect(
+                orgId: (int) CurrentOrg::id(),
+                actor: $request->user(),
+                businessId: (string) $validated['business_id'],
+                systemUserToken: (string) $validated['system_user_token'],
+                requestedAssetIds: array_values($validated['asset_ids']),
+            );
+        } catch (MetaConnectException $e) {
+            return response()->json(
+                ['message' => $e->getMessage(), 'reason' => $e->failure->value],
+                $this->statusFor($e),
+            );
+        }
+
+        return response()->json([
+            'data' => [
+                'connection' => [
+                    'id' => (int) $result['connection']->id,
+                    'status' => $result['connection']->status,
+                    'origin' => $result['connection']->origin(),
+                    'externalBusinessId' => $result['connection']->external_business_id,
+                    'connectedAt' => $result['connection']->connected_at?->toIso8601String(),
+                ],
+                'attached' => array_map(static fn ($a): array => [
+                    'id' => (int) $a->id,
+                    'resourceType' => $a->resource_type,
+                    'externalId' => $a->external_id,
+                    'label' => $a->label,
+                ], $result['accounts']),
+                'discovered' => array_map(static fn ($a): array => $a->toArray(), $result['assets']),
+            ],
+        ], 201);
+    }
+
+    /**
+     * An HTTP status that matches what went wrong.
+     *
+     * A refusal because the server is not configured is not the caller's mistake, and a business
+     * owned by another tenant is a conflict rather than a bad request — collapsing all three into
+     * 422 would make an operator debug the wrong thing.
+     */
+    private function statusFor(MetaConnectException $e): int
+    {
+        return match ($e->failure) {
+            MetaConnectFailureCode::NotConfigured,
+            MetaConnectFailureCode::ProviderUnavailable,
+            MetaConnectFailureCode::ProviderRateLimited => 503,
+            MetaConnectFailureCode::BusinessOwnedByAnotherOrg,
+            MetaConnectFailureCode::AssetOwnedByAnotherOrg => 409,
+            MetaConnectFailureCode::TenantMismatch => 403,
+            default => 422,
+        };
     }
 
     /** Disconnect every live Meta connection for this org. Deletes nothing. Idempotent. */

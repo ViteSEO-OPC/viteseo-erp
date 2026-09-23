@@ -42,6 +42,9 @@ final class MetaConnectException extends RuntimeException
             MetaConnectFailureCode::AssetNotOffered => 'That asset was not among the ones this connection returned.',
             MetaConnectFailureCode::AssetOwnedByAnotherOrg => 'That asset is already connected to another organization.',
             MetaConnectFailureCode::TenantMismatch => 'That connection belongs to a different organization.',
+            MetaConnectFailureCode::BusinessVerificationFailed => 'That credential does not have access to the named Business Portfolio.',
+            MetaConnectFailureCode::BusinessOwnedByAnotherOrg => 'That Meta business is already connected to another organization.',
+            MetaConnectFailureCode::PageCredentialUnavailable => 'Meta returned no access token for one of the selected Pages.',
         });
     }
 }
