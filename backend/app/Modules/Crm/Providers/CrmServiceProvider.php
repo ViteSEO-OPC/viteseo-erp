@@ -60,6 +60,8 @@ use App\Modules\Crm\Services\Mail\Contracts\GoogleCredentialSource;
 use App\Modules\Crm\Services\Mail\Google\GoogleCredentialSourceFactory;
 use App\Modules\Crm\Services\Mail\MailboxOauthTokenStore;
 use App\Modules\Crm\Services\Inbound\Adapters\InboundAdapterRegistry;
+use App\Modules\Crm\Services\Meta\Connect\Contracts\MetaOAuthClient;
+use App\Modules\Crm\Services\Meta\Connect\UnconfiguredMetaOAuthClient;
 use App\Modules\Crm\Services\Outbound\Adapters\OutboundAdapterRegistry;
 use App\Modules\Crm\Services\Outbound\Contracts\ProviderCredentialResolver;
 use App\Modules\Crm\Services\Outbound\Credentials\DatabaseProviderCredentialResolver;
@@ -185,6 +187,13 @@ class CrmServiceProvider extends ServiceProvider
         // lookup path. Sending still cannot happen, because no Meta adapter has a transport.
         // NullProviderCredentialResolver is kept as the documented "nothing configured" stand-in.
         $this->app->bind(ProviderCredentialResolver::class, DatabaseProviderCredentialResolver::class);
+
+        // Phase 3F.3A — everything that would talk to Meta's OAuth and Graph endpoints, behind one
+        // seam. The bound implementation makes NO network call and refuses with NOT_CONFIGURED, so
+        // the flow around it (state, tenancy, asset claiming) is built and tested while the calls
+        // that need a verified Meta app wait for the review that grants them. Replacing this
+        // binding is the whole of Phase 3F.3B.
+        $this->app->bind(MetaOAuthClient::class, UnconfiguredMetaOAuthClient::class);
     }
 
     public function boot(): void
@@ -212,6 +221,15 @@ class CrmServiceProvider extends ServiceProvider
         Route::prefix('api')
             ->middleware('api')
             ->group(__DIR__ . '/../Routes/webhooks.php');
+
+        // Phase 3F.3A — the Meta OAuth callback. Under the `api` prefix for the same reason the
+        // webhook is: nginx serves the domain root with Next.js and routes only /api, /storage and
+        // two exact paths to Laravel, so a root-level Meta callback would be answered by the SPA.
+        // The resulting path is /api/auth/meta/callback, which is what META_OAUTH_REDIRECT_URI
+        // must be registered as.
+        Route::prefix('api')
+            ->middleware('api')
+            ->group(__DIR__ . '/../Routes/meta-oauth.php');
 
         // The Google OAuth callback, mounted at the ROOT with no prefix so its path is exactly
         // /auth/google/callback — the string registered as GOOGLE_REDIRECT_URI on the OAuth client,

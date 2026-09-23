@@ -64,6 +64,61 @@ return [
     | `resource_type` values stored in crm_provider_accounts. Stated here so the
     | provisioning command, the resolver and the classifier cannot drift.
     */
+    /*
+    |--------------------------------------------------------------------------
+    | SaaS Connect (Phase 3F.3A) — Facebook Login for Business
+    |--------------------------------------------------------------------------
+    |
+    | NON-SECRET KEYS ONLY. The App Secret is NOT duplicated here: the webhook
+    | already reads it from `meta.app_secret` above, and one secret with two
+    | config homes is one that eventually gets rotated in only one of them.
+    |
+    | None of these have production values. `app_id` and `redirect_uri` are
+    | empty by default, and MetaConnectFlow refuses to issue an authorization
+    | URL while either is blank rather than sending somebody to Meta on a link
+    | whose callback could only fail.
+    |
+    | Setting them does NOT enable connecting: the bound MetaOAuthClient is
+    | UnconfiguredMetaOAuthClient, which makes no network call at all. Phase
+    | 3F.3B replaces that binding, and that replacement is its own review.
+    |
+    */
+    'oauth' => [
+        /** Facebook App ID. Public by nature — it appears in the authorization URL. */
+        'app_id' => env('META_APP_ID', ''),
+
+        /**
+         * Must match the redirect URI registered on the app EXACTLY. Meta compares
+         * strings, so this is not ours to tidy — see the same note on the Google
+         * callback in Routes/oauth.php.
+         */
+        'redirect_uri' => env('META_OAUTH_REDIRECT_URI', ''),
+
+        /**
+         * Facebook Login for Business drives its permission set from a configuration
+         * created in the App dashboard rather than from a scope list in the URL. When
+         * this is set we send `config_id` and nothing else.
+         */
+        'configuration_id' => env('META_LOGIN_CONFIGURATION_ID', ''),
+
+        'authorize_endpoint' => env('META_OAUTH_AUTHORIZE_ENDPOINT', 'https://www.facebook.com/v21.0/dialog/oauth'),
+
+        /**
+         * Fallback only, for a development app with no Login configuration. These are
+         * the permissions the CRM would need and each one is subject to App Review:
+         * reading and sending Page messages, the Instagram equivalent, and the two
+         * management scopes that let a person list the assets they are choosing from.
+         */
+        'scopes' => [
+            'pages_show_list',
+            'pages_messaging',
+            'pages_manage_metadata',
+            'instagram_basic',
+            'instagram_manage_messages',
+            'business_management',
+        ],
+    ],
+
     'resource_types' => [
         'page' => 'page',
         'instagram' => 'instagram_business_account',

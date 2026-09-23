@@ -16,6 +16,7 @@ use App\Modules\Crm\Controllers\EmailController;
 use App\Modules\Crm\Controllers\EmailTemplateController;
 use App\Modules\Crm\Controllers\DiscoveryConfigController;
 use App\Modules\Crm\Controllers\GmailOAuthController;
+use App\Modules\Crm\Controllers\MetaConnectController;
 use App\Modules\Crm\Controllers\NerbyProviderSettingController;
 use App\Modules\Crm\Controllers\LeadAttachmentController;
 use App\Modules\Crm\Controllers\LeadController;
@@ -606,6 +607,24 @@ Route::middleware(['auth:sanctum', 'set-current-org', 'subscription-active', 'fe
             Route::get('/settings/integrations/gmail', [GmailOAuthController::class, 'show']);
             Route::delete('/settings/integrations/gmail', [GmailOAuthController::class, 'destroy']);
             Route::post('/settings/integrations/gmail/authorization', [GmailOAuthController::class, 'store']);
+
+            /*
+             * Settings → Integrations → Meta. Same role gate as Gmail above, and for the same
+             * reason: connecting a tenant's Facebook Pages is an administrative act, not a
+             * business-development one, so crm_bd is refused at the route rather than by a UI
+             * that hides the button.
+             *
+             * GET    status — configured / connected / how many connections. No secret.
+             * POST   authorization — issue a single-use consent URL. Creates NO connection row.
+             * DELETE — disconnect every live connection. Deletes nothing.
+             *
+             * The public half of this flow is /auth/meta/callback in Routes/oauth.php, which Meta
+             * reaches with no bearer token.
+             */
+            Route::get('/settings/integrations/meta', [MetaConnectController::class, 'show']);
+            Route::delete('/settings/integrations/meta', [MetaConnectController::class, 'destroy']);
+            Route::post('/settings/integrations/meta/authorization', [MetaConnectController::class, 'store'])
+                ->middleware('throttle:10,1');
 
             // Settings → Integrations → Nearby Lead Generation: which engine fills the discovered-
             // business pool. A Business Development Manager is refused here at the route, so the UI
