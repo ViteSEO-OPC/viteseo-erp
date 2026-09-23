@@ -192,6 +192,13 @@ class RolesAndPermissionsSeeder extends Seeder
             // has no lead, so gating it on crm.leads.view would hide the very messages it exists to
             // surface. Message bodies are the most sensitive data the module holds.
             'crm.conversations.view',
+            // Replying to one (Phase 3F). Separate from viewing because reading a customer's
+            // message and speaking to that customer AS THE BUSINESS are different powers: the
+            // second one reaches the customer's phone under the company's name and cannot be
+            // taken back. It is in $crmPermissions, so crm_admin holds it and crm_bd does not —
+            // crm_bd's grant is an explicit list below, and this deliberately is not on it.
+            // Nothing checks it yet beyond OutboundMessageService: Phase 3F.1 ships no endpoint.
+            'crm.conversations.reply',
             'crm.dashboard.view',
             'crm.users.view', 'crm.users.create', 'crm.users.edit', 'crm.users.delete',
         ];
