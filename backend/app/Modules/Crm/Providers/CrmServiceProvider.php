@@ -61,6 +61,7 @@ use App\Modules\Crm\Services\Mail\Google\GoogleCredentialSourceFactory;
 use App\Modules\Crm\Services\Mail\MailboxOauthTokenStore;
 use App\Modules\Crm\Services\Inbound\Adapters\InboundAdapterRegistry;
 use App\Modules\Crm\Services\Meta\Connect\Contracts\MetaOAuthClient;
+use App\Modules\Crm\Services\Meta\Connect\GraphMetaOAuthClient;
 use App\Modules\Crm\Services\Meta\Connect\UnconfiguredMetaOAuthClient;
 use App\Modules\Crm\Services\Outbound\Adapters\OutboundAdapterRegistry;
 use App\Modules\Crm\Services\Outbound\Contracts\ProviderCredentialResolver;
@@ -188,12 +189,23 @@ class CrmServiceProvider extends ServiceProvider
         // NullProviderCredentialResolver is kept as the documented "nothing configured" stand-in.
         $this->app->bind(ProviderCredentialResolver::class, DatabaseProviderCredentialResolver::class);
 
-        // Phase 3F.3A — everything that would talk to Meta's OAuth and Graph endpoints, behind one
-        // seam. The bound implementation makes NO network call and refuses with NOT_CONFIGURED, so
-        // the flow around it (state, tenancy, asset claiming) is built and tested while the calls
-        // that need a verified Meta app wait for the review that grants them. Replacing this
-        // binding is the whole of Phase 3F.3B.
-        $this->app->bind(MetaOAuthClient::class, UnconfiguredMetaOAuthClient::class);
+        // Phase 3F.3C — the real Graph client, chosen by CONFIGURATION rather than by a code
+        // change. With no app id, redirect URI or app secret set, the null object is bound and the
+        // whole flow refuses exactly as it did before, so deploying this changes nothing about what
+        // the server can do; setting those keys is what turns it on, and that is an operator action
+        // with one obvious way to undo it.
+        //
+        // Decided per resolution rather than at boot: this release runs with no config cache, and a
+        // test needs to set the keys and get the behaviour it configured.
+        $this->app->bind(MetaOAuthClient::class, function (Application $app): MetaOAuthClient {
+            $configured = (string) config('meta.oauth.app_id', '') !== ''
+                && (string) config('meta.oauth.redirect_uri', '') !== ''
+                && (string) config('meta.app_secret', '') !== '';
+
+            return $configured
+                ? $app->make(GraphMetaOAuthClient::class)
+                : $app->make(UnconfiguredMetaOAuthClient::class);
+        });
     }
 
     public function boot(): void

@@ -34,7 +34,36 @@ enum MetaConnectFailureCode: string
     case ProviderError = 'provider_error';
 
     /** The authorization code could not be traded for a token. */
-    case ExchangeFailed = 'exchange_failed';
+    case TokenExchangeFailed = 'token_exchange_failed';
+
+    /** Meta says the token is expired or has been invalidated. Reconnecting is the only fix. */
+    case TokenExpired = 'token_expired';
+
+    /**
+     * The grant exists but does not carry a permission the call needed.
+     *
+     * Distinct from a failed exchange because the remedy is different: somebody must re-run the
+     * login and approve more, or the app must pass App Review for that permission.
+     */
+    case InsufficientPermissions = 'insufficient_permissions';
+
+    /** The token was fine but the Pages could not be listed. */
+    case AssetDiscoveryFailed = 'asset_discovery_failed';
+
+    /** Meta is throttling us. The only safe response is to stop, not to try harder. */
+    case ProviderRateLimited = 'provider_rate_limited';
+
+    /** Meta was unreachable or returned a server error. Transient by nature. */
+    case ProviderUnavailable = 'provider_unavailable';
+
+    /**
+     * Meta answered with something that is not the shape we require.
+     *
+     * Its own case rather than a generic failure because this is the one that means OUR assumptions
+     * about the API have drifted — an API version change, a renamed field — and it should read
+     * differently in a log from "the network was down".
+     */
+    case MalformedProviderResponse = 'malformed_provider_response';
 
     /** A selected Page or Instagram account was not among those the verified connection returned. */
     case AssetNotOffered = 'asset_not_offered';
@@ -56,7 +85,12 @@ enum MetaConnectFailureCode: string
     {
         return match ($this) {
             self::InvalidState, self::AuthorizationDenied, self::MissingCode,
-            self::ProviderError, self::ExchangeFailed => true,
+            self::ProviderError, self::TokenExchangeFailed,
+            // Transient at Meta's end: the same request may well work later.
+            self::ProviderRateLimited, self::ProviderUnavailable, self::AssetDiscoveryFailed => true,
+            // NotConfigured, TokenExpired, InsufficientPermissions and the two asset refusals all
+            // need a person to change something first; a retry button on them only produces the
+            // same answer more times.
             default => false,
         };
     }

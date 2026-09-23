@@ -85,6 +85,13 @@ final class MetaConnectFlow
 
         if ($configurationId !== '') {
             $query['config_id'] = $configurationId;
+
+            // Facebook Login for Business issues a Business Integration System User token only
+            // under the authorization-code grant, and Meta requires BOTH `response_type=code` and
+            // this override before it will honour it — without the override the configuration's
+            // own default response type wins and the callback arrives carrying a fragment token
+            // instead of a code, which this flow has no way to use.
+            $query['override_default_response_type'] = 'true';
         } else {
             $query['scope'] = implode(',', (array) config('meta.oauth.scopes', []));
         }
@@ -130,7 +137,7 @@ final class MetaConnectFlow
         $exchange = $this->client->exchangeCode($code, (string) config('meta.oauth.redirect_uri', ''));
 
         if (! $exchange->successful || $exchange->credential === null) {
-            $failure = $exchange->failure ?? MetaConnectFailureCode::ExchangeFailed;
+            $failure = $exchange->failure ?? MetaConnectFailureCode::TokenExchangeFailed;
             $this->refused($failure, $context);
 
             throw MetaConnectException::of($failure);
@@ -139,7 +146,7 @@ final class MetaConnectFlow
         $discovery = $this->client->discoverAssets($exchange->credential);
 
         if (! $discovery->successful) {
-            $failure = $discovery->failure ?? MetaConnectFailureCode::ExchangeFailed;
+            $failure = $discovery->failure ?? MetaConnectFailureCode::AssetDiscoveryFailed;
             $this->refused($failure, $context);
 
             throw MetaConnectException::of($failure);

@@ -101,7 +101,32 @@ return [
          */
         'configuration_id' => env('META_LOGIN_CONFIGURATION_ID', ''),
 
-        'authorize_endpoint' => env('META_OAUTH_AUTHORIZE_ENDPOINT', 'https://www.facebook.com/v21.0/dialog/oauth'),
+        /**
+         * Graph API version, verified against Meta's changelog on 2026-09-23: v26.0 is
+         * current (released 2026-07-29). Pinned rather than floating — an unversioned
+         * Graph call silently follows Meta's default and changes behaviour under us.
+         */
+        'graph_version' => env('META_GRAPH_VERSION', 'v26.0'),
+
+        'authorize_endpoint' => env('META_OAUTH_AUTHORIZE_ENDPOINT', 'https://www.facebook.com/v26.0/dialog/oauth'),
+
+        'graph_host' => env('META_GRAPH_HOST', 'https://graph.facebook.com'),
+
+        /*
+        | Bounds on talking to Meta. A connect flow happens with a person waiting on a
+        | browser redirect, so a slow provider must become an error they can act on
+        | rather than a request that hangs until the gateway gives up.
+        */
+        'http' => [
+            'connect_timeout' => (int) env('META_HTTP_CONNECT_TIMEOUT', 5),
+            'timeout' => (int) env('META_HTTP_TIMEOUT', 10),
+
+            /** Pages a discovery walk will follow before it stops. */
+            'max_pages' => (int) env('META_DISCOVERY_MAX_PAGES', 10),
+
+            /** Assets per page requested from Meta. */
+            'page_size' => (int) env('META_DISCOVERY_PAGE_SIZE', 50),
+        ],
 
         /**
          * Fallback only, for a development app with no Login configuration. These are

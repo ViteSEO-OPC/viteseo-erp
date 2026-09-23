@@ -430,26 +430,51 @@ class MetaSaasConnectTest extends TestCase
         );
     }
 
-    /** 17 — nothing in the connect tree can reach Meta. */
-    public function test_the_connect_tree_makes_no_network_call(): void
+    /**
+     * 17 — every line that can reach Meta lives in ONE file.
+     *
+     * Phase 3F.3C added a real Graph client, so "this tree makes no network call" stopped being
+     * true and had to be replaced rather than deleted. What is worth protecting now is narrower
+     * and more useful: a reviewer asking "what can talk to Meta?" has exactly one file to read,
+     * and the null object that production still binds has nothing in it at all.
+     */
+    public function test_meta_transport_is_confined_to_the_graph_client(): void
     {
+        $allowed = 'GraphMetaOAuthClient.php';
         $offenders = [];
-        $root = app_path('Modules/Crm/Services/Meta/Connect');
+        $transportSeen = false;
 
-        foreach (new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($root)) as $file) {
+        foreach (new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator(app_path('Modules/Crm/Services/Meta/Connect'))) as $file) {
             if (! $file->isFile() || $file->getExtension() !== 'php') {
                 continue;
             }
+
             $source = file_get_contents($file->getPathname());
+
             foreach (['graph.facebook.com', '/me/accounts', 'oauth/access_token', 'curl_init',
-                'GuzzleHttp\\Client', 'Http::post', 'Http::get', 'openrouter'] as $needle) {
-                if (stripos($source, $needle) !== false) {
-                    $offenders[] = $file->getFilename().' => '.$needle;
+                'GuzzleHttp\\Client', 'Http::', 'openrouter'] as $needle) {
+                if (stripos($source, $needle) === false) {
+                    continue;
                 }
+
+                if ($needle === 'openrouter' || $file->getFilename() !== $allowed) {
+                    $offenders[] = $file->getFilename().' => '.$needle;
+
+                    continue;
+                }
+
+                $transportSeen = true;
             }
         }
 
-        $this->assertSame([], $offenders, 'Phase 3F.3A must contain no Meta transport.');
+        $this->assertSame([], $offenders, "Meta transport must live only in {$allowed}.");
+        $this->assertTrue($transportSeen, "{$allowed} should be the file that holds it.");
+
+        // And the implementation production still binds has none of it.
+        $nullObject = file_get_contents(app_path('Modules/Crm/Services/Meta/Connect/UnconfiguredMetaOAuthClient.php'));
+        foreach (['graph.facebook.com', 'Http::', 'curl_init'] as $needle) {
+            $this->assertStringNotContainsStringIgnoringCase($needle, $nullObject);
+        }
     }
 
     /** 18 — with no app id configured, no link is issued at all. */
