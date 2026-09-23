@@ -47,8 +47,9 @@ class OutboundFoundationTest extends TestCase
         parent::setUp();
         $this->seed(RolesAndPermissionsSeeder::class);
         FixtureOutboundAdapter::reset();
+        // preventStrayRequests() ALONE. A bare Http::fake() installs a catch-all stub that would
+        // absorb a real outbound call and let it pass silently — the opposite of what this asserts.
         Http::preventStrayRequests();
-        Http::fake();
     }
 
     /**
@@ -263,7 +264,11 @@ class OutboundFoundationTest extends TestCase
 
         $this->assertTrue($result->wasRefused());
         $this->assertSame(OutboundFailureCode::NotConfigured, $result->failure);
-        Http::assertNothingSent();
+
+        // NotConfigured is also what a MISSING credential produces, so assert on the adapter's own
+        // wording: without this the test would pass having never reached send() at all.
+        $this->assertStringContainsString('has no transport', (string) $result->reason);
+        $this->assertStringContainsString('meta-messenger-outbound', (string) $result->reason);
     }
 
     /** 8b — and the outbound source tree contains no transport at all. */
@@ -361,7 +366,16 @@ class OutboundFoundationTest extends TestCase
         $credential = new ProviderCredential('super-secret-token-value', 'page_owned');
 
         $this->assertStringNotContainsString('super-secret-token-value', print_r($credential->__debugInfo(), true));
+        $this->assertStringNotContainsString('super-secret-token-value', (string) json_encode($credential));
         $this->assertFalse(method_exists($credential, '__toString'), 'A credential must not be interpolable into a string.');
+
+        // Documented limitation, asserted so it stays documented: var_export() and serialize()
+        // read private state directly and DO render the token. This class raises the cost of an
+        // accidental disclosure; it does not make one impossible, and a test that pretended
+        // otherwise would be the more dangerous error.
+        $this->assertStringContainsString('super-secret-token-value', var_export($credential, true));
+        $this->assertStringContainsString('super-secret-token-value', serialize($credential));
+
         $this->assertSame('super-secret-token-value', $credential->reveal());
     }
 }

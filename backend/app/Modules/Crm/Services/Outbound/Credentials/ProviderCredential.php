@@ -16,6 +16,13 @@ use SensitiveParameter;
  * interpolating one of these into a string is a TypeError at the point of the mistake instead of a
  * leak at the point of the log.
  *
+ * WHAT IT DOES NOT PROTECT AGAINST, stated plainly because a wrapper that is trusted further than
+ * it deserves is worse than no wrapper. `var_dump`, `print_r` and `json_encode` are covered — the
+ * first two by `__debugInfo()`, the third because a private property on a non-JsonSerializable
+ * object encodes to `{}`. `var_export()` and `serialize()` are NOT: both read private state
+ * directly and will render the token in full. Neither belongs in a log line, and a test asserts the
+ * three that are covered rather than claiming all five.
+ *
  * NOT PERSISTED BY THIS PHASE. Phase 3F.1 never constructs a real one — the only resolver wired in
  * is {@see NullProviderCredentialResolver}. The class exists so the shape that a real store must
  * return is decided here, under review, rather than improvised beside the first Graph API call.
