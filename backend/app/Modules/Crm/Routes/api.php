@@ -9,6 +9,7 @@ use App\Modules\Crm\Controllers\AutomationConversationController;
 use App\Modules\Crm\Controllers\AutomationEmailController;
 use App\Modules\Crm\Controllers\BusinessRuleController;
 use App\Modules\Crm\Controllers\CallController;
+use App\Modules\Crm\Controllers\ConversationController;
 use App\Modules\Crm\Controllers\DashboardController;
 use App\Modules\Crm\Controllers\DeliveryMonitorController;
 use App\Modules\Crm\Controllers\EmailController;
@@ -338,6 +339,23 @@ Route::middleware(['auth:sanctum', 'set-current-org', 'subscription-active', 'fe
         // user-facing POST /leads/{lead}/emails above is unchanged (still can:view,lead + ownership).
         Route::post('/automation/leads/{lead}/emails', [AutomationEmailController::class, 'store'])
             ->middleware('permission:crm.outreach.automation.send');
+
+        // Phase 3E — the read-only conversation inbox: the first surface where an inbound
+        // Messenger or Instagram message becomes visible to a person. Both routes READ only; there
+        // is no reply, no status change and no lead linking here, and no Meta API call anywhere in
+        // the module.
+        //
+        // Gated by its own ability rather than crm.leads.view. A conversation from an unknown
+        // sender has NO lead — both of the first real production threads are unlinked — so a
+        // lead permission would hide exactly the messages this screen exists to show. Message
+        // bodies are the most sensitive data the module holds and deserve their own grant.
+        //
+        // Tenancy is not enforced here: Conversation uses BelongsToOrg, so the route-model binding
+        // below resolves another tenant's id to a 404 rather than to a filtered row.
+        Route::get('/conversations', [ConversationController::class, 'index'])
+            ->middleware('permission:crm.conversations.view');
+        Route::get('/conversations/{conversation}', [ConversationController::class, 'show'])
+            ->middleware('permission:crm.conversations.view');
 
         // Phase 3B — the trusted inbound conversation boundary. NOT a Meta webhook: it takes an
         // ALREADY NORMALIZED turn (no provider payload shape, no hub.challenge handshake) and hands

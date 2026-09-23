@@ -73,6 +73,16 @@ export const queryKeys = {
     all: ["niches"] as const,
     list: () => [...queryKeys.niches.all, "list"] as const,
   },
+  conversations: {
+    // Conversation Inbox (Phase 3E) — inbound Messenger / Instagram threads.
+    all: ["conversations"] as const,
+    lists: () => [...queryKeys.conversations.all, "list"] as const,
+    // The channel filter is part of the key, so switching channels swaps cached lists instead of
+    // briefly rendering the previous channel's rows under the new label.
+    list: (filters: Record<string, unknown>) =>
+      [...queryKeys.conversations.lists(), filters] as const,
+    detail: (id: string) => [...queryKeys.conversations.all, "detail", id] as const,
+  },
   followUps: {
     all: ["follow-ups"] as const,
     lists: () => [...queryKeys.followUps.all, "list"] as const,

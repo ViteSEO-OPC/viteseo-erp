@@ -187,6 +187,11 @@ class RolesAndPermissionsSeeder extends Seeder
             // Calling Workspace — read Call History (crm.calls.view) and log/conclude a call
             // (crm.calls.log). Calls are Planner-driven; see CallSessionService.
             'crm.calls.view', 'crm.calls.log',
+            // Conversation Inbox (Phase 3E) — read inbound Messenger / Instagram threads. Its own
+            // ability rather than a lead permission: an inbound conversation from an unknown sender
+            // has no lead, so gating it on crm.leads.view would hide the very messages it exists to
+            // surface. Message bodies are the most sensitive data the module holds.
+            'crm.conversations.view',
             'crm.dashboard.view',
             'crm.users.view', 'crm.users.create', 'crm.users.edit', 'crm.users.delete',
         ];
@@ -230,6 +235,10 @@ class RolesAndPermissionsSeeder extends Seeder
             'crm.calendar.view', 'crm.calendar.create', 'crm.calendar.edit', 'crm.calendar.delete',
             // A BD runs the Calling Workspace — logs calls and reads their own leads' Call History.
             'crm.calls.view', 'crm.calls.log',
+            // A BD reads the Conversation Inbox: inbound Messenger and Instagram threads are
+            // where a prospect first speaks to the business, so the people who follow prospects up
+            // are exactly the people who need to see them.
+            'crm.conversations.view',
             'crm.dashboard.view',
         ]);
 

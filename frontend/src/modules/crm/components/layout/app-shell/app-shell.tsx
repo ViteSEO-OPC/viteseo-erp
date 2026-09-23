@@ -14,6 +14,7 @@ import { usePathname } from "next/navigation";
 const PAGE_TITLES: Record<string, string> = {
   "/zerem/dashboard": "Dashboard",
   "/zerem/leads": "Leads",
+  "/zerem/inbox": "Conversation Inbox",
   "/zerem/nearby-clients": "Nearby Clients",
   "/zerem/follow-ups": "Outreach",
   "/zerem/planner/history": "Planner History",

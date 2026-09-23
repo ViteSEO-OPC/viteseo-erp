@@ -120,6 +120,10 @@ export const PAGE_ACCESS: PageAccess[] = [
   // Settings, so these use an explicit allow-list rather than `minRole` — which is inherit-upward and
   // therefore handed them to Admin. Super Admin is listed explicitly because it has full system access
   // and must NOT be excluded by the allow-list.
+  // Conversation Inbox — inbound Messenger / Instagram threads. Open to BD (who work the
+  // enquiries) and to Admin/Super Admin (who oversee them); the backend gates the data on
+  // crm.conversations.view regardless of what this table allows through.
+  { href: "/zerem/inbox", minRole: "crm_bd" },
   { href: "/zerem/nearby-clients", allowedRoles: ["crm_bd", "super_admin"] },
   { href: "/zerem/follow-ups", allowedRoles: ["crm_bd", "super_admin"] },
   // Planner History — completed Planner work with no 7-day window. A read-only REPORTING surface, not
