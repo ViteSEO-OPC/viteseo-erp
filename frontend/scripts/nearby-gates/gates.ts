@@ -862,5 +862,81 @@ const aiRun = (status: DiscoveryRun["status"], ai: DiscoveryRun["ai"], isTermina
   report("AB the board names provenance and never invents it", 15 - bad.length, 15, bad);
 }
 
+
+// AC — THE SPEND LIMIT IS A CONTROL, NOT A CAPTION.
+//
+// The budget is enforced server-side on every Google Places request; this gate pins the client half,
+// where the ways it goes wrong are all silent:
+//
+//   - an amount hardcoded in the UI, so the "configurable" promise is a lie
+//   - a save that sends only the changed key, which the server treats as the WHOLE options bag and
+//     so quietly clears this provider's pricing overrides
+//   - dollars shown without requests, which hides a stale price inside the number it distorts
+//   - "no limit" and "zero" rendered the same, when they mean opposite things
+//   - a second endpoint or a second meter growing beside the one that exists
+{
+  const bad: string[] = [];
+  const hook = readFileSync(
+    new URL("../../src/modules/crm/features/settings/hooks/use-nerby-integration.ts", import.meta.url),
+    "utf8",
+  );
+  const card = readFileSync(
+    new URL("../../src/modules/crm/features/settings/components/nerby-integration-card.tsx", import.meta.url),
+    "utf8",
+  );
+
+  // The server's shape must be a shape the client admits, or the meter renders as blanks.
+  if (!/export type NerbySpendState/.test(hook)) bad.push("NerbySpendState is not declared");
+  for (const field of ["limitUsd", "billedUsd", "remainingUsd", "requestsUsed", "requestsAllowed", "unlimited"]) {
+    if (!new RegExp(`\\b${field}\\b`).test(hook)) bad.push(`NerbySpendState is missing ${field}`);
+  }
+  if (!/spend: NerbySpendState \| null/.test(hook)) bad.push("NerbyProviderConfig does not carry spend");
+
+  // NO AMOUNT IS BAKED INTO THE UI. The field's default comes from what the server stored, never
+  // from a literal — $10 is a configured value, not an application constant.
+  if (/defaultValues:\s*\{\s*spendLimitUsd:\s*"[0-9]/.test(card)) {
+    bad.push("the spend field defaults to a hardcoded amount");
+  }
+  if (!/spendLimitUsd:\s*\(provider\.options\?\.spend_limit_usd/.test(card)) {
+    bad.push("the spend field does not default from the stored configuration");
+  }
+
+  // PROVIDER-DRIVEN, not provider-named: the panel appears because the server says this provider
+  // takes the option, exactly as the model field does.
+  if (!/provider\.optionKeys\.includes\("spend_limit_usd"\)/.test(card)) {
+    bad.push("the spend panel is not gated on the provider's declared option keys");
+  }
+
+  // THE WHOLE BAG TRAVELS. The server REPLACES options with what it receives, so a save that sent
+  // only the limit would silently drop price_per_1000_usd / free_tier_requests / safety_factor.
+  if (!/\.\.\.currentOptions\(provider\),\s*spend_limit_usd:/.test(card)) {
+    bad.push("saving the limit does not resend the provider's other options, so they would be cleared");
+  }
+
+  // ONE ENDPOINT, ONE METER. The panel goes through the existing configure mutation; it must not
+  // grow its own API call or its own client-side tally.
+  if (/apiClient\./.test(card)) bad.push("the settings card calls the API directly instead of using the existing hook");
+  if (!/configure\.mutate\(\{\s*\n?\s*provider: provider\.provider,\s*\n?\s*\/\//.test(card) && !/configure\.mutate\(/.test(card)) {
+    bad.push("the spend panel does not use the existing configure mutation");
+  }
+
+  // BOTH UNITS. Dollars are a model; requests are what is counted. Showing one without the other is
+  // how a wrong price constant stays invisible.
+  if (!/spend\.requestsAllowed/.test(card)) bad.push("the meter never shows the request allowance");
+  if (!/spend\.billedUsd/.test(card)) bad.push("the meter never shows what has been charged");
+  if (!/spend\.remainingUsd/.test(card)) bad.push("the meter never shows the remaining budget");
+
+  // THE THREE STATES ARE DISTINGUISHABLE. "No limit" and "Stopped" look alike and mean opposites.
+  if (!/spend\.unlimited/.test(card)) bad.push("the card has no branch for an unconfigured limit");
+  if (!/spend\.limitUsd === 0/.test(card)) bad.push("the card has no branch for a zero (stopped) limit");
+  if (!/spend\.unreadable/.test(card)) bad.push("the card has no branch for an unreadable stored limit");
+
+  // The copy must say the baseline is unaffected: an admin setting a Google budget needs to know
+  // OpenStreetMap keeps running, or a zero will read as switching discovery off entirely.
+  if (!/OpenStreetMap/.test(card)) bad.push("the spend copy does not say OpenStreetMap is unaffected");
+
+  report("AC the spend limit is configurable, enforced and legible", 18 - bad.length, 18, bad);
+}
+
 console.log(failed === 0 ? "\nAll gates passed." : `\n${failed} gate(s) FAILED.`);
 process.exit(failed === 0 ? 0 : 1);

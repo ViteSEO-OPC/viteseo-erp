@@ -249,6 +249,18 @@ class DiscoveryConfigController extends Controller
             'queriesExecuted' => $result['queries_executed'] ?? 1,
         ];
 
+        // A SPEND REFUSAL IS NOT A PROVIDER FAILURE, and gets its own status so nothing downstream
+        // has to infer the difference from a message. 402 says what happened: the request was
+        // affordable-checked and declined, by us, before it was made. Reporting it as 502 would tell
+        // an operator that Google was unreachable, sending them to check the wrong system entirely.
+        if ($result['status'] === GooglePlacesTextSearch::STATUS_SPEND_LIMITED) {
+            return response()->json([
+                'message' => 'The configured Google Places spend limit for this period has been reached. '
+                    .'No request was made. Anything already discovered has been saved.',
+                'data' => $payload,
+            ], Response::HTTP_PAYMENT_REQUIRED);
+        }
+
         if ($result['status'] !== GooglePlacesTextSearch::STATUS_OK) {
             // 502, like `proposals`: a failed Google call must never read as an area with no businesses.
             return response()->json([

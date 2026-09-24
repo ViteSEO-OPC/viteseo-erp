@@ -68,7 +68,19 @@ class GooglePlacesTextSearch
 
     public const STATUS_NOT_CONFIGURED = 'not_configured';
 
-    public function __construct(private readonly NerbyProviderSettingService $settings) {}
+    /**
+     * The configured spend limit cannot cover this request, so it was never made.
+     *
+     * A DISTINCT WORD BECAUSE IT IS A DISTINCT FACT. This is not a provider failure, not a bad
+     * credential and — critically — not an area with no businesses in it. Nothing was searched, so
+     * nothing may be concluded about the ground. See GooglePlacesSpendGate.
+     */
+    public const STATUS_SPEND_LIMITED = 'spend_limited';
+
+    public function __construct(
+        private readonly NerbyProviderSettingService $settings,
+        private readonly GooglePlacesSpendGate $spend,
+    ) {}
 
     /**
      * @param  array{0: float, 1: float, 2: float, 3: float}|null  $bbox  south, west, north, east
@@ -282,14 +294,34 @@ class GooglePlacesTextSearch
      */
     private function send(string $apiKey, string $fieldMask, array $body): Response|string
     {
+        // THE SPEND FENCE, AND IT IS HERE FOR A REASON. This is the one function every Google Places
+        // request in this module passes through — production searches, every page of every planned
+        // query, and both probes. Reserving here therefore bounds the whole surface, and it does so
+        // PER REQUEST rather than per run: a search that crosses the limit on its second page stops
+        // on the second page. It also means the orchestrator's rate-limit retry loop is counted
+        // without knowing this exists, because a retry re-enters `send()` like any other request.
+        //
+        // BEFORE the call, never after. A reservation taken afterwards would be a record of spending,
+        // not a guard against it.
+        $verdict = $this->spend->reserve($fieldMask);
+        if ($verdict !== GooglePlacesSpendGate::ALLOWED) {
+            Log::warning('Google Places request refused by the spend gate', ['reason' => $verdict]);
+
+            return self::STATUS_SPEND_LIMITED;
+        }
+
         try {
             $response = Http::withHeaders([
                 'X-Goog-Api-Key' => $apiKey,
                 'X-Goog-FieldMask' => $fieldMask,
             ])->acceptJson()->timeout(self::TIMEOUT_SECONDS)->post(self::SEARCH_URL, $body);
         } catch (ConnectionException) {
+            // Never reached the provider, so it was never billed.
+            $this->spend->refund($fieldMask);
+
             return self::STATUS_UNREACHABLE;
         } catch (Throwable $e) {
+            $this->spend->refund($fieldMask);
             // The class only: the request carried the credential, and a message could quote it.
             Log::warning('Google Places search failed', ['class' => $e::class]);
 
@@ -306,6 +338,14 @@ class GooglePlacesTextSearch
             $response->status() === 400 => self::STATUS_INVALID_REQUEST,
             default => self::STATUS_UNREACHABLE,
         };
+
+        // A RATE REFUSAL WAS NOT SERVED, SO IT WAS NOT BILLED. Charging for it would let the
+        // orchestrator's own backoff quietly eat a budget: every retry would cost twice — once for
+        // the refusal and once for the attempt. Deliberately not extended to 4xx rejections, whose
+        // billing this code cannot know; over-counting those spends less than allowed.
+        if ($status === self::STATUS_RATE_LIMITED) {
+            $this->spend->refund($fieldMask);
+        }
 
         Log::warning('Google Places search rejected', [
             'status' => $status,

@@ -58,7 +58,13 @@ class GooglePlacesIdProbe
 
     public const STATUS_INVALID_RESPONSE = 'invalid_response';
 
-    public function __construct(private readonly NerbyProviderSettingService $settings) {}
+    /** The spend gate refused this probe, so no request was made. Same word the search path uses. */
+    public const STATUS_SPEND_LIMITED = GooglePlacesTextSearch::STATUS_SPEND_LIMITED;
+
+    public function __construct(
+        private readonly NerbyProviderSettingService $settings,
+        private readonly GooglePlacesSpendGate $spend,
+    ) {}
 
     /**
      * Count what one phrase reaches in one area.
@@ -104,6 +110,17 @@ class GooglePlacesIdProbe
             $body['strictTypeFiltering'] = true;
         }
 
+        // THE SECOND GOOGLE PLACES CALL SITE, GATED IDENTICALLY. This probe asks for ids only, so
+        // it is free at the provider and the gate prices it at zero — but it is still counted, and
+        // it is still refused when the limit is 0, because 0 means "issue no Google Places requests"
+        // rather than "issue only the free ones". A guard with a second, ungated door is not a guard.
+        $verdict = $this->spend->reserve(self::FIELD_MASK);
+        if ($verdict !== GooglePlacesSpendGate::ALLOWED) {
+            Log::warning('Query yield probe refused by the spend gate', ['reason' => $verdict]);
+
+            return $this->failure(self::STATUS_SPEND_LIMITED, $verdict);
+        }
+
         try {
             $response = Http::withHeaders([
                 'X-Goog-Api-Key' => (string) $row->api_key,
@@ -111,8 +128,11 @@ class GooglePlacesIdProbe
             ])->acceptJson()->timeout(self::TIMEOUT_SECONDS)
                 ->post(GooglePlacesTextSearch::SEARCH_URL, $body);
         } catch (ConnectionException) {
+            $this->spend->refund(self::FIELD_MASK);
+
             return $this->failure(self::STATUS_UNREACHABLE, 'connection');
         } catch (Throwable $e) {
+            $this->spend->refund(self::FIELD_MASK);
             // The class only: the request carried the credential, and a message could quote it.
             Log::warning('Query yield probe failed', ['class' => $e::class]);
 
@@ -125,6 +145,11 @@ class GooglePlacesIdProbe
                 $response->status() === 429 => self::STATUS_RATE_LIMITED,
                 default => self::STATUS_UNREACHABLE,
             };
+
+            // Refused for rate, therefore not served and not billed — same rule as the search path.
+            if ($status === self::STATUS_RATE_LIMITED) {
+                $this->spend->refund(self::FIELD_MASK);
+            }
 
             Log::warning('Query yield probe rejected', ['status' => $status, 'http' => $response->status()]);
 

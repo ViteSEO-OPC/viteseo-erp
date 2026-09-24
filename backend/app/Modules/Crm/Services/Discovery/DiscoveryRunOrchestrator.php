@@ -151,6 +151,15 @@ class DiscoveryRunOrchestrator
             }
 
             $effective = $this->runTarget($run, $target, $effective, $metricsPath);
+
+            // THE BUDGET IS GONE. Stop the run rather than march every remaining target into the
+            // same refusal: each would be recorded as a failed search, which is true and useless,
+            // and the run would report dozens of failures where there is one cause.
+            if ($this->spendLimited($target)) {
+                $this->stopForSpendLimit($run);
+
+                return false;
+            }
         }
 
         // The LAST search can be the one that learns the account cannot pay; the run still must not
@@ -360,6 +369,47 @@ class DiscoveryRunOrchestrator
     private function aiCreditExhausted(DiscoveryRun $run): bool
     {
         return (bool) $run->ai_strategy_requested && $run->ai_outcome === DiscoveryRun::AI_INSUFFICIENT_CREDIT;
+    }
+
+    /**
+     * Did this target end because the configured Google Places spend limit was reached?
+     *
+     * Read from the PERSISTED target rather than from a return value, so the scoped and nationwide
+     * paths ask the identical question of the identical record.
+     */
+    private function spendLimited(DiscoveryRunTarget $target): bool
+    {
+        return $target->execution_status === GooglePlacesTextSearch::STATUS_SPEND_LIMITED;
+    }
+
+    /**
+     * Stop a run that has reached its configured spend limit.
+     *
+     * FAILED, NOT COMPLETED, AND THAT IS THE POINT. A run that stopped because the money ran out did
+     * not finish its work, and reporting it as completed would tell an operator the area was covered
+     * when most of it was never searched. It is also not `cancelled` — nobody cancelled it.
+     *
+     * The message says plainly what happened, that nothing was lost, and what to do — because the
+     * fix is a settings change by a super admin, not a retry.
+     */
+    private function stopForSpendLimit(DiscoveryRun $run): void
+    {
+        // A run a user already cancelled stays cancelled, and one already stopped is not re-stopped.
+        $run->refresh();
+        if ($run->isTerminal()) {
+            return;
+        }
+
+        $this->skipRemaining($run);
+
+        $run->forceFill([
+            'status' => DiscoveryRun::STATUS_FAILED,
+            'error_message' => 'The configured Google Places spend limit for this period has been reached, '
+                .'so the run was stopped before making further paid requests. Any businesses already '
+                .'found were saved. Raise or clear the limit in Settings → Integrations to continue.',
+        ])->save();
+
+        Log::warning('Discovery run stopped at the Google Places spend limit', ['run' => $run->uuid]);
     }
 
     /**
@@ -646,8 +696,14 @@ class DiscoveryRunOrchestrator
         $maxDepth = max(0, (int) config('discovery.nationwide.max_depth', 2));
         $limit = (int) (($run->scope)['limitPerTask'] ?? config('discovery.nationwide.limit_per_task', 20));
         $searchesThisSlice = 0;
+        $spendLimited = false;
 
         while ($queue !== []) {
+            if ($spendLimited) {
+                $this->stopForSpendLimit($run);
+
+                return null;
+            }
             if ($this->isCancelled($run)) {
                 $this->skipRemaining($run);
 
@@ -716,6 +772,16 @@ class DiscoveryRunOrchestrator
 
                 $result = $this->runBoundedTarget($run, $target, $provider, $metricsPath, $cell['bbox']);
                 $searchesThisSlice++;
+
+                // Break rather than return, exactly as the budget and AI-credit checks above do, so
+                // this cell's bookkeeping still runs. The refused search leaves `searchFailed` true,
+                // and the H-4 guard below therefore refuses to record the cell as exhausted — a
+                // budget stop must never be mistaken for "the provider had nothing left here".
+                if ($this->spendLimited($target)) {
+                    $spendLimited = true;
+
+                    break;
+                }
 
                 if (! $result['ok']) {
                     $searchFailed = true;

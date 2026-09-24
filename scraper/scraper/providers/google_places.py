@@ -48,6 +48,13 @@ EXECUTION_AREA_UNRESOLVED = "area_unresolved"
 #: may retry later. Same word the CRM uses, so both sources read identically downstream.
 EXECUTION_RATE_LIMITED = "rate_limited"
 
+#: The CRM refused the search because its configured Google Places spend limit is reached. NOTHING
+#: WAS SEARCHED, so this says nothing whatever about whether businesses exist in the area — it must
+#: never be read as an empty or exhausted cell. Distinct from ``rate_limited`` (a refusal for rate,
+#: retryable shortly) and from ``not_effective_provider`` (configuration): this one is a budget that
+#: a human has to raise, so there is no point retrying it within a run.
+EXECUTION_SPEND_LIMITED = "spend_limited"
+
 #: Upper bound on a server-supplied Retry-After we will pass on. A larger value is clamped rather than
 #: trusted, so a misbehaving header cannot stall a run.
 MAX_RETRY_AFTER_SECONDS = 300
@@ -281,6 +288,11 @@ class GooglePlacesProvider(DiscoveryProvider):
                     # `crm_unreachable`, which read as an outage and — worse — as a cell with nothing
                     # in it. It is a rate refusal: nothing was searched.
                     status = EXECUTION_RATE_LIMITED
+                elif response.status_code == 402:
+                    # The CRM's spend gate declined before making a provider call. Named explicitly
+                    # so a body-less 402 cannot degrade into "the CRM is unreachable", which would
+                    # send an operator to check the wrong system.
+                    status = EXECUTION_SPEND_LIMITED
                 elif response.status_code == 409:
                     status = EXECUTION_NOT_EFFECTIVE
                 else:
