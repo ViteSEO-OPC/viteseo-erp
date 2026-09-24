@@ -54,12 +54,34 @@ enum NerbyProvider: string
         return $this !== self::OPENSTREETMAP;
     }
 
-    /** Keys this provider accepts inside its `options` bag. Empty means it takes no options. */
+    /**
+     * Keys this provider accepts inside its `options` bag. Empty means it takes no options.
+     *
+     * THIS LIST IS WHAT MAKES AN OPTION REAL. `NerbyProviderSettingService::configure()` intersects
+     * a submitted bag against it and silently drops anything not named here, so a key absent from
+     * this list cannot be stored however the UI sends it.
+     *
+     * Google Places' four are the spend guardrail's dial and the pricing model it is translated
+     * through. `spend_limit_usd` lives HERE rather than in config for one reason: management must be
+     * able to move the budget from $10 to $50 without a deploy, a restart, or a code change. The
+     * bound on what they may set is the deployment's, and stays in `config/nerby.php`.
+     */
     public function optionKeys(): array
     {
         return match ($this) {
             self::OPENAI => ['model'],
-            self::GOOGLE_PLACES => [],
+            self::GOOGLE_PLACES => [
+                // The budget for one period, in USD. Absent/NULL = unlimited (today's behaviour);
+                // 0 = stop issuing Google Places requests. Bounded on write by
+                // `nerby.spend.limit_max_usd`.
+                'spend_limit_usd',
+                // Per-deployment overrides of the pricing model. Defaults live in config/nerby.php;
+                // these exist so a Google rate change or a tier correction is a settings edit rather
+                // than a release.
+                'price_per_1000_usd',
+                'free_tier_requests',
+                'safety_factor',
+            ],
             self::OPENSTREETMAP => [],
         };
     }

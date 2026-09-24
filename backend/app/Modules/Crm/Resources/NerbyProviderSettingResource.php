@@ -2,7 +2,9 @@
 
 namespace App\Modules\Crm\Resources;
 
+use App\Modules\Crm\Enums\NerbyProvider;
 use App\Modules\Crm\Models\NerbyProviderSetting;
+use App\Modules\Crm\Services\Discovery\GooglePlacesSpendGate;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -49,6 +51,17 @@ class NerbyProviderSettingResource extends JsonResource
             // Whether this provider has ever been configured — distinct from being enabled.
             'configured' => $this->resource->exists,
             'updatedAt' => $this->updated_at?->toIso8601String(),
+
+            // WHAT THE BUDGET IS AND WHAT IT HAS BOUGHT, for the provider that has one. Present only
+            // for Google Places, so no other provider's card grows a meaningless meter.
+            //
+            // Reported in DOLLARS AND REQUESTS TOGETHER, deliberately. The dollar figure is a model —
+            // the budget divided by a configured price — and an operator who sees only dollars cannot
+            // tell a stale price constant from real spending, because a wrong price is invisible in
+            // the very number it distorts. Seeing both makes the translation checkable.
+            'spend' => $provider === NerbyProvider::GOOGLE_PLACES
+                ? app(GooglePlacesSpendGate::class)->state()
+                : null,
         ];
     }
 }

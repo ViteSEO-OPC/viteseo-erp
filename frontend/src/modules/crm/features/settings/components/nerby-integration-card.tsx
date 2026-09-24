@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { AlertTriangle, CheckCircle2, Lock, Radar, Sparkles } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Lock, Radar, Sparkles, Wallet } from "lucide-react";
 import { Card } from "@/modules/crm/components/ui/card";
 import { Button } from "@/modules/crm/components/ui/button";
 import { Badge } from "@/modules/crm/components/ui/badge";
@@ -449,6 +449,25 @@ const modelSchema = z.object({
 });
 
 /**
+ * The spend limit is optional TEXT, not a number input, because three inputs are meaningful and a
+ * numeric field cannot express all of them: an amount, blank (no limit), and 0 (stop everything).
+ * A `<input type="number">` conflates blank and zero in several browsers, which here is the
+ * difference between "unlimited" and "refuse every request".
+ *
+ * The server re-validates and owns the ceiling; this only stops an obviously wrong value making a
+ * round trip.
+ */
+const spendSchema = z.object({
+  spendLimitUsd: z
+    .string()
+    .trim()
+    .refine(
+      (v) => v === "" || (/^\d+(\.\d{1,2})?$/.test(v) && Number.isFinite(Number(v))),
+      "Enter an amount in USD such as 10 or 49.50, or leave blank for no limit.",
+    ),
+});
+
+/**
  * The credential + options panel for a provider that needs a key.
  *
  * The key field is WRITE-ONLY: it starts empty and is never populated from a response, because the
@@ -572,6 +591,24 @@ function CredentialPanel({ provider }: { provider: NerbyProviderConfig }) {
             <p className="text-xs text-destructive">{modelForm.formState.errors.model.message}</p>
           ) : null}
         </form>
+      ) : null}
+
+      {/* --- Google Places spend limit --- */}
+      {provider.optionKeys.includes("spend_limit_usd") ? (
+        <SpendLimitPanel
+          provider={provider}
+          busy={busy}
+          onSave={(value) =>
+            configure.mutate({
+              provider: provider.provider,
+              // THE WHOLE BAG TRAVELS, NOT JUST THE FIELD THAT CHANGED. The server replaces
+              // `options` with what it receives, so sending only the limit would silently clear this
+              // provider's pricing overrides — a saved budget would quietly start being divided by a
+              // different price than the one an admin configured.
+              options: { ...currentOptions(provider), spend_limit_usd: value },
+            })
+          }
+        />
       ) : null}
 
       {/* --- Connection status --- */}
@@ -718,5 +755,205 @@ function CapabilityTiers() {
         ))}
       </div>
     </section>
+  );
+}
+
+/**
+ * The provider's stored options as a plain string map, so a save can resend everything it is not
+ * changing. Nulls are dropped: the server treats an absent key and a null one the same way, and
+ * sending null back would be asking it to store an absence.
+ */
+function currentOptions(provider: NerbyProviderConfig): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(provider.options ?? {}).filter(
+      (entry): entry is [string, string] => typeof entry[1] === "string",
+    ),
+  );
+}
+
+/** USD, because this is what Google charges Vite SEO — not platform money, which is pesos. */
+const usd = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  maximumFractionDigits: 2,
+});
+
+const count = new Intl.NumberFormat("en-US");
+
+/**
+ * The Google Places spend guardrail: what the budget is, what it has bought, and how to change it.
+ *
+ * THE NUMBER HERE IS THE ENFORCEMENT, NOT A DISPLAY. Saving this field changes what the server
+ * refuses on the very next request — there is no deploy, no restart and no second place to update.
+ * That is the whole point of the field, so the copy says it rather than leaving an admin to wonder
+ * whether a settings value is wired to anything.
+ *
+ * BOTH UNITS, ALWAYS. Dollars are a model (a budget divided by a configured price per 1,000
+ * requests); requests are what is actually counted. Showing only dollars would hide a stale price
+ * inside the very figure it distorts, so the request allowance sits beside it as a cross-check.
+ *
+ * THREE STATES WORTH DISTINGUISHING, and the card is explicit about each because they look alike
+ * and mean opposite things:
+ *   - no limit  -> every request allowed. Today's behaviour, and the one state worth warning about.
+ *   - a limit   -> enforced; the meter shows how much of it is left.
+ *   - zero      -> every Google Places request refused, including the free ones. A deliberate stop.
+ */
+function SpendLimitPanel({
+  provider,
+  busy,
+  onSave,
+}: {
+  provider: NerbyProviderConfig;
+  busy: boolean;
+  onSave: (value: string) => void;
+}) {
+  const spend = provider.spend;
+
+  const form = useForm<z.infer<typeof spendSchema>>({
+    resolver: zodResolver(spendSchema),
+    defaultValues: { spendLimitUsd: (provider.options?.spend_limit_usd as string | undefined) ?? "" },
+  });
+
+  if (!spend) return null;
+
+  const stopped = spend.limitUsd === 0;
+  const tone = spend.unreadable
+    ? "destructive"
+    : spend.unlimited
+      ? "warning"
+      : stopped
+        ? "destructive"
+        : "ok";
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <label
+          htmlFor={`${provider.provider}-spend-limit`}
+          className="flex items-center gap-1.5 text-sm font-medium text-foreground"
+        >
+          <Wallet className="size-3.5 text-muted-foreground" aria-hidden />
+          Monthly spend limit
+        </label>
+        <Badge
+          variant={tone === "ok" ? "secondary" : "outline"}
+          className={cn(
+            "text-[11px]",
+            tone === "warning" && "border-amber-500/40 text-amber-700 dark:text-amber-400",
+            tone === "destructive" && "border-destructive/40 text-destructive",
+          )}
+        >
+          {spend.unreadable
+            ? "Unreadable — requests refused"
+            : spend.unlimited
+              ? "No limit set"
+              : stopped
+                ? "Stopped"
+                : `Enforced · ${spend.period}`}
+        </Badge>
+      </div>
+
+      {/* --- The meter --- */}
+      <dl className="grid grid-cols-2 gap-x-4 gap-y-2.5 rounded-lg bg-muted/40 px-3 py-3 sm:grid-cols-4 dark:bg-muted/60">
+        <div className="flex flex-col gap-0.5">
+          <dt className="text-[11px] uppercase tracking-wide text-muted-foreground">Limit</dt>
+          <dd className="text-sm font-medium text-foreground">
+            {spend.limitUsd === null ? "None" : usd.format(spend.limitUsd)}
+          </dd>
+        </div>
+        <div className="flex flex-col gap-0.5">
+          <dt className="text-[11px] uppercase tracking-wide text-muted-foreground">Used</dt>
+          <dd className="text-sm font-medium text-foreground">{usd.format(spend.billedUsd)}</dd>
+        </div>
+        <div className="flex flex-col gap-0.5">
+          <dt className="text-[11px] uppercase tracking-wide text-muted-foreground">Remaining</dt>
+          <dd className="text-sm font-medium text-foreground">
+            {spend.remainingUsd === null ? "—" : usd.format(spend.remainingUsd)}
+          </dd>
+        </div>
+        <div className="flex flex-col gap-0.5">
+          <dt className="text-[11px] uppercase tracking-wide text-muted-foreground">Requests</dt>
+          <dd className="text-sm font-medium text-foreground">
+            {spend.requestsAllowed === null
+              ? count.format(spend.requestsUsed)
+              : `${count.format(spend.requestsUsed)} / ${count.format(spend.requestsAllowed)}`}
+          </dd>
+        </div>
+      </dl>
+
+      {/* --- The dial --- */}
+      <form
+        className="flex flex-col gap-2"
+        onSubmit={form.handleSubmit(({ spendLimitUsd }) => onSave(spendLimitUsd.trim()))}
+      >
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative flex-1 sm:max-w-[12rem]">
+            <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-sm text-muted-foreground">
+              $
+            </span>
+            <input
+              id={`${provider.provider}-spend-limit`}
+              inputMode="decimal"
+              className={cn(FIELD, "w-full pl-7")}
+              placeholder="No limit"
+              aria-describedby={`${provider.provider}-spend-help`}
+              {...form.register("spendLimitUsd")}
+            />
+          </div>
+          <Button type="submit" size="sm" variant="outline" disabled={busy}>
+            Save limit
+          </Button>
+          <span className="text-xs text-muted-foreground">USD per calendar month</span>
+        </div>
+
+        {form.formState.errors.spendLimitUsd ? (
+          <p className="text-xs text-destructive">{form.formState.errors.spendLimitUsd.message}</p>
+        ) : null}
+
+        <p id={`${provider.provider}-spend-help`} className="text-xs text-muted-foreground">
+          Enforced on every Google Places request — a change takes effect immediately, with no
+          deployment. Leave blank for no limit; enter <span className="font-medium">0</span> to stop
+          all Google Places requests. OpenStreetMap discovery is free and is never affected.
+        </p>
+
+        {spend.listPricePer1000Usd ? (
+          <p className="text-xs text-muted-foreground">
+            Priced at {usd.format(spend.listPricePer1000Usd)} per 1,000 requests
+            {spend.freeTierRequests > 0
+              ? `, with the first ${count.format(spend.freeTierRequests)} each month free`
+              : ""}
+            .
+            {spend.effectivePricePer1000Usd &&
+            spend.effectivePricePer1000Usd !== spend.listPricePer1000Usd
+              ? ` A safety margin is applied, so the allowance is calculated at ${usd.format(
+                  spend.effectivePricePer1000Usd,
+                )} per 1,000.`
+              : ""}
+          </p>
+        ) : null}
+
+        {spend.unlimited ? (
+          <p className="flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-400">
+            <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+            No spend limit is set, so Google Places requests are not capped by this CRM.
+          </p>
+        ) : null}
+
+        {stopped ? (
+          <p className="flex items-start gap-1.5 text-xs text-destructive">
+            <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+            Every Google Places request is being refused. Raise the limit or clear it to resume.
+          </p>
+        ) : null}
+
+        {spend.unreadable ? (
+          <p className="flex items-start gap-1.5 text-xs text-destructive">
+            <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+            The stored limit is not a readable amount, so requests are being refused. Save a valid
+            amount to resume.
+          </p>
+        ) : null}
+      </form>
+    </div>
   );
 }
