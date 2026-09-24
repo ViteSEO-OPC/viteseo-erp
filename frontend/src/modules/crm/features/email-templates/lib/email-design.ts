@@ -134,8 +134,8 @@ export const CONTENT_FIELDS: { required: readonly (keyof TemplateContent)[]; opt
 
 /** Each part of an email → the blocks it may hold — EmailDesignSchema::REGION_BLOCKS. */
 export const REGION_BLOCKS: Record<DesignRegion, readonly DesignBlockType[]> = {
-  header: ["logo", "heading", "text", "image", "divider", "spacer"],
-  footer: ["footer", "text", "logo", "image", "divider", "spacer"],
+  header: ["logo", "heading", "text", "button", "image", "divider", "spacer"],
+  footer: ["footer", "text", "logo", "button", "image", "divider", "spacer"],
   blocks: ["heading", "text", "button", "image", "divider", "spacer"],
 };
 
@@ -169,8 +169,8 @@ export const BLOCK_LABELS: Record<DesignBlockType, string> = {
  * and there is nowhere to choose one yet. An image already in a document still loads, edits and saves.
  */
 export const ADDABLE_BLOCKS: Record<DesignRegion, readonly DesignBlockType[]> = {
-  header: ["logo", "heading", "text", "divider", "spacer"],
-  footer: ["footer", "text", "logo", "divider", "spacer"],
+  header: ["logo", "heading", "text", "button", "divider", "spacer"],
+  footer: ["footer", "text", "logo", "button", "divider", "spacer"],
   blocks: ["heading", "text", "button", "divider", "spacer"],
 };
 

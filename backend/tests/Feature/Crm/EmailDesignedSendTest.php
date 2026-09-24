@@ -74,12 +74,12 @@ class EmailDesignedSendTest extends TestCase
      * `body` is stored exactly as the application stores it: the design's plain-text form with the
      * placeholders left in, which is what the composer is later handed with them filled in.
      */
-    private function designedTemplate(array $contentOverride = []): EmailTemplate
+    private function designedTemplate(array $contentOverride = [], ?array $headerBlocks = null): EmailTemplate
     {
         $design = EmailDesign::create([
             'name' => 'Brand design',
             'is_default' => true,
-            'layout' => $this->layout(styles: [
+            'layout' => $this->layout($headerBlocks, null, styles: [
                 'font' => 'georgia',
                 'background_color' => '#101828',
                 'content_background_color' => '#fffdf5',
@@ -211,6 +211,127 @@ class EmailDesignedSendTest extends TestCase
         $this->assertStringContainsString('https://viteseo.test/offer', $html, 'The text link is missing.');
         $this->assertStringContainsString('https://viteseo.test/book', $html, 'The button URL is missing.');
         $this->assertStringContainsString('Book a call', $html, 'The button label is missing.');
+    }
+
+    // ── The design-level button ──────────────────────────────────────────────────────────────
+
+    /**
+     * A button placed in the DESIGN's header is the reusable call to action every template drawn in
+     * that design carries — and it must survive to the recipient exactly as the preview showed it.
+     *
+     * Asserted with byte equality for the same reason the content test is: anything looser would
+     * still pass if a second rendering path appeared.
+     */
+    public function test_a_design_level_button_renders_identically_in_the_preview_and_the_send(): void
+    {
+        $sender = $this->admin();
+        Sanctum::actingAs($sender);
+        $lead = $this->lead();
+
+        $template = $this->designedTemplate(headerBlocks: [
+            $this->logo(),
+            $this->button(['id' => 'design-cta', 'label' => 'View our work', 'url' => 'https://viteseo.test/work']),
+        ]);
+
+        $this->send($lead, [
+            'subject' => 'A quick idea',
+            'body' => $this->asOffered($template, $lead, $sender),
+            'email_template_id' => (string) $template->id,
+        ])->assertCreated();
+
+        $sentHtml = (string) $this->lastSent()->getHtmlBody();
+
+        $previewHtml = app(EmailDesignRenderer::class)->toHtml(
+            $template->design->layout,
+            $template->content,
+            app(EmailTemplateDesignService::class)->sendContext($lead, $sender),
+        );
+
+        $this->assertSame($previewHtml, $sentHtml, 'A design-level button must render identically in both.');
+    }
+
+    /** Its URL arrives as a real anchor a recipient can click, not as bare text. */
+    public function test_a_design_level_buttons_url_is_a_clickable_link_in_the_sent_email(): void
+    {
+        $sender = $this->admin();
+        Sanctum::actingAs($sender);
+        $lead = $this->lead();
+
+        $template = $this->designedTemplate(headerBlocks: [
+            $this->button(['id' => 'design-cta', 'label' => 'View our work', 'url' => 'https://viteseo.test/work']),
+        ]);
+
+        $this->send($lead, [
+            'subject' => 'A quick idea',
+            'body' => $this->asOffered($template, $lead, $sender),
+            'email_template_id' => (string) $template->id,
+        ])->assertCreated();
+
+        $message = $this->lastSent();
+        $html = (string) $message->getHtmlBody();
+
+        $this->assertStringContainsString('<a href="https://viteseo.test/work"', $html, 'The design button is not a link.');
+        $this->assertStringContainsString('View our work', $html);
+        // A text-only client still gets the destination.
+        $this->assertStringContainsString('https://viteseo.test/work', (string) $message->getTextBody());
+    }
+
+    /**
+     * THE DESIGN'S BUTTON AND THE TEMPLATE'S OWN COEXIST. Adding the reusable one must not displace
+     * the per-template call to action, which is a different block owned by a different document.
+     */
+    public function test_a_design_button_and_a_template_button_both_reach_the_recipient(): void
+    {
+        $sender = $this->admin();
+        Sanctum::actingAs($sender);
+        $lead = $this->lead();
+
+        $template = $this->designedTemplate(headerBlocks: [
+            $this->button(['id' => 'design-cta', 'label' => 'View our work', 'url' => 'https://viteseo.test/work']),
+        ]);
+
+        $this->send($lead, [
+            'subject' => 'A quick idea',
+            'body' => $this->asOffered($template, $lead, $sender),
+            'email_template_id' => (string) $template->id,
+        ])->assertCreated();
+
+        $html = (string) $this->lastSent()->getHtmlBody();
+
+        $this->assertStringContainsString('https://viteseo.test/work', $html, 'The design button is missing.');
+        $this->assertStringContainsString('https://viteseo.test/book', $html, 'The template button is missing.');
+    }
+
+    /**
+     * BACKWARD COMPATIBILITY. A design saved before buttons were allowed in the header — one with no
+     * button at all — renders exactly as it always did. Widening an allow-list cannot change what an
+     * existing document produces, and this is the assertion that says so.
+     */
+    public function test_a_design_without_any_button_is_unaffected(): void
+    {
+        $sender = $this->admin();
+        Sanctum::actingAs($sender);
+        $lead = $this->lead();
+
+        $template = $this->designedTemplate(headerBlocks: [$this->logo()]);
+
+        $this->send($lead, [
+            'subject' => 'A quick idea',
+            'body' => $this->asOffered($template, $lead, $sender),
+            'email_template_id' => (string) $template->id,
+        ])->assertCreated();
+
+        $sentHtml = (string) $this->lastSent()->getHtmlBody();
+        $previewHtml = app(EmailDesignRenderer::class)->toHtml(
+            $template->design->layout,
+            $template->content,
+            app(EmailTemplateDesignService::class)->sendContext($lead, $sender),
+        );
+
+        $this->assertSame($previewHtml, $sentHtml);
+        $this->assertStringNotContainsString('https://viteseo.test/work', $sentHtml, 'No design button was placed.');
+        // The template's own button is untouched by any of this.
+        $this->assertStringContainsString('https://viteseo.test/book', $sentHtml);
     }
 
     // ── 1. Multipart ─────────────────────────────────────────────────────────────────────────
