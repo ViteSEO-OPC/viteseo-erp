@@ -66,6 +66,8 @@ use App\Modules\Crm\Services\Meta\Connect\UnconfiguredMetaOAuthClient;
 use App\Modules\Crm\Services\Outbound\Adapters\OutboundAdapterRegistry;
 use App\Modules\Crm\Services\Outbound\Contracts\ProviderCredentialResolver;
 use App\Modules\Crm\Services\Outbound\Credentials\DatabaseProviderCredentialResolver;
+use App\Modules\Crm\Services\Outbound\Meta\GraphMetaSender;
+use App\Modules\Crm\Services\Outbound\Meta\MetaMessagingWindow;
 use App\Modules\Crm\Services\Mail\MailboxSyncManager;
 use App\Modules\Crm\Services\Mail\Providers\SmtpEmailProvider;
 use App\Modules\Crm\Services\Ranking\RankingConfig;
@@ -188,6 +190,19 @@ class CrmServiceProvider extends ServiceProvider
         // lookup path. Sending still cannot happen, because no Meta adapter has a transport.
         // NullProviderCredentialResolver is kept as the documented "nothing configured" stand-in.
         $this->app->bind(ProviderCredentialResolver::class, DatabaseProviderCredentialResolver::class);
+
+        /*
+         * Phase 3G — the Meta outbound transport and its policy gate. Both are stateless and are
+         * shared by the two Meta adapters, which receive them by constructor injection and are
+         * forbidden (by a guard test) from building an HTTP client of their own. Registering them
+         * explicitly rather than leaning on autowiring makes the seam visible: this is the ONLY
+         * place the outbound path acquires the ability to talk to Meta.
+         *
+         * Binding them does not enable sending. `canTransmit()` also requires meta.outbound.enabled,
+         * which ships false.
+         */
+        $this->app->singleton(GraphMetaSender::class);
+        $this->app->singleton(MetaMessagingWindow::class);
 
         // Phase 3F.3C — the real Graph client, chosen by CONFIGURATION rather than by a code
         // change. With no app id, redirect URI or app secret set, the null object is bound and the

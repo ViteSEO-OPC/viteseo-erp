@@ -92,6 +92,44 @@ final class OutboundMessagePersister
         $message->save();
     }
 
+    /**
+     * The attempt happened and we never learned the outcome.
+     *
+     * PHASE 3G, AND THE ONE PIECE OF STATE THIS PHASE ADDS. A POST that timed out may have been
+     * delivered. `sent` would claim a delivery we cannot prove; `failed` would deny one that may
+     * have happened. Both are lies and both are actionable by somebody, which is worse than an
+     * honest unknown.
+     *
+     * So the row STAYS `pending` — it is, genuinely, unresolved — and carries the failure code as
+     * a marker of why. A fresh pending row has `failure_code` null, so the pair
+     * (pending, delivery_unknown) is unambiguous and needs no new column: see isUnresolved().
+     *
+     * NO MIGRATION. `delivery_status` keeps its existing vocabulary and `failure_code` is an
+     * existing nullable varchar(32); 'delivery_unknown' is 16 characters. Adding a fourth status
+     * would have meant a migration, a backfill decision and every existing reader of
+     * `delivery_status` learning a new value — for no information that this pair does not carry.
+     */
+    public function markUnresolved(ConversationMessage $message): void
+    {
+        $message->delivery_status = self::PENDING;
+        $message->failure_code = OutboundFailureCode::DeliveryUnknown->value;
+        // Explicit rather than merely absent: nothing about this outcome is a delivery.
+        $message->delivered_at = null;
+        $message->save();
+    }
+
+    /**
+     * Whether a previous attempt on this row left delivery unknown.
+     *
+     * The guard that makes the rule binding: the service asks this BEFORE calling a transport, so
+     * a replay of the same client request id refuses instead of posting a second time.
+     */
+    public function isUnresolved(ConversationMessage $message): bool
+    {
+        return $message->delivery_status === self::PENDING
+            && $message->failure_code === OutboundFailureCode::DeliveryUnknown->value;
+    }
+
     private function find(int $orgId, string $idempotencyKey): ?ConversationMessage
     {
         return ConversationMessage::query()

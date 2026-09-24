@@ -144,6 +144,45 @@ return [
         ],
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Meta outbound messaging (Phase 3G)
+    |--------------------------------------------------------------------------
+    | DISABLED BY DEFAULT, AND DISABLED MEANS THE ADAPTERS REPORT NO TRANSPORT.
+    | Phase 3F.1 made `canTransmit()` a hard-coded false precisely so that no
+    | environment file could switch on code that did not exist. Phase 3G writes
+    | that code, so the constant becomes a flag — but the flag is only half the
+    | condition: `canTransmit()` also asks GraphMetaSender whether it is
+    | configured, so an operator who sets this true against an unconfigured
+    | Graph host still gets a refusal rather than a broken send.
+    |
+    | Turning this on is a separate, explicitly authorised step. Shipping the
+    | code and enabling it are deliberately two different reviews.
+    */
+    'outbound' => [
+        'enabled' => (bool) env('META_OUTBOUND_ENABLED', false),
+
+        /*
+        | Matches the connect client's budget. A person is not waiting on a
+        | redirect here, but a reply IS synchronous today, and a send that hangs
+        | for a minute is a send the operator retries by hand — which is the one
+        | thing the ambiguous-timeout rule exists to prevent.
+        */
+        'http' => [
+            'connect_timeout' => (int) env('META_OUTBOUND_CONNECT_TIMEOUT', 5),
+            'timeout' => (int) env('META_OUTBOUND_TIMEOUT', 10),
+        ],
+
+        /*
+        | The standard reply window, in hours, counted from the newest inbound
+        | customer turn. Configurable so a test can pin it, NOT so an operator
+        | can widen it: Meta enforces its own window regardless of what this
+        | says, and raising it only converts a local refusal into a remote one.
+        | Tags, HUMAN_AGENT and paid messaging are deliberately not implemented.
+        */
+        'window_hours' => (int) env('META_OUTBOUND_WINDOW_HOURS', 24),
+    ],
+
     'resource_types' => [
         'page' => 'page',
         'instagram' => 'instagram_business_account',

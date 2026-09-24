@@ -21,4 +21,25 @@ final class MetaOutboundMessengerAdapter extends AbstractMetaOutboundAdapter
     {
         return 'page';
     }
+
+    /**
+     * Messenger's Send API body.
+     *
+     * `messaging_type: RESPONSE` is the only value this adapter will ever send, and saying so once
+     * here is the enforcement. RESPONSE declares the message is a direct reply inside the standard
+     * window — which {@see \App\Modules\Crm\Services\Outbound\Meta\MetaMessagingWindow} has
+     * already checked. The alternatives (UPDATE, MESSAGE_TAG) are the doorway to tagged and paid
+     * messaging, each of which has its own eligibility rules and its own review, and none of which
+     * this phase implements. There is deliberately no parameter to vary it.
+     *
+     * @return array<string, mixed>
+     */
+    protected function payloadFor(string $recipientExternalId, string $body): array
+    {
+        return [
+            'recipient' => ['id' => $recipientExternalId],
+            'messaging_type' => 'RESPONSE',
+            'message' => ['text' => $body],
+        ];
+    }
 }

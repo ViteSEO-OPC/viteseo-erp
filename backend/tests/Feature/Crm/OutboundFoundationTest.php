@@ -274,26 +274,68 @@ class OutboundFoundationTest extends TestCase
         $this->assertStringContainsString('meta-messenger-outbound', (string) $result->reason);
     }
 
-    /** 8b — and the outbound source tree contains no transport at all. */
-    public function test_the_outbound_tree_contains_no_http_client(): void
+    /**
+     * 8b — the transport boundary: exactly one file in the outbound tree may talk to Meta.
+     *
+     * REPLACES the Phase 3F.1 assertion that the tree contained no HTTP client at all, which Phase
+     * 3G makes obsolete by writing one. The property worth protecting was never "no HTTP" — it was
+     * "no scattered HTTP": the token handling, the appsecret_proof, the timeouts and above all the
+     * rule that a timed-out POST is never retried live in one class, and a second class quietly
+     * growing its own client is how one copy ends up with a retry the other does not have.
+     */
+    public function test_only_the_graph_sender_owns_meta_outbound_http(): void
     {
         $root = app_path('Modules/Crm/Services/Outbound');
         $files = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($root));
+
+        $httpNeedles = ['Http::', 'curl_init', 'GuzzleHttp\\Client', 'file_get_contents(\'http', 'graph.facebook.com'];
         $offenders = [];
+        $senderSeen = false;
 
         foreach ($files as $file) {
             if (! $file->isFile() || $file->getExtension() !== 'php') {
                 continue;
             }
+
+            $name = $file->getFilename();
             $source = file_get_contents($file->getPathname());
-            foreach (['graph.facebook.com', 'curl_init', 'GuzzleHttp\\Client', 'Http::post', 'Http::get', 'file_get_contents(\'http'] as $needle) {
+
+            foreach ($httpNeedles as $needle) {
+                if (! str_contains($source, $needle)) {
+                    continue;
+                }
+
+                if ($name === 'GraphMetaSender.php') {
+                    $senderSeen = true;
+
+                    continue;
+                }
+
+                $offenders[] = $name.' => '.$needle;
+            }
+        }
+
+        $this->assertSame([], $offenders, 'Only GraphMetaSender may own Meta outbound HTTP.');
+        $this->assertTrue($senderSeen, 'GraphMetaSender must be the file that owns the transport.');
+    }
+
+    /** 8c — and no adapter names a Graph host, a version or a timeout of its own. */
+    public function test_adapters_do_not_name_graph_endpoints_or_transport_policy(): void
+    {
+        $root = app_path('Modules/Crm/Services/Outbound/Meta/Adapters');
+        $offenders = [];
+
+        foreach ((array) glob($root.'/*.php') as $path) {
+            $source = file_get_contents((string) $path);
+
+            foreach (['graph.facebook.com', 'graph_host', 'graph_version', 'Http::', 'connectTimeout', 'retry(', 'withToken'] as $needle) {
                 if (str_contains($source, $needle)) {
-                    $offenders[] = $file->getFilename().' => '.$needle;
+                    $offenders[] = basename((string) $path).' => '.$needle;
                 }
             }
         }
 
-        $this->assertSame([], $offenders, 'Phase 3F.1 must contain no outbound transport.');
+        $this->assertSame([], $offenders, 'Adapters render payloads; they do not own transport policy.');
     }
 
     /** 9 — no outbound message row is written, correctly or otherwise. */

@@ -172,10 +172,32 @@ final class OutboundMessageService
             );
         }
 
+        /*
+         * PHASE 3G — THE AMBIGUOUS-TIMEOUT GUARD, and the reason it sits before the transport call
+         * rather than after it.
+         *
+         * A previous attempt on this exact client request id timed out: the POST may have reached
+         * Meta and been delivered, or may never have arrived, and the Send API offers us no way to
+         * ask which. Posting again would resolve that ambiguity by guessing, and the cost of
+         * guessing wrong is a real customer receiving the same message twice from a business.
+         *
+         * So a replay of an unresolved key refuses. It does NOT mark the row failed — the message
+         * may well have been delivered — and it does not clear the marker. A human resolves this by
+         * looking at the thread, which is slower and correct.
+         */
+        if ($this->persister->isUnresolved($persisted)) {
+            return $this->refuse($request, OutboundFailureCode::DeliveryUnknown,
+                'A previous attempt with this request id did not return an outcome; it will not be sent again automatically.',
+                $key);
+        }
+
         $result = $adapter->send($request, $resource->externalId, $credential);
 
         if ($result->accepted && $result->providerMessageId !== null) {
             $this->persister->markSent($persisted, $result->providerMessageId);
+        } elseif ($result->failure === OutboundFailureCode::DeliveryUnknown) {
+            // Neither sent nor failed. Left pending, marked unresolved, never auto-retried.
+            $this->persister->markUnresolved($persisted);
         } else {
             $this->persister->markFailed($persisted, $result->failure ?? OutboundFailureCode::NotConfigured);
         }

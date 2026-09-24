@@ -57,9 +57,66 @@ enum OutboundFailureCode: string
      */
     case NotConfigured = 'not_configured';
 
-    /** Whether a caller should ever try this again unchanged. Every current case: no. */
+    /*
+    |--------------------------------------------------------------------------
+    | Phase 3G — outcomes that only exist once there is a transport
+    |--------------------------------------------------------------------------
+    | Every case below is derived from an HTTP status and Meta's NUMERIC error
+    | code. None of them ever carries Meta's prose: a Graph error message can
+    | quote the customer's own message back at us, and these values are written
+    | into `crm_messages.failure_code` and into log context.
+    */
+
+    /** The provider could not be reached, or answered 5xx. The attempt did not happen. */
+    case ProviderUnavailable = 'provider_unavailable';
+
+    /** The provider is throttling us. Distinct from unavailable: the fix is time, not repair. */
+    case ProviderRateLimited = 'provider_rate_limited';
+
+    /**
+     * Refused locally because the standard reply window has closed, or never opened.
+     *
+     * Emitted BEFORE any HTTP request and before anything is persisted. Meta enforces its own
+     * window regardless; this exists so the operator learns at the keyboard rather than from a
+     * failed delivery, and so no phantom outbound row appears in a thread the customer can see.
+     */
+    case OutsideMessagingWindow = 'outside_messaging_window';
+
+    /** Meta refused on policy or permission grounds. Not retryable, and not a bug to work around. */
+    case PolicyViolation = 'policy_violation';
+
+    /**
+     * The credential was rejected by the provider — expired, revoked, or missing a permission.
+     *
+     * Deliberately NOT folded into NotConfigured. "You never connected an account" and "the token
+     * you connected no longer works" are different problems with different fixes, and collapsing
+     * them would send an operator to reconnect an account that is already connected.
+     */
+    case CredentialRejected = 'credential_rejected';
+
+    /**
+     * THE IMPORTANT ONE. The request may or may not have reached Meta; we never saw the answer.
+     *
+     * A connection or read timeout on a POST leaves delivery genuinely unknown, and the Send API
+     * gives us no idempotency token with which to ask. So this is neither `sent` (we would be
+     * claiming a delivery we cannot prove) nor `failed` (we would be denying one that may have
+     * happened). The row stays `pending` carrying this code, and a replay of the same client
+     * request id refuses rather than posting a second time. A human resolves it.
+     */
+    case DeliveryUnknown = 'delivery_unknown';
+
+    /**
+     * Whether a caller should ever try this again unchanged.
+     *
+     * DeliveryUnknown is emphatically NOT retryable, and it is the case most likely to be
+     * mis-handled: it looks like a transient network error, and treating it as one is exactly how
+     * a customer receives the same message twice.
+     */
     public function isRetryable(): bool
     {
-        return false;
+        return match ($this) {
+            self::ProviderUnavailable, self::ProviderRateLimited => true,
+            default => false,
+        };
     }
 }
