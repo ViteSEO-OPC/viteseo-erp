@@ -8,6 +8,7 @@ use App\Modules\Crm\Models\ProviderAccount;
 use App\Modules\Crm\Models\ProviderConnection;
 use App\Modules\Crm\Models\ProviderConnectionCredential;
 use App\Modules\Crm\Services\Outbound\Credentials\ProviderCredential;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -31,6 +32,35 @@ use Illuminate\Support\Facades\DB;
 final class MetaCredentialWriter
 {
     /**
+     * Put this credential on a row and save it.
+     *
+     * Shared by the first attempt and by the post-race overwrite so the two cannot drift — the
+     * ownership rule in particular is written once.
+     */
+    private function write(
+        ProviderConnectionCredential $row,
+        ProviderConnection $connection,
+        ProviderCredential $credential,
+    ): int {
+        // Denormalized for query convenience, and taken from the CONNECTION, which is the
+        // authority — never from the account and never from a caller. Asserted rather than
+        // assumed on the race path: a row read back by its unique key could, in principle,
+        // belong to a connection that has since been re-pointed.
+        if ($row->exists && (int) $row->org_id !== (int) $connection->org_id) {
+            throw MetaConnectException::of(MetaConnectFailureCode::TenantMismatch);
+        }
+
+        $row->org_id = (int) $connection->org_id;
+
+        // Plaintext in PHP, ciphertext in the column — the model's cast does the work.
+        $row->access_token = $credential->reveal();
+        $row->expires_at = $credential->expiresAt;
+        $row->save();
+
+        return (int) $row->id;
+    }
+
+    /**
      * Store or replace the credential for one resource of one connection.
      *
      * @param  ProviderAccount|null  $account  null for the grant-level user token
@@ -46,26 +76,51 @@ final class MetaCredentialWriter
             throw MetaConnectException::of(MetaConnectFailureCode::TenantMismatch);
         }
 
-        return DB::transaction(function () use ($connection, $account, $credentialType, $credential): int {
-            // firstOrNew rather than updateOrCreate: `org_id` is deliberately NOT fillable on this
-            // model — ownership is set once, explicitly — so a mass-assigning helper cannot supply
-            // it and the insert would fail on a NOT NULL column.
-            $row = ProviderConnectionCredential::query()->firstOrNew([
-                'provider_connection_id' => $connection->id,
-                'credential_type' => $credentialType,
-                'provider_account_id' => $account?->id,
-            ]);
+        $key = [
+            'provider_connection_id' => $connection->id,
+            'credential_type' => $credentialType,
+            'provider_account_id' => $account?->id,
+        ];
 
-            // Denormalized for query convenience, and taken from the CONNECTION, which is the
-            // authority — never from the account and never from a caller.
-            $row->org_id = (int) $connection->org_id;
+        return DB::transaction(function () use ($connection, $credential, $key): int {
+            try {
+                // firstOrNew rather than updateOrCreate: `org_id` is deliberately NOT fillable on
+                // this model — ownership is set once, explicitly — so a mass-assigning helper
+                // cannot supply it and the insert would fail on a NOT NULL column.
+                return $this->write(ProviderConnectionCredential::query()->firstOrNew($key), $connection, $credential);
+            } catch (UniqueConstraintViolationException $violation) {
+                /*
+                 * THE RACE THIS CATCHES, AND ONLY THIS ONE. Two bootstraps for the same connection
+                 * can both miss the read above and both insert, colliding on
+                 * UNIQUE(provider_connection_id, credential_type, provider_account_id). Laravel
+                 * raises this narrow subclass ONLY for a unique violation — every other database
+                 * failure stays a plain QueryException and propagates untouched, so a disk error
+                 * or a broken column can never be dressed up as a credential conflict.
+                 *
+                 * NOT CHAINED. A QueryException carries its bindings in the message; one of these
+                 * bindings is the credential column. It is ciphertext rather than plaintext because
+                 * the cast runs before binding, but ciphertext in a log is still a secret nobody
+                 * asked to store there.
+                 */
+                unset($violation);
 
-            // Plaintext in PHP, ciphertext in the column — the model's cast does the work.
-            $row->access_token = $credential->reveal();
-            $row->expires_at = $credential->expiresAt;
-            $row->save();
+                $winner = ProviderConnectionCredential::query()->where($key)->first();
 
-            return (int) $row->id;
+                if ($winner === null) {
+                    // A unique violation with nothing to read back means the collision was not the
+                    // one this catch is for. Refuse rather than invent an answer.
+                    throw MetaConnectException::of(MetaConnectFailureCode::CredentialWriteFailed);
+                }
+
+                /*
+                 * OVERWRITE, DO NOT ACCEPT. The row that won the race holds whatever the other
+                 * request was storing, and this caller has just proven a live credential against
+                 * Meta. Keeping the winner's value would leave the connection authenticated by a
+                 * token this bootstrap never verified — silently, and with no way to tell later.
+                 * Last verified writer wins, deterministically.
+                 */
+                return $this->write($winner, $connection, $credential);
+            }
         });
     }
 }

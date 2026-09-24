@@ -96,6 +96,15 @@ enum MetaConnectFailureCode: string
     case PageCredentialUnavailable = 'page_credential_unavailable';
 
     /**
+     * A credential row could neither be written nor recovered after a write collision.
+     *
+     * Distinct from a plain persistence error because it names the one situation the writer
+     * actively handles and could not resolve: a unique violation whose winning row then could not
+     * be read back. Anything else that goes wrong at the database stays a QueryException.
+     */
+    case CredentialWriteFailed = 'credential_write_failed';
+
+    /**
      * Whether a person should simply try again.
      *
      * NotConfigured and the two asset refusals are not retryable by the person: they need an

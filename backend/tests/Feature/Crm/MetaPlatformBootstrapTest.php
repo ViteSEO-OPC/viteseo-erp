@@ -12,8 +12,10 @@ use App\Modules\Crm\Models\ProviderConnectionCredential;
 use App\Modules\Crm\Services\Meta\Connect\Assets\MetaAsset;
 use App\Modules\Crm\Services\Meta\Connect\MetaConnectFailureCode;
 use App\Modules\Crm\Services\Meta\Connect\ProviderConnectionStore;
+use App\Modules\Crm\Services\Outbound\Contracts\ProviderCredentialResolver;
 use App\Support\CurrentOrg;
 use Database\Seeders\RolesAndPermissionsSeeder;
+use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Log\Events\MessageLogged;
 use Illuminate\Support\Facades\DB;
@@ -82,7 +84,17 @@ class MetaPlatformBootstrapTest extends TestCase
         return $u;
     }
 
-    /** Meta answering all three calls the bootstrap makes. */
+    /** What the next Meta call will answer. Mutated by fakeMeta(), read by the single stub. */
+    private array $metaAnswers = [];
+
+    /**
+     * Meta answering all three calls the bootstrap makes.
+     *
+     * ONE stub is registered, on first use, and later calls only change what it returns. Repeated
+     * Http::fake() MERGES stubs rather than replacing them, so a second registration is never
+     * consulted — which is exactly why every reconnect test first came back 422 against the FIRST
+     * bootstrap's discovery.
+     */
     private function fakeMeta(
         ?array $business = null,
         ?array $accounts = null,
@@ -90,25 +102,36 @@ class MetaPlatformBootstrapTest extends TestCase
         int $businessStatus = 200,
         int $accountsStatus = 200,
     ): void {
-        $business ??= ['id' => self::BUSINESS, 'name' => 'Synthetic Portfolio'];
-        $accounts ??= ['data' => [[
-            'id' => self::PAGE,
-            'name' => 'Synthetic Page',
-            'instagram_business_account' => ['id' => self::IG, 'username' => 'synthetic_ig'],
-        ]]];
-        $tokens ??= ['data' => [['id' => self::PAGE, 'access_token' => 'SYNTH_PAGE_TOKEN_5501']]];
+        $fresh = $this->metaAnswers === [];
 
-        Http::fake(function ($request) use ($business, $accounts, $tokens, $businessStatus, $accountsStatus) {
+        $this->metaAnswers = [
+            'business' => $business ?? ['id' => self::BUSINESS, 'name' => 'Synthetic Portfolio'],
+            'accounts' => $accounts ?? ['data' => [[
+                'id' => self::PAGE,
+                'name' => 'Synthetic Page',
+                'instagram_business_account' => ['id' => self::IG, 'username' => 'synthetic_ig'],
+            ]]],
+            'tokens' => $tokens ?? ['data' => [['id' => self::PAGE, 'access_token' => 'SYNTH_PAGE_TOKEN_5501']]],
+            'businessStatus' => $businessStatus,
+            'accountsStatus' => $accountsStatus,
+        ];
+
+        if (! $fresh) {
+            return;
+        }
+
+        Http::fake(function ($request) {
             $url = $request->url();
+            $a = $this->metaAnswers;
 
             if (str_contains($url, '/me/accounts')) {
                 // The token fetch asks for `access_token`; discovery asks for the IG field.
                 return str_contains($url, 'access_token')
-                    ? Http::response($tokens, $accountsStatus)
-                    : Http::response($accounts, $accountsStatus);
+                    ? Http::response($a['tokens'], $a['accountsStatus'])
+                    : Http::response($a['accounts'], $a['accountsStatus']);
             }
 
-            return Http::response($business, $businessStatus);
+            return Http::response($a['business'], $a['businessStatus']);
         });
     }
 
@@ -435,6 +458,389 @@ class MetaPlatformBootstrapTest extends TestCase
         $this->assertNotNull($store->activeFor($org));
         $b->disconnect();
         $this->assertNull($store->activeFor($org), 'A disconnected connection is not active.');
+    }
+
+    /**
+     * 15 — B-1: the expected credential unique race resolves deterministically.
+     *
+     * The race is FORCED rather than hoped for: a `creating` hook inserts a colliding row between
+     * the writer's read and its insert, which is exactly the window two concurrent bootstraps
+     * would hit. Without the catch this is an unhandled QueryException and a 500.
+     *
+     * FORCED ON A PAGE CREDENTIAL, NOT THE GRANT ONE, and that detail is load-bearing:
+     * UNIQUE(provider_connection_id, credential_type, provider_account_id) cannot fire for the
+     * grant-level row because its `provider_account_id` is NULL and a unique index treats NULLs as
+     * distinct. Only per-account credentials are constrained — see the phase report.
+     */
+    public function test_a_credential_unique_race_is_resolved_by_overwriting(): void
+    {
+        $org = $this->pinnedTenant();
+        $this->fakeMeta();
+        Sanctum::actingAs($this->superAdmin());
+
+        $raced = false;
+        ProviderConnectionCredential::creating(function ($model) use (&$raced, $org) {
+            if ($raced || $model->credential_type !== ProviderConnectionCredential::PAGE_ACCESS_TOKEN) {
+                return;
+            }
+            $raced = true;
+
+            // The other request wins the insert, storing a DIFFERENT token under the same key.
+            DB::table('crm_provider_credentials')->insert([
+                'org_id' => $org,
+                'provider_connection_id' => $model->provider_connection_id,
+                'provider_account_id' => $model->provider_account_id,
+                'credential_type' => ProviderConnectionCredential::PAGE_ACCESS_TOKEN,
+                'access_token' => encrypt('SYNTH_LOSER_TOKEN_0001'),
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        });
+
+        $this->postJson(self::ENDPOINT, [
+            'business_id' => self::BUSINESS,
+            'system_user_token' => self::TOKEN,
+            'asset_ids' => [self::PAGE],
+        ])->assertCreated();
+
+        $this->assertTrue($raced, 'The race must actually have been forced.');
+
+        $pageCredentials = ProviderConnectionCredential::query()
+            ->where('credential_type', ProviderConnectionCredential::PAGE_ACCESS_TOKEN)
+            ->get();
+
+        $this->assertCount(1, $pageCredentials, 'The race must leave exactly one page credential.');
+        // Last VERIFIED writer wins: this bootstrap proved its token against Meta, the loser did not.
+        $this->assertSame('SYNTH_PAGE_TOKEN_5501', $pageCredentials->first()->access_token);
+        $this->assertNotSame('SYNTH_LOSER_TOKEN_0001', $pageCredentials->first()->access_token);
+        $this->assertSame($org, (int) $pageCredentials->first()->org_id);
+    }
+
+    /**
+     * 16 — B-1: an unrelated database failure is NOT dressed up as an ownership conflict.
+     *
+     * The catch in the writer is deliberately narrow. A plain QueryException must travel all the
+     * way out rather than becoming a 409 that would send an operator hunting for a tenancy problem
+     * that does not exist.
+     */
+    public function test_an_unrelated_database_failure_is_not_reported_as_a_conflict(): void
+    {
+        $this->pinnedTenant();
+        $this->fakeMeta();
+        Sanctum::actingAs($this->superAdmin());
+
+        ProviderConnectionCredential::creating(function () {
+            throw new QueryException('mysql', 'insert into crm_provider_credentials', [], new \RuntimeException('disk is on fire'));
+        });
+
+        $this->withoutExceptionHandling();
+
+        try {
+            $this->postJson(self::ENDPOINT, [
+                'business_id' => self::BUSINESS,
+                'system_user_token' => self::TOKEN,
+                'asset_ids' => [self::PAGE],
+            ]);
+            $this->fail('An unrelated database failure must propagate.');
+        } catch (QueryException $e) {
+            $this->assertStringNotContainsString('owned_by_another_org', $e->getMessage());
+            $this->assertStringNotContainsString(self::TOKEN, $e->getMessage(), 'No plaintext token in the exception.');
+        }
+
+        // And it still rolled everything back.
+        $this->assertSame(0, ProviderConnection::query()->count());
+        $this->assertSame(0, ProviderAccount::query()->count());
+        $this->assertSame(0, ProviderConnectionCredential::query()->count());
+    }
+
+    /** 17 — B-1: no plaintext token reaches a log on the race path. */
+    public function test_the_race_path_leaks_no_plaintext_token(): void
+    {
+        $org = $this->pinnedTenant();
+        $this->fakeMeta();
+        Sanctum::actingAs($this->superAdmin());
+
+        $captured = [];
+        Event::listen(MessageLogged::class, function (MessageLogged $e) use (&$captured): void {
+            $captured[] = $e->message.' '.json_encode($e->context);
+        });
+
+        $raced = false;
+        ProviderConnectionCredential::creating(function ($model) use (&$raced, $org) {
+            if ($raced || $model->credential_type !== ProviderConnectionCredential::PAGE_ACCESS_TOKEN) {
+                return;
+            }
+            $raced = true;
+            DB::table('crm_provider_credentials')->insert([
+                'org_id' => $org,
+                'provider_connection_id' => $model->provider_connection_id,
+                'provider_account_id' => $model->provider_account_id,
+                'credential_type' => ProviderConnectionCredential::PAGE_ACCESS_TOKEN,
+                'access_token' => encrypt('SYNTH_LOSER_TOKEN_0002'),
+                'created_at' => now(), 'updated_at' => now(),
+            ]);
+        });
+
+        $response = $this->postJson(self::ENDPOINT, [
+            'business_id' => self::BUSINESS, 'system_user_token' => self::TOKEN, 'asset_ids' => [self::PAGE],
+        ])->assertCreated();
+
+        $this->assertStringNotContainsString(self::TOKEN, $response->getContent());
+        foreach ($captured as $line) {
+            $this->assertStringNotContainsString(self::TOKEN, $line);
+            $this->assertStringNotContainsString('SYNTH_PAGE_TOKEN_5501', $line);
+        }
+    }
+
+    /**
+     * 18 — B-2: the submitted selection is authoritative. Page A + IG A, then Page B only.
+     */
+    public function test_a_narrower_reconnect_releases_the_assets_it_no_longer_names(): void
+    {
+        $org = $this->pinnedTenant();
+        Sanctum::actingAs($this->superAdmin());
+
+        // First bootstrap: Page A + its linked Instagram account.
+        $this->fakeMeta();
+        $this->postJson(self::ENDPOINT, [
+            'business_id' => self::BUSINESS, 'system_user_token' => self::TOKEN,
+            'asset_ids' => [self::PAGE, self::IG],
+        ])->assertCreated();
+
+        $pageA = ProviderAccount::query()->where('external_id', self::PAGE)->firstOrFail();
+        $igA = ProviderAccount::query()->where('external_id', self::IG)->firstOrFail();
+        $connectionId = (int) $pageA->connection_id;
+        $this->assertSame(3, ProviderConnectionCredential::query()->count());
+
+        // Second bootstrap on the SAME org + business, naming a different Page.
+        $pageB = '900000000000102';
+        $this->fakeMeta(
+            accounts: ['data' => [['id' => $pageB, 'name' => 'Synthetic Page B']]],
+            tokens: ['data' => [['id' => $pageB, 'access_token' => 'SYNTH_PAGE_B_TOKEN_9902']]],
+        );
+        $this->postJson(self::ENDPOINT, [
+            'business_id' => self::BUSINESS, 'system_user_token' => self::TOKEN, 'asset_ids' => [$pageB],
+        ])->assertCreated();
+
+        // Page B is attached, active, and holds the refreshed token.
+        $attachedB = ProviderAccount::query()->where('external_id', $pageB)->firstOrFail();
+        $this->assertSame($connectionId, (int) $attachedB->connection_id);
+        $this->assertTrue((bool) $attachedB->is_active);
+        $this->assertSame(
+            'SYNTH_PAGE_B_TOKEN_9902',
+            ProviderConnectionCredential::query()->where('provider_account_id', $attachedB->id)->firstOrFail()->access_token,
+        );
+
+        // Page A and Instagram A are RELEASED from the connection.
+        foreach ([$pageA, $igA] as $old) {
+            $fresh = $old->fresh();
+            $this->assertNotNull($fresh, 'A released account must not be deleted.');
+            $this->assertNull($fresh->connection_id, 'A released account must no longer belong to the connection.');
+            $this->assertTrue((bool) $fresh->is_active, 'is_active must be untouched so inbound keeps resolving.');
+            $this->assertSame($org, (int) $fresh->org_id, 'Ownership must not move.');
+        }
+
+        // One connection still, and no duplicate rows.
+        $this->assertSame(1, ProviderConnection::query()->count());
+        $this->assertSame(3, ProviderAccount::query()->count());
+    }
+
+    /** 19 — B-2: the released accounts' credentials are gone, so outbound for them fails closed. */
+    public function test_released_assets_have_no_usable_credential_left(): void
+    {
+        $org = $this->pinnedTenant();
+        Sanctum::actingAs($this->superAdmin());
+
+        $this->fakeMeta();
+        $this->postJson(self::ENDPOINT, [
+            'business_id' => self::BUSINESS, 'system_user_token' => self::TOKEN,
+            'asset_ids' => [self::PAGE, self::IG],
+        ])->assertCreated();
+
+        $resolver = app(ProviderCredentialResolver::class);
+        $this->assertNotNull($resolver->resolve($org, 'meta', MetaAsset::PAGE, self::PAGE));
+        $this->assertNotNull($resolver->resolve($org, 'meta', MetaAsset::INSTAGRAM, self::IG));
+
+        $pageB = '900000000000102';
+        $this->fakeMeta(
+            accounts: ['data' => [['id' => $pageB, 'name' => 'Synthetic Page B']]],
+            tokens: ['data' => [['id' => $pageB, 'access_token' => 'SYNTH_PAGE_B_TOKEN_9903']]],
+        );
+        $this->postJson(self::ENDPOINT, [
+            'business_id' => self::BUSINESS, 'system_user_token' => self::TOKEN, 'asset_ids' => [$pageB],
+        ])->assertCreated();
+
+        // The accounts still exist and still resolve for INBOUND, but have no credential to send with.
+        $this->assertNull($resolver->resolve($org, 'meta', MetaAsset::PAGE, self::PAGE));
+        $this->assertNull($resolver->resolve($org, 'meta', MetaAsset::INSTAGRAM, self::IG));
+        $this->assertNotNull($resolver->resolve($org, 'meta', MetaAsset::PAGE, $pageB));
+
+        $this->assertSame(
+            0,
+            ProviderConnectionCredential::query()
+                ->whereIn('provider_account_id', [
+                    ProviderAccount::query()->where('external_id', self::PAGE)->value('id'),
+                    ProviderAccount::query()->where('external_id', self::IG)->value('id'),
+                ])->count(),
+            'A released account must keep no credential.',
+        );
+    }
+
+    /** 20 — B-2: a same-org connection_id = NULL account that was never part of this connection is untouched by a reconnect. */
+    public function test_a_never_attached_account_survives_a_reconnect_untouched(): void
+    {
+        $org = $this->pinnedTenant();
+        Sanctum::actingAs($this->superAdmin());
+
+        // Stands in for production's two live inbound rows.
+        $standIn = new ProviderAccount([
+            'provider' => 'meta', 'resource_type' => MetaAsset::PAGE,
+            'external_id' => '900000000000888', 'label' => 'Pre-existing inbound mapping', 'is_active' => true,
+        ]);
+        $standIn->org_id = $org;
+        $standIn->save();
+
+        $this->fakeMeta();
+        $this->postJson(self::ENDPOINT, [
+            'business_id' => self::BUSINESS, 'system_user_token' => self::TOKEN, 'asset_ids' => [self::PAGE],
+        ])->assertCreated();
+
+        $pageB = '900000000000102';
+        $this->fakeMeta(
+            accounts: ['data' => [['id' => $pageB, 'name' => 'Synthetic Page B']]],
+            tokens: ['data' => [['id' => $pageB, 'access_token' => 'SYNTH_PAGE_B_TOKEN_9904']]],
+        );
+        $this->postJson(self::ENDPOINT, [
+            'business_id' => self::BUSINESS, 'system_user_token' => self::TOKEN, 'asset_ids' => [$pageB],
+        ])->assertCreated();
+
+        $fresh = $standIn->fresh();
+        $this->assertNull($fresh->connection_id);
+        $this->assertSame('Pre-existing inbound mapping', $fresh->label);
+        $this->assertTrue((bool) $fresh->is_active);
+        $this->assertSame($org, (int) $fresh->org_id);
+    }
+
+    /** 21 — B-2: a reconnect that fails midway restores the original selection completely. */
+    public function test_a_failed_reconnect_restores_the_previous_state(): void
+    {
+        $org = $this->pinnedTenant();
+        Sanctum::actingAs($this->superAdmin());
+
+        $this->fakeMeta();
+        $this->postJson(self::ENDPOINT, [
+            'business_id' => self::BUSINESS, 'system_user_token' => self::TOKEN,
+            'asset_ids' => [self::PAGE, self::IG],
+        ])->assertCreated();
+
+        $before = [
+            'connections' => ProviderConnection::query()->count(),
+            'accounts' => ProviderAccount::query()->count(),
+            'credentials' => ProviderConnectionCredential::query()->count(),
+            'pageAConnection' => (int) ProviderAccount::query()->where('external_id', self::PAGE)->value('connection_id'),
+            'igAConnection' => (int) ProviderAccount::query()->where('external_id', self::IG)->value('connection_id'),
+        ];
+
+        // The second bootstrap dies while writing a page credential — after the connection update,
+        // the grant credential, the attach and the release would all have run.
+        $pageB = '900000000000102';
+        $this->fakeMeta(
+            accounts: ['data' => [['id' => $pageB, 'name' => 'Synthetic Page B']]],
+            tokens: ['data' => [['id' => $pageB, 'access_token' => 'SYNTH_PAGE_B_TOKEN_9905']]],
+        );
+        ProviderConnectionCredential::creating(function ($model) {
+            if ($model->credential_type === ProviderConnectionCredential::PAGE_ACCESS_TOKEN) {
+                throw new QueryException('mysql', 'insert into crm_provider_credentials', [], new \RuntimeException('write failed'));
+            }
+        });
+
+        $this->withoutExceptionHandling();
+        try {
+            $this->postJson(self::ENDPOINT, [
+                'business_id' => self::BUSINESS, 'system_user_token' => self::TOKEN, 'asset_ids' => [$pageB],
+            ]);
+            $this->fail('The failing reconnect must not succeed.');
+        } catch (QueryException) {
+            // expected
+        }
+
+        $this->assertSame($before['connections'], ProviderConnection::query()->count());
+        $this->assertSame($before['accounts'], ProviderAccount::query()->count(), 'Page B must not survive.');
+        $this->assertSame($before['credentials'], ProviderConnectionCredential::query()->count());
+        $this->assertSame($before['pageAConnection'], (int) ProviderAccount::query()->where('external_id', self::PAGE)->value('connection_id'), 'Page A must still be attached.');
+        $this->assertSame($before['igAConnection'], (int) ProviderAccount::query()->where('external_id', self::IG)->value('connection_id'), 'Instagram A must still be attached.');
+    }
+
+    /**
+     * 22 — B-3: a page-token HTTP failure after a successful verify and discover mutates nothing.
+     */
+    public function test_a_page_token_failure_leaves_no_mutation(): void
+    {
+        $this->pinnedTenant();
+        Sanctum::actingAs($this->superAdmin());
+
+        // verify + discover succeed; the token call returns a server error.
+        Http::fake(function ($request) {
+            $url = $request->url();
+
+            if (str_contains($url, '/me/accounts') && str_contains($url, 'access_token')) {
+                return Http::response([], 500);
+            }
+
+            if (str_contains($url, '/me/accounts')) {
+                return Http::response(['data' => [[
+                    'id' => self::PAGE, 'name' => 'Synthetic Page',
+                    'instagram_business_account' => ['id' => self::IG, 'username' => 'synthetic_ig'],
+                ]]], 200);
+            }
+
+            return Http::response(['id' => self::BUSINESS, 'name' => 'Synthetic Portfolio'], 200);
+        });
+
+        $this->postJson(self::ENDPOINT, [
+            'business_id' => self::BUSINESS, 'system_user_token' => self::TOKEN, 'asset_ids' => [self::PAGE],
+        ])->assertStatus(503)->assertJsonPath('reason', MetaConnectFailureCode::ProviderUnavailable->value);
+
+        $this->assertSame(0, ProviderConnection::query()->count());
+        $this->assertSame(0, ProviderConnectionCredential::query()->count());
+        $this->assertSame(0, ProviderAccount::query()->count());
+    }
+
+    /**
+     * 23 — B-3: a credential-writer failure AFTER the connection, the grant credential and the
+     * attach have all been written rolls every one of them back.
+     */
+    public function test_a_credential_write_failure_rolls_back_earlier_writes(): void
+    {
+        $this->pinnedTenant();
+        $this->fakeMeta();
+        Sanctum::actingAs($this->superAdmin());
+
+        $seen = 0;
+        ProviderConnectionCredential::creating(function ($model) use (&$seen) {
+            $seen++;
+            // Let the grant credential through; fail on the first PAGE credential, by which point
+            // the connection, the grant credential and the attached accounts all exist.
+            if ($model->credential_type === ProviderConnectionCredential::PAGE_ACCESS_TOKEN) {
+                throw new QueryException('mysql', 'insert into crm_provider_credentials', [], new \RuntimeException('write failed'));
+            }
+        });
+
+        $this->withoutExceptionHandling();
+        try {
+            $this->postJson(self::ENDPOINT, [
+                'business_id' => self::BUSINESS, 'system_user_token' => self::TOKEN,
+                'asset_ids' => [self::PAGE, self::IG],
+            ]);
+            $this->fail('The failing write must not succeed.');
+        } catch (QueryException) {
+            // expected
+        }
+
+        $this->assertGreaterThanOrEqual(2, $seen, 'The grant credential must have been written before the failure.');
+        $this->assertSame(0, ProviderConnection::query()->count());
+        $this->assertSame(0, ProviderConnectionCredential::query()->count());
+        $this->assertSame(0, ProviderAccount::query()->count());
     }
 
     /** 14 — nothing in this flow reaches a real Meta host. */

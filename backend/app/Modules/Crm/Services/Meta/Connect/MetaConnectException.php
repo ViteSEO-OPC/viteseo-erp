@@ -45,6 +45,7 @@ final class MetaConnectException extends RuntimeException
             MetaConnectFailureCode::BusinessVerificationFailed => 'That credential does not have access to the named Business Portfolio.',
             MetaConnectFailureCode::BusinessOwnedByAnotherOrg => 'That Meta business is already connected to another organization.',
             MetaConnectFailureCode::PageCredentialUnavailable => 'Meta returned no access token for one of the selected Pages.',
+            MetaConnectFailureCode::CredentialWriteFailed => 'The credential could not be stored.',
         });
     }
 }

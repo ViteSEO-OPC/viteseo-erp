@@ -153,12 +153,17 @@ final class MetaPlatformBootstrap
                     );
                 }
 
+                // The submitted selection is AUTHORITATIVE for this connection: anything it
+                // previously carried and no longer names is released here.
+                $released = $this->release($connection, $accounts);
+
                 Log::info('crm.meta.bootstrap.connected', [
                     'provider' => 'meta',
                     'org_id' => $orgId,
                     'connection_id' => (int) $connection->id,
                     'origin' => ProviderConnection::ORIGIN_PLATFORM_BOOTSTRAP,
                     'accounts_attached' => count($accounts),
+                    'accounts_released' => $released,
                     'credentials_written' => count($accounts) + 1,
                 ]);
 
@@ -173,6 +178,53 @@ final class MetaPlatformBootstrap
 
             throw $e;
         }
+    }
+
+    /**
+     * Release everything this connection used to carry that the new selection does not name.
+     *
+     * DETACH, NEVER DEACTIVATE — and this is the one decision in the whole reconcile worth
+     * arguing. The inbound resolver matches on (provider, resource_type, external_id, is_active),
+     * so clearing `is_active` on a released Page would stop Meta's webhook from resolving a tenant
+     * for it and silently end inbound delivery for a Page that is still receiving real customer
+     * messages. Detaching leaves the row exactly as inbound needs it — active, owned, addressable
+     * — and removes only its membership of this connection.
+     *
+     * THE STALE CREDENTIAL IS DELETED, NOT ORPHANED. `DatabaseProviderCredentialResolver` finds a
+     * credential by `provider_account_id` alone and only then checks the connection, so a released
+     * account that kept its row would still resolve a token — the token this bootstrap just
+     * replaced everywhere else. Deleting it makes outbound for that account fail closed, which is
+     * the honest state: nothing has authorized us to speak for it any more. A credential is the
+     * one thing in this module worth destroying rather than keeping for history.
+     *
+     * SCOPED BY connection_id ALONE, which is what keeps it safe. Another org's rows can never
+     * carry this connection's id, and a same-org row that was never attached still has NULL — so
+     * the hand-provisioned inbound mappings that predate connections cannot be swept in.
+     *
+     * @param  list<ProviderAccount>  $keep
+     * @return int how many accounts were released
+     */
+    private function release(ProviderConnection $connection, array $keep): int
+    {
+        $keepIds = array_map(static fn (ProviderAccount $a): int => (int) $a->id, $keep);
+
+        $released = ProviderAccount::query()
+            ->where('connection_id', $connection->id)
+            ->when($keepIds !== [], fn ($q) => $q->whereNotIn('id', $keepIds))
+            ->get();
+
+        foreach ($released as $account) {
+            ProviderConnectionCredential::query()
+                ->where('provider_connection_id', $connection->id)
+                ->where('provider_account_id', $account->id)
+                ->delete();
+
+            // `is_active` is deliberately untouched — see the docblock.
+            $account->connection_id = null;
+            $account->save();
+        }
+
+        return $released->count();
     }
 
     /**
