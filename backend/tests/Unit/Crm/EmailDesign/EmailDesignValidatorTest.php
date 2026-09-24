@@ -103,12 +103,36 @@ class EmailDesignValidatorTest extends TestCase
         $this->assertSame(['path' => "{$region}.0.type", 'message' => EmailDesignValidator::BLOCK_NOT_ALLOWED], $this->problemIn($region, $this->block($type)));
     }
 
-    public function test_buttons_belong_to_content_and_logos_and_footers_to_the_design(): void
+    /**
+     * A button belongs to EITHER document; a logo and footer text belong only to the design.
+     *
+     * The button rule changed deliberately: a design may now carry the reusable call to action every
+     * template drawn in it shows, while a template still carries its own. The two other rules did not
+     * change and are asserted here so widening one allow-list cannot quietly widen the rest —
+     * `logo` and `footer` remain the design's alone, because a template that could place them would be
+     * able to contradict the design it is shown in.
+     */
+    public function test_a_button_belongs_to_any_part_while_logos_and_footers_belong_to_the_design(): void
     {
-        $this->assertNotContains('button', EmailDesignSchema::REGION_BLOCKS[EmailDesignSchema::HEADER]);
-        $this->assertNotContains('button', EmailDesignSchema::REGION_BLOCKS[EmailDesignSchema::FOOTER]);
+        $this->assertContains('button', EmailDesignSchema::REGION_BLOCKS[EmailDesignSchema::HEADER]);
+        $this->assertContains('button', EmailDesignSchema::REGION_BLOCKS[EmailDesignSchema::FOOTER]);
+        $this->assertContains('button', EmailDesignSchema::REGION_BLOCKS[EmailDesignSchema::CONTENT]);
+
         $this->assertNotContains('logo', EmailDesignSchema::REGION_BLOCKS[EmailDesignSchema::CONTENT]);
         $this->assertNotContains('footer', EmailDesignSchema::REGION_BLOCKS[EmailDesignSchema::CONTENT]);
+    }
+
+    /** A design-level button validates in the header and in the footer, with the same rules as any other. */
+    public function test_a_button_validates_in_the_designs_header_and_footer(): void
+    {
+        $this->assertNull($this->problemIn(EmailDesignSchema::HEADER, $this->button()));
+        $this->assertNull($this->problemIn(EmailDesignSchema::FOOTER, $this->button()));
+
+        // And it is still held to the button rules wherever it sits.
+        $this->assertSame(
+            ['path' => 'header.0.url', 'message' => EmailDesignValidator::UNSAFE_URL],
+            $this->problemIn(EmailDesignSchema::HEADER, $this->button(['url' => 'javascript:alert(1)'])),
+        );
     }
 
     /** @return array<string, array{string, string, int}> */

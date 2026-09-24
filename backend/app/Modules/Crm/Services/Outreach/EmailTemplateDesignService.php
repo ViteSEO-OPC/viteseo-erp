@@ -234,6 +234,21 @@ class EmailTemplateDesignService
     /**
      * What a design is previewed with: a short message standing in for a template's content.
      *
+     * DELIBERATELY NO BUTTON, and that is the point of this docblock.
+     *
+     * The sample used to include a "Book a call" button pointing at example.com. It read as a saved
+     * part of the design: a designer looking at the preview could not tell the stand-in message from
+     * their own blocks, and reasonably concluded their design already carried a call to action with a
+     * working link. It did not — the link went nowhere, and nothing in their design contained it.
+     *
+     * A heading and a paragraph are enough to show how a design frames a message. A BUTTON IS NOT,
+     * because a button is the one sample block that is also something a designer can genuinely add to
+     * a design (header or footer), so the fake one and the real one are indistinguishable on screen.
+     * The stand-in must never be mistakable for the thing it stands in for.
+     *
+     * Real design-level buttons are unaffected: a button saved into a design's header or footer is
+     * part of the layout, renders here like any other block, and reaches the recipient.
+     *
      * @return array<string, mixed>
      */
     public function sampleContent(): array
@@ -251,7 +266,6 @@ class EmailTemplateDesignService
                     'align' => 'left',
                     'font_size' => 14,
                 ],
-                ['type' => 'button', 'id' => 'sample-button', 'label' => 'Book a call', 'url' => 'https://example.com/book', 'align' => 'center', 'radius' => 6],
             ],
         ];
     }

@@ -22,7 +22,8 @@ use App\Modules\Crm\Support\EmailTemplateCatalog;
  *
  * The renderer composes them in this order: header · content · signature area · footer. Neither document
  * holds HTML, CSS, script or a URL for an image or logo. REGION_BLOCKS decides which blocks each part may
- * hold: the logo and footer text belong to a design, buttons to a template's content.
+ * hold: the logo and footer text belong to a design, a template's message to its content, and a button
+ * to either — the design's is the reusable call to action every template drawn in it carries.
  *
  * ── Styles are inherited, not copied ──
  * Every style, and every block color, is OPTIONAL. An absent (or null) value is inherited:
@@ -126,11 +127,19 @@ final class EmailDesignSchema
     /**
      * Each part of an email → the blocks it may hold.
      *
+     * A BUTTON IS ALLOWED IN ALL THREE. In the content it is the message's own call to action, written
+     * per template; in the header or footer it is the REUSABLE one — "Book a call", "View our work" —
+     * that belongs to the design and appears on every template drawn in it. Both are the same block
+     * type, validated by the same rules and drawn by the same renderer; only who owns it differs.
+     *
+     * Widening an allow-list is backward-compatible by construction: a design saved before this
+     * accepted exactly the blocks it still accepts, so nothing stored can become invalid.
+     *
      * @var array<string, list<string>>
      */
     public const REGION_BLOCKS = [
-        'header' => ['logo', 'heading', 'text', 'image', 'divider', 'spacer'],
-        'footer' => ['footer', 'text', 'logo', 'image', 'divider', 'spacer'],
+        'header' => ['logo', 'heading', 'text', 'button', 'image', 'divider', 'spacer'],
+        'footer' => ['footer', 'text', 'logo', 'button', 'image', 'divider', 'spacer'],
         'blocks' => ['heading', 'text', 'button', 'image', 'divider', 'spacer'],
     ];
 

@@ -190,6 +190,60 @@ class EmailDesignManagementTest extends TestCase
         $this->assertSame($admin->id, EmailDesign::query()->where('name', 'Campaign')->firstOrFail()->created_by);
     }
 
+    /**
+     * A design may carry the reusable call to action — created in its header or footer, edited there,
+     * and stored as part of the design rather than any one template.
+     *
+     * Asserted through the real API in both directions, because "editable and saved as part of the
+     * design" is a claim about the round trip, not about the validator alone.
+     */
+    public function test_an_admin_can_create_and_edit_a_button_in_a_design(): void
+    {
+        $this->actingAsAdmin();
+
+        $cta = $this->button(['id' => 'design-cta', 'label' => 'Book a call', 'url' => 'https://viteseo.ph/book', 'align' => 'center', 'radius' => 8]);
+        $created = $this->layout([$this->logo(), $cta], [$this->footer(), $this->button(['id' => 'footer-cta', 'label' => 'See our work', 'url' => 'https://viteseo.ph/work'])]);
+
+        $this->postJson(self::URL, ['name' => 'With CTA', 'layout' => $this->layoutJson($created)])
+            ->assertCreated()
+            ->assertJsonPath('data.layout.header.1.type', 'button')
+            ->assertJsonPath('data.layout.header.1.label', 'Book a call')
+            ->assertJsonPath('data.layout.header.1.url', 'https://viteseo.ph/book')
+            ->assertJsonPath('data.layout.header.1.radius', 8)
+            ->assertJsonPath('data.layout.footer.1.type', 'button');
+
+        $design = EmailDesign::query()->where('name', 'With CTA')->firstOrFail();
+        $this->assertSame('button', $design->layout['header'][1]['type'], 'The button is stored on the design.');
+
+        // Edited in place: every property the block supports travels back and forth.
+        $edited = $this->layout([$this->logo(), $this->button([
+            'id' => 'design-cta', 'label' => 'Talk to us', 'url' => 'https://viteseo.ph/contact',
+            'align' => 'left', 'radius' => 0, 'background_color' => '#123456', 'text_color' => '#FEDCBA',
+        ])], [$this->footer()]);
+
+        $this->patchJson(self::URL."/{$design->id}", ['layout' => $this->layoutJson($edited)])
+            ->assertOk()
+            ->assertJsonPath('data.layout.header.1.label', 'Talk to us')
+            ->assertJsonPath('data.layout.header.1.url', 'https://viteseo.ph/contact')
+            ->assertJsonPath('data.layout.header.1.align', 'left')
+            ->assertJsonPath('data.layout.header.1.radius', 0)
+            ->assertJsonPath('data.layout.header.1.background_color', '#123456')
+            ->assertJsonPath('data.layout.header.1.text_color', '#FEDCBA');
+    }
+
+    /** A design button is held to the same URL rule as any other — the scheme allow-list still applies. */
+    public function test_a_design_button_with_an_unsafe_url_is_refused(): void
+    {
+        $this->actingAsAdmin();
+
+        $this->postJson(self::URL, [
+            'name' => 'Bad CTA',
+            'layout' => $this->layoutJson($this->layout([$this->button(['url' => 'javascript:alert(1)'])], [])),
+        ])->assertJsonValidationErrors(['layout.header.0.url' => EmailDesignValidator::UNSAFE_URL]);
+
+        $this->assertSame(0, EmailDesign::query()->count());
+    }
+
     public function test_a_design_needs_a_unique_name(): void
     {
         $this->actingAsAdmin();
@@ -208,7 +262,9 @@ class EmailDesignManagementTest extends TestCase
             ->assertJsonValidationErrors(['layout' => 'Send the design layout as a JSON-encoded string.']);
         $this->postJson(self::URL, ['name' => 'Bad', 'layout' => $this->layoutJson($this->layout([$this->logo(['link_url' => 'javascript:alert(1)'])], []))])
             ->assertJsonValidationErrors(['layout.header.0.link_url' => EmailDesignValidator::UNSAFE_URL]);
-        $this->postJson(self::URL, ['name' => 'Bad', 'layout' => $this->layoutJson($this->layout([$this->button()], []))])
+        // A footer block in the header — a button is allowed in both parts now, so the refusal has to
+        // be shown with a block that genuinely belongs to one part only.
+        $this->postJson(self::URL, ['name' => 'Bad', 'layout' => $this->layoutJson($this->layout([$this->footer()], []))])
             ->assertJsonValidationErrors(['layout.header.0.type' => EmailDesignValidator::BLOCK_NOT_ALLOWED]);
         $this->postJson(self::URL, ['name' => 'Bad', 'layout' => str_repeat('[', 40).str_repeat(']', 40)])
             ->assertJsonValidationErrors(['layout' => EmailDesignValidator::TOO_DEEP]);
@@ -386,12 +442,51 @@ class EmailDesignManagementTest extends TestCase
         $this->assertSame(0, EmailDesign::query()->count(), 'a design preview writes nothing');
     }
 
+    /**
+     * THE SAMPLE MESSAGE CARRIES NO BUTTON, and a real one still renders.
+     *
+     * Both halves matter and they are asserted together on purpose. The sample used to include a
+     * "Book a call" button that looked exactly like a saved one, so designers believed their design
+     * already had a call to action with a working link. Removing it would be easy to over-apply into
+     * "designs cannot show buttons", which is the opposite of what was just built — so the second
+     * assertion pins the real block rendering in the very same preview.
+     */
+    public function test_the_design_preview_shows_no_sample_button_but_does_show_a_real_one(): void
+    {
+        $this->actingAsAdmin();
+
+        // A design with no button of its own: nothing button-shaped may appear.
+        $plain = $this->layout([$this->logo()], [$this->footer()]);
+        $html = $this->postJson(self::URL.'/preview', ['layout' => $this->layoutJson($plain)])
+            ->assertOk()->json('data.html');
+
+        $this->assertStringNotContainsString('Book a call', $html, 'The sample button is back.');
+        $this->assertStringNotContainsString('example.com/book', $html, 'The sample button URL is back.');
+        $this->assertStringNotContainsString('display:inline-block;padding:12px 24px', $html, 'Something rendered a button.');
+
+        // The sample message itself is still useful — a heading and a paragraph remain.
+        $this->assertStringContainsString('Hi ', $html);
+        $this->assertStringContainsString('Each template shows its own message here', $html);
+
+        // And a button the designer actually saved renders, with its own real link.
+        $withCta = $this->layout(
+            [$this->logo(), $this->button(['id' => 'real-cta', 'label' => 'Talk to us', 'url' => 'https://viteseo.ph/contact'])],
+            [$this->footer()],
+        );
+        $ctaHtml = $this->postJson(self::URL.'/preview', ['layout' => $this->layoutJson($withCta)])
+            ->assertOk()->json('data.html');
+
+        $this->assertStringContainsString('<a href="https://viteseo.ph/contact"', $ctaHtml, 'A real design button must render.');
+        $this->assertStringContainsString('Talk to us', $ctaHtml);
+        $this->assertStringNotContainsString('Book a call', $ctaHtml, 'Only the designer\'s own button may appear.');
+    }
+
     public function test_the_design_preview_refuses_an_invalid_layout(): void
     {
         $this->actingAsAdmin();
 
         $this->postJson(self::URL.'/preview', [])->assertJsonValidationErrors('layout');
-        $this->postJson(self::URL.'/preview', ['layout' => $this->layoutJson($this->layout([$this->button()], []))])
+        $this->postJson(self::URL.'/preview', ['layout' => $this->layoutJson($this->layout([$this->footer()], []))])
             ->assertJsonValidationErrors(['layout.header.0.type' => EmailDesignValidator::BLOCK_NOT_ALLOWED]);
     }
 
