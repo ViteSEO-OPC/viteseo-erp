@@ -104,7 +104,14 @@ final class MetaCredentialWriter
                  */
                 unset($violation);
 
-                $winner = ProviderConnectionCredential::query()->where($key)->first();
+                /*
+                 * LOCKING, for the reason spelled out in ProviderConnectionStore: under
+                 * REPEATABLE READ a plain re-read is served from this transaction's
+                 * pre-collision snapshot and finds nothing, which would turn a recoverable
+                 * race into a CredentialWriteFailed. `FOR UPDATE` reads the latest committed
+                 * row and serializes this writer behind the one that won.
+                 */
+                $winner = ProviderConnectionCredential::query()->where($key)->lockForUpdate()->first();
 
                 if ($winner === null) {
                     // A unique violation with nothing to read back means the collision was not the

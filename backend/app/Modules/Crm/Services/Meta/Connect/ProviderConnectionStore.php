@@ -81,9 +81,23 @@ final class ProviderConnectionStore
             // a QueryException carries its bindings, and a binding here names a customer's business.
             unset($violation);
 
+            /*
+             * A LOCKING read, and the whole recovery depends on it. InnoDB's default REPEATABLE
+             * READ serves a plain SELECT from the snapshot this transaction took BEFORE the winner
+             * committed, so a non-locking re-read here returns nothing and the caller is told the
+             * business belongs to another organization when it does not. Verified against this
+             * deployment's MariaDB 10.11: after a competing commit the non-locking read saw 0 rows
+             * and `FOR UPDATE` saw 1. A locking read always reads the latest committed version and
+             * blocks until the winner is done — the same reasoning, and the same fix, as
+             * ConversationResolver's locked lookup.
+             *
+             * NOTE ON SQLITE: lockForUpdate() compiles to nothing there, so the test suite proves
+             * the recovery LOGIC and says nothing about InnoDB's locking.
+             */
             $winner = ProviderConnection::query()
                 ->where('provider', self::PROVIDER)
                 ->where('external_business_id', $externalBusinessId)
+                ->lockForUpdate()
                 ->first();
 
             if ($winner === null || (int) $winner->org_id !== $orgId) {

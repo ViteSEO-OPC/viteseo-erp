@@ -843,6 +843,140 @@ class MetaPlatformBootstrapTest extends TestCase
         $this->assertSame(0, ProviderAccount::query()->count());
     }
 
+    /**
+     * 24 — the GRANT-level credential race, which the old index could not even detect.
+     *
+     * `provider_account_id` is NULL on the grant row, and a unique index treats NULLs as distinct,
+     * so before the schema fix two concurrent bootstraps could each write their own grant
+     * credential and nothing would notice. The collision is forced with the same model-hook
+     * technique as the page race, but on the NULL-account row.
+     *
+     * WHAT THIS PROVES AND WHAT IT DOES NOT. It proves the database invariant and the
+     * application's recovery logic. It does NOT prove InnoDB's lock timing: the suite runs on
+     * SQLite, where lockForUpdate() compiles to nothing — the same caveat ConversationResolver
+     * already records for its locked lookup.
+     */
+    public function test_a_grant_credential_race_leaves_exactly_one_row(): void
+    {
+        $org = $this->pinnedTenant();
+        $this->fakeMeta();
+        Sanctum::actingAs($this->superAdmin());
+
+        $captured = [];
+        Event::listen(MessageLogged::class, function (MessageLogged $e) use (&$captured): void {
+            $captured[] = $e->message.' '.json_encode($e->context);
+        });
+
+        $raced = false;
+        ProviderConnectionCredential::creating(function ($model) use (&$raced, $org) {
+            if ($raced || $model->credential_type !== ProviderConnectionCredential::USER_ACCESS_TOKEN) {
+                return;
+            }
+            $raced = true;
+
+            // The competing transaction wins the insert, storing a DIFFERENT grant token.
+            DB::table('crm_provider_credentials')->insert([
+                'org_id' => $org,
+                'provider_connection_id' => $model->provider_connection_id,
+                'provider_account_id' => null,
+                'credential_type' => ProviderConnectionCredential::USER_ACCESS_TOKEN,
+                'access_token' => encrypt('SYNTH_STALE_GRANT_TOKEN_0007'),
+                'created_at' => now(), 'updated_at' => now(),
+            ]);
+        });
+
+        $response = $this->postJson(self::ENDPOINT, [
+            'business_id' => self::BUSINESS,
+            'system_user_token' => self::TOKEN,
+            'asset_ids' => [self::PAGE],
+        ])->assertCreated();
+
+        $this->assertTrue($raced, 'The grant-level race must actually have been forced.');
+
+        $connectionId = (int) ProviderConnection::query()->value('id');
+        $grants = ProviderConnectionCredential::query()
+            ->where('provider_connection_id', $connectionId)
+            ->where('credential_type', ProviderConnectionCredential::USER_ACCESS_TOKEN)
+            ->whereNull('provider_account_id')
+            ->get();
+
+        $this->assertCount(1, $grants, 'Exactly one grant credential may survive the race.');
+        $survivor = $grants->first();
+        $this->assertSame(self::TOKEN, $survivor->access_token, "The surviving token must be this bootstrap's verified one.");
+        $this->assertNotSame('SYNTH_STALE_GRANT_TOKEN_0007', $survivor->access_token, 'The stale competing value must not be retained.');
+        $this->assertSame($org, (int) $survivor->org_id);
+
+        $this->assertStringNotContainsString(self::TOKEN, $response->getContent());
+        $this->assertStringNotContainsString('SYNTH_STALE_GRANT_TOKEN_0007', $response->getContent());
+        foreach ($captured as $line) {
+            $this->assertStringNotContainsString(self::TOKEN, $line);
+            $this->assertStringNotContainsString('SYNTH_STALE_GRANT_TOKEN_0007', $line);
+        }
+    }
+
+    /**
+     * 25 — the SCHEMA itself holds the invariant, with no application code involved.
+     *
+     * Written straight through the query builder so it exercises the index rather than
+     * MetaCredentialWriter's recovery: the point is that a future writer which forgets the
+     * recovery path still cannot create a duplicate.
+     */
+    public function test_the_schema_enforces_grant_uniqueness_and_keeps_page_uniqueness(): void
+    {
+        $org = $this->pinnedTenant();
+
+        $connection = new ProviderConnection([
+            'provider' => 'meta', 'status' => ProviderConnection::CONNECTED,
+            'external_business_id' => self::BUSINESS, 'connected_at' => now(),
+        ]);
+        $connection->org_id = $org;
+        $connection->save();
+
+        $accountA = new ProviderAccount([
+            'provider' => 'meta', 'resource_type' => MetaAsset::PAGE,
+            'external_id' => '900000000000301', 'label' => 'A', 'is_active' => true,
+        ]);
+        $accountA->org_id = $org;
+        $accountA->save();
+
+        $accountB = new ProviderAccount([
+            'provider' => 'meta', 'resource_type' => MetaAsset::PAGE,
+            'external_id' => '900000000000302', 'label' => 'B', 'is_active' => true,
+        ]);
+        $accountB->org_id = $org;
+        $accountB->save();
+
+        $insert = function (?int $accountId, string $type) use ($org, $connection): bool {
+            try {
+                DB::table('crm_provider_credentials')->insert([
+                    'org_id' => $org,
+                    'provider_connection_id' => $connection->id,
+                    'provider_account_id' => $accountId,
+                    'credential_type' => $type,
+                    'created_at' => now(), 'updated_at' => now(),
+                ]);
+
+                return true;
+            } catch (QueryException) {
+                return false;
+            }
+        };
+
+        // The gap this migration closed.
+        $this->assertTrue($insert(null, ProviderConnectionCredential::USER_ACCESS_TOKEN), 'The first grant row must be accepted.');
+        $this->assertFalse($insert(null, ProviderConnectionCredential::USER_ACCESS_TOKEN), 'A second NULL-account grant row must be rejected by the schema.');
+
+        // The guarantee that already existed and must survive the index replacement.
+        $this->assertTrue($insert((int) $accountA->id, ProviderConnectionCredential::PAGE_ACCESS_TOKEN));
+        $this->assertTrue($insert((int) $accountB->id, ProviderConnectionCredential::PAGE_ACCESS_TOKEN), 'Two different accounts must still be allowed.');
+        $this->assertFalse($insert((int) $accountA->id, ProviderConnectionCredential::PAGE_ACCESS_TOKEN), 'A duplicate account credential must still be rejected.');
+
+        // A different credential_type on the same NULL scope is a different row, not a duplicate.
+        $this->assertTrue($insert(null, ProviderConnectionCredential::PAGE_ACCESS_TOKEN), 'The scope is per credential_type.');
+
+        $this->assertSame(4, ProviderConnectionCredential::query()->count());
+    }
+
     /** 14 — nothing in this flow reaches a real Meta host. */
     public function test_no_stray_request_is_made(): void
     {
