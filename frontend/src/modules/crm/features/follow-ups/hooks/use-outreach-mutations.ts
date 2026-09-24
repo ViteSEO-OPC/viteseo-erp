@@ -24,6 +24,12 @@ export type SendEmailVars = {
    * Omit it for the unchanged plain-text send every other caller makes.
    */
   bodyDoc?: import("@tiptap/react").JSONContent;
+  /**
+   * The designed template this message was composed from, when it is still unedited. Sent as
+   * `email_template_id` so the server can render the design the sender previewed; omitted — the
+   * usual case — sends plain text exactly as before. An id, never HTML: the server renders.
+   */
+  emailTemplateId?: string;
 };
 
 export type SentEmail = {
@@ -64,7 +70,7 @@ const draftsKey = [...queryKeys.followUps.all, "drafts"] as const;
 export function useSendEmail() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ leadId, subject, body, to, scheduledAt, bodyDoc }: SendEmailVars) =>
+    mutationFn: ({ leadId, subject, body, to, scheduledAt, bodyDoc, emailTemplateId }: SendEmailVars) =>
       apiClient
         .post(`/leads/${leadId}/emails`, {
           subject,
@@ -75,6 +81,8 @@ export function useSendEmail() {
           // Only sent when scheduling — its ABSENCE is what selects the immediate-send branch
           // server-side (`isset($data['scheduled_at'])`), so a null/empty value must never be sent.
           ...(scheduledAt ? { scheduled_at: scheduledAt } : {}),
+          // Only an unedited designed template carries one; its absence is the plain-text send.
+          ...(emailTemplateId ? { email_template_id: emailTemplateId } : {}),
         })
         .then((r) => r.data.data as SentEmail),
     onSuccess: (email, variables) => {

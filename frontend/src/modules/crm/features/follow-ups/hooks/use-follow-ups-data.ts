@@ -287,6 +287,27 @@ export function useFollowUpsData(leadId?: string) {
     [activeTemplate, draft.subject, draft.body],
   );
 
+  /**
+   * The template id to send with this email, or null to send plain text.
+   *
+   * A designed template's blocks are only the message while the composer still says what they say.
+   * The moment a BD edits the flattened text, the blocks and the message have diverged, and rendering
+   * the blocks would mail the recipient something the sender never wrote — invisibly, since the HTML
+   * part is the one a person reads. So the id is simply not sent, and the email goes out as the plain
+   * text on screen.
+   *
+   * BODY ONLY, deliberately — not `isDraftEdited`, which also trips on a subject change. The subject
+   * is sent as its own plain-text field and is not part of the rendered design, and the server's own
+   * check compares the body alone. Matching it exactly keeps one rule, not two that can disagree.
+   *
+   * This is a courtesy, not the guarantee: the server recomputes the same comparison and refuses a
+   * mismatched design regardless of what the browser claims.
+   */
+  const sendableTemplateId = useMemo(
+    () => (activeTemplate !== null && draft.body === activeTemplate.body ? activeTemplate.id : null),
+    [activeTemplate, draft.body],
+  );
+
   /** Existing templates available for the tone the BD currently has selected. */
   const templatesForTone = useMemo(
     () => templates.filter((t) => t.tone === draft.tone),
@@ -352,6 +373,7 @@ export function useFollowUpsData(leadId?: string) {
     // unchanged; Regenerate simply moves Purpose to one that does exist for that tone.
     canRegenerate: templatesForTone.length > 0,
     isDraftEdited,
+    sendableTemplateId,
     isLoading,
     isError,
   };

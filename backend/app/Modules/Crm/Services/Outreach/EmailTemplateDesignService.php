@@ -207,6 +207,31 @@ class EmailTemplateDesignService
     }
 
     /**
+     * The context a REAL send renders with — the preview's context with real values in place of samples.
+     *
+     * THE ONLY DIFFERENCE FROM {@see sampleContext()} IS THE TOKENS, and that is the whole point: if the
+     * two contexts diverged anywhere else, the preview would stop being a promise about the email. Logo
+     * resolution is the same call on the same branding, `assetUrls` is empty in both until image uploads
+     * exist, and `brandStyles`/`brandWebsite` are empty in both because `crm_email_brandings` stores only
+     * a logo today.
+     *
+     * `previewImages` IS DELIBERATELY EMPTY AND MUST STAY SO. It exists for the Settings preview frame,
+     * which loads no remote images and so needs the logo's bytes inline. A real email client gets the
+     * public URL; Gmail blocks inline data, so sending those bytes would hide the logo it is meant to show.
+     */
+    public function sendContext(Lead $lead, ?User $sender): EmailDesignContext
+    {
+        $logo = $this->branding->logoForRender();
+
+        return new EmailDesignContext(
+            tokens: $this->templates->tokens($lead, $sender),
+            logoUrl: $logo['url'] ?? null,
+            logoAlt: $logo['alt'] ?? '',
+            previewImages: [],
+        );
+    }
+
+    /**
      * What a design is previewed with: a short message standing in for a template's content.
      *
      * @return array<string, mixed>

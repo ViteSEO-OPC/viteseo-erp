@@ -33,6 +33,15 @@ class SendEmailRequest extends FormRequest
             // Its text survives the request intact because `body_doc.*` is exempt from TrimStrings in
             // bootstrap/app.php — "Hello " + bold "world" must not lose the space between them.
             'body_doc' => ['sometimes', 'nullable', 'array'],
+
+            // WHICH DESIGNED TEMPLATE THIS WAS COMPOSED FROM, so the send path can render the design
+            // the sender previewed instead of its flattened plain text. An id, never markup: no field
+            // on this request accepts HTML, and the server remains the only thing that renders any.
+            //
+            // Optional and additive. Absent — every existing caller — sends plain text exactly as
+            // before. Present but edited, deleted or undesigned is not an error either: the send path
+            // checks all three and falls back to the plain-text body it already carries.
+            'email_template_id' => ['sometimes', 'nullable', 'integer', 'exists:crm_email_templates,id'],
         ];
     }
 

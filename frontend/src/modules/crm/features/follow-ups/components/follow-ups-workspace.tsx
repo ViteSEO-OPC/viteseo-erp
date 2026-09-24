@@ -52,6 +52,7 @@ export function FollowUpsWorkspace({ leadId }: FollowUpsWorkspaceProps) {
     regenerate,
     canRegenerate,
     isDraftEdited,
+    sendableTemplateId,
   } = useFollowUpsData(leadId);
 
   const sendEmail = useSendEmail();
@@ -103,7 +104,15 @@ export function FollowUpsWorkspace({ leadId }: FollowUpsWorkspaceProps) {
     }
 
     sendEmail.mutate(
-      { leadId: item.leadId, subject: draft.subject, body: draft.body, to: item.email || undefined, scheduledAt },
+      {
+        leadId: item.leadId,
+        subject: draft.subject,
+        body: draft.body,
+        to: item.email || undefined,
+        scheduledAt,
+        // Null once the BD has edited the template's text — see `sendableTemplateId`.
+        emailTemplateId: sendableTemplateId ?? undefined,
+      },
       {
         onSuccess: (email) => {
           // Unchanged: a Planner Email Task completes only on an ACTUAL send. A scheduled email

@@ -38,6 +38,7 @@ use Illuminate\Support\Carbon;
     // Formatted replies only (Lead Detail's composer): the validated Tiptap document the text/html
     // part is rendered from at send time. Null for every other email — `body` stays canonical.
     'body_doc',
+    'email_template_id',
     // RC3 Outreach Automation Pack — business purpose of the send (e.g. proposal, introduction,
     // thank_you). Nullable; set only by the automation send path. Drives the `proposal.sent` event.
     'purpose',
@@ -82,6 +83,20 @@ class Email extends Model
     }
 
     /** @return BelongsTo<Lead, $this> */
+    /**
+     * The designed template this email was composed from, when it was composed from one.
+     *
+     * NULL for every plain-text send, every formatted reply and every row written before designed
+     * sending existed — which is most of them. Its only reader is
+     * {@see \App\Modules\Crm\Services\Outreach\OutreachEmailService::htmlFor()}, which uses it to
+     * re-render the design at send time. `nullOnDelete` means a deleted template leaves the email
+     * intact and simply un-renderable, falling back to the `body` it already carries.
+     */
+    public function emailTemplate(): BelongsTo
+    {
+        return $this->belongsTo(EmailTemplate::class, 'email_template_id');
+    }
+
     public function lead(): BelongsTo
     {
         return $this->belongsTo(Lead::class);
