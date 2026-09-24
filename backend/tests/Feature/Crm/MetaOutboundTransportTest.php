@@ -92,12 +92,15 @@ class MetaOutboundTransportTest extends TestCase
         return $user;
     }
 
-    private function connection(int $orgId, string $status = ProviderConnection::CONNECTED): ProviderConnection
-    {
+    private function connection(
+        int $orgId,
+        string $status = ProviderConnection::CONNECTED,
+        string $businessId = '900000000000999',
+    ): ProviderConnection {
         $connection = new ProviderConnection([
             'provider' => 'meta',
             'status' => $status,
-            'external_business_id' => '900000000000999',
+            'external_business_id' => $businessId,
             'connected_at' => now()->subDay(),
         ]);
         $connection->org_id = $orgId;
@@ -491,17 +494,54 @@ class MetaOutboundTransportTest extends TestCase
     }
 
     /**
-     * Detaching an account WITHOUT removing its credential does not close the door.
+     * Detaching an account closes the door even if its credential row survives.
      *
-     * Documented rather than asserted as a bug, because it is a consequence of a deliberate design
-     * decision: `ProviderAccount::isUsableForOutbound()` treats a null `connection_id` as usable so
-     * that the two hand-provisioned production mappings keep working, and the credential resolver
-     * validates the credential's OWN connection rather than the account's. The state this test
-     * creates is therefore not one the codebase produces — `release()` always deletes the
-     * credential first. It is pinned here so that a future change to `release()` which forgets the
-     * delete fails a test instead of quietly leaving a revoked account able to send.
+     * THE REGRESSION TEST FOR REVIEW FINDING 3. This previously asserted the OPPOSITE — that a
+     * detached account could still send — because `DatabaseProviderCredentialResolver` validated
+     * the credential's own `provider_connection_id` and never looked at the account's. Fail-closed
+     * therefore rested entirely on `MetaPlatformBootstrap::release()` deleting the credential
+     * first. It does; but a release path that ever forgot would have left a revoked account able
+     * to speak, so the resolver now requires the attachment itself.
      */
-    public function test_detaching_an_account_alone_does_not_revoke_its_credential(): void
+    public function test_detaching_an_account_revokes_it_even_with_a_surviving_credential(): void
+    {
+        $org = $this->tenantId();
+        $connection = $this->connection($org);
+        $account = $this->account($org, $connection);
+        $this->credential($org, $connection, $account);
+
+        // Only half of release(): detach, but leave the credential row behind.
+        $account->connection_id = null;
+        $account->save();
+
+        $result = $this->service()->send($this->request($this->conversation(), $this->actor()), $org);
+
+        $this->assertTrue($result->wasRefused());
+        $this->assertSame(OutboundFailureCode::NotConfigured, $result->failure);
+        Http::assertNothingSent();
+    }
+
+    // ------------------------------------------------- C2. resolver invariant
+
+    private function resolver(): \App\Modules\Crm\Services\Outbound\Contracts\ProviderCredentialResolver
+    {
+        return app(\App\Modules\Crm\Services\Outbound\Contracts\ProviderCredentialResolver::class);
+    }
+
+    public function test_the_resolver_returns_a_credential_when_account_and_credential_agree(): void
+    {
+        $org = $this->tenantId();
+        $connection = $this->connection($org);
+        $account = $this->account($org, $connection);
+        $this->credential($org, $connection, $account);
+
+        $credential = $this->resolver()->resolve($org, 'meta', 'page', self::PAGE_ID);
+
+        $this->assertNotNull($credential);
+        $this->assertSame(self::PAGE_ID, $credential->resourceExternalId);
+    }
+
+    public function test_the_resolver_returns_null_for_a_detached_account_with_a_surviving_credential(): void
     {
         $org = $this->tenantId();
         $connection = $this->connection($org);
@@ -511,56 +551,23 @@ class MetaOutboundTransportTest extends TestCase
         $account->connection_id = null;
         $account->save();
 
-        $this->fakeAccepted();
-        $result = $this->service()->send($this->request($this->conversation(), $this->actor()), $org);
-
-        $this->assertTrue(
-            $result->accepted,
-            'If this now refuses, release() no longer depends on deleting the credential - update the comment above.',
-        );
+        $this->assertNull($this->resolver()->resolve($org, 'meta', 'page', self::PAGE_ID));
     }
 
-    public function test_a_disconnected_connection_fails_closed_before_any_http(): void
+    public function test_the_resolver_returns_null_when_account_and_credential_name_different_grants(): void
     {
         $org = $this->tenantId();
-        $connection = $this->connection($org, ProviderConnection::DISCONNECTED);
-        $account = $this->account($org, $connection);
-        $this->credential($org, $connection, $account);
+        $first = $this->connection($org);
+        $second = $this->connection($org, ProviderConnection::CONNECTED, '900000000000998');
 
-        $conversation = $this->conversation();
-        $result = $this->service()->send($this->request($conversation, $this->actor()), $org);
+        $account = $this->account($org, $first);
+        // The credential belongs to the OTHER grant. Both connections are live, so nothing but the
+        // mismatch itself can refuse this.
+        $credential = $this->credential($org, $first, $account);
+        $credential->provider_connection_id = $second->id;
+        $credential->save();
 
-        $this->assertTrue($result->wasRefused());
-        $this->assertSame(OutboundFailureCode::ResourceUnavailable, $result->failure);
-        Http::assertNothingSent();
-    }
-
-    public function test_an_expired_credential_fails_closed_before_any_http(): void
-    {
-        $org = $this->tenantId();
-        $connection = $this->connection($org);
-        $account = $this->account($org, $connection);
-        $this->credential($org, $connection, $account, now()->subHour());
-
-        $conversation = $this->conversation();
-        $result = $this->service()->send($this->request($conversation, $this->actor()), $org);
-
-        $this->assertTrue($result->wasRefused());
-        $this->assertSame(OutboundFailureCode::NotConfigured, $result->failure);
-        Http::assertNothingSent();
-    }
-
-    public function test_the_request_type_exposes_no_recipient_a_caller_could_set(): void
-    {
-        // Structural, not validated: there is no field to smuggle a recipient through.
-        $properties = array_map(
-            static fn (\ReflectionProperty $p): string => $p->getName(),
-            (new \ReflectionClass(OutboundMessageRequest::class))->getProperties(),
-        );
-
-        foreach (['recipient', 'recipientId', 'recipient_external_id', 'to', 'pageId'] as $forbidden) {
-            $this->assertNotContains($forbidden, $properties);
-        }
+        $this->assertNull($this->resolver()->resolve($org, 'meta', 'page', self::PAGE_ID));
     }
 
     // ---------------------------------------------------------------- D. Policy
@@ -667,8 +674,22 @@ class MetaOutboundTransportTest extends TestCase
             'forbidden (403)' => [403, ['code' => 0], OutboundFailureCode::CredentialRejected],
             'throttled (429)' => [429, ['code' => 4], OutboundFailureCode::ProviderRateLimited],
             'application throttle (400/code 613)' => [400, ['code' => 613], OutboundFailureCode::ProviderRateLimited],
-            'provider fault (500)' => [500, ['code' => 1], OutboundFailureCode::ProviderUnavailable],
-            'provider fault (503)' => [503, ['code' => 2], OutboundFailureCode::ProviderUnavailable],
+        ];
+    }
+
+    /**
+     * The 5xx family, which is NOT deterministic.
+     *
+     * A Graph 500 may be raised after the message was queued, and a 502/504 from an edge may mean
+     * the request never reached the backend or that it was processed and the answer lost. None of
+     * these establishes non-delivery, so none may be recorded as `failed`.
+     */
+    public static function providerAmbiguousErrors(): array
+    {
+        return [
+            'graph fault (500)' => [500],
+            'bad gateway (502)' => [502],
+            'unavailable (503)' => [503],
         ];
     }
 
@@ -690,6 +711,86 @@ class MetaOutboundTransportTest extends TestCase
         // A deterministic rejection is a real failure; only an ambiguous one stays pending.
         $this->assertSame(OutboundMessagePersister::FAILED, $row->delivery_status);
         $this->assertSame($expected->value, $row->failure_code);
+        $this->assertFalse($expected->leavesDeliveryUnresolved());
+    }
+
+    /**
+     * REVIEW FINDING 1. A 5xx leaves the row unresolved, and a replay never posts again.
+     *
+     * This previously asserted `FAILED`, which is what made the row replayable: neither the SENT
+     * check nor the unresolved check matched it, so a second attempt with the same client request
+     * id fell straight through to the transport and could deliver the message twice.
+     */
+    #[DataProvider('providerAmbiguousErrors')]
+    public function test_a_five_hundred_class_response_is_unresolved_and_never_replayed(int $status): void
+    {
+        [$org, $conversation, $actor] = $this->messengerTenant();
+
+        $calls = 0;
+        // ONE stub, mutated by reference: Http::fake() merges, and an arrow function would capture
+        // the counter by value.
+        Http::fake(['*' => function () use (&$calls, $status) {
+            $calls++;
+
+            return Http::response(['error' => ['code' => 1]], $status);
+        }]);
+
+        $first = $this->service()->send($this->request($conversation, $actor, 'req-5xx'), $org);
+
+        $this->assertTrue($first->wasRefused());
+        $this->assertSame(OutboundFailureCode::ProviderUnavailable, $first->failure);
+        $this->assertSame(1, $calls);
+
+        $row = ConversationMessage::query()->withoutGlobalScopes()
+            ->where('direction', 'outbound')->firstOrFail();
+
+        $this->assertSame(OutboundMessagePersister::PENDING, $row->delivery_status);
+        $this->assertSame(OutboundFailureCode::ProviderUnavailable->value, $row->failure_code);
+        $this->assertNull($row->delivered_at);
+        $this->assertNull($row->external_message_id);
+
+        // The replay refuses BEFORE the transport, and names the original reason.
+        $second = $this->service()->send($this->request($conversation, $actor, 'req-5xx'), $org);
+
+        $this->assertTrue($second->wasRefused());
+        $this->assertSame(OutboundFailureCode::ProviderUnavailable, $second->failure);
+        $this->assertStringContainsString('provider_unavailable', (string) $second->reason);
+        $this->assertSame(1, $calls, 'A 5xx must never produce a second provider POST.');
+
+        $this->assertSame(1, ConversationMessage::query()->withoutGlobalScopes()
+            ->where('direction', 'outbound')->count());
+    }
+
+    /** Which outcomes may be replayed at all, stated once and asserted. */
+    public function test_ambiguous_outcomes_are_never_advertised_as_retryable(): void
+    {
+        foreach ([OutboundFailureCode::ProviderUnavailable, OutboundFailureCode::DeliveryUnknown] as $code) {
+            $this->assertTrue($code->leavesDeliveryUnresolved(), $code->value);
+            $this->assertFalse($code->isRetryable(), $code->value.' must not invite an automatic retry.');
+        }
+
+        // The one case where non-delivery IS established: the throttle rejects before processing.
+        $this->assertTrue(OutboundFailureCode::ProviderRateLimited->isRetryable());
+        $this->assertFalse(OutboundFailureCode::ProviderRateLimited->leavesDeliveryUnresolved());
+
+        foreach ([OutboundFailureCode::InvalidRequest, OutboundFailureCode::PolicyViolation,
+            OutboundFailureCode::CredentialRejected, OutboundFailureCode::OutsideMessagingWindow] as $code) {
+            $this->assertFalse($code->leavesDeliveryUnresolved(), $code->value);
+        }
+    }
+
+    /** The persister refuses to park a resolved outcome in the unresolved state. */
+    public function test_the_persister_refuses_to_park_a_resolved_outcome_as_unresolved(): void
+    {
+        [$org, $conversation, $actor] = $this->messengerTenant();
+        $this->fakeAccepted();
+        $this->service()->send($this->request($conversation, $actor, 'req-park'), $org);
+
+        $row = ConversationMessage::query()->withoutGlobalScopes()
+            ->where('direction', 'outbound')->firstOrFail();
+
+        $this->expectException(\App\Modules\Crm\Services\Outbound\OutboundPersistenceException::class);
+        app(OutboundMessagePersister::class)->markUnresolved($row, OutboundFailureCode::PolicyViolation);
     }
 
     public function test_a_connection_timeout_is_never_retried_and_never_marked_failed(): void

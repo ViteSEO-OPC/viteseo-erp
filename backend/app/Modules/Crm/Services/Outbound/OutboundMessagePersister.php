@@ -93,41 +93,66 @@ final class OutboundMessagePersister
     }
 
     /**
-     * The attempt happened and we never learned the outcome.
+     * The attempt happened and we never learned whether it was delivered.
      *
-     * PHASE 3G, AND THE ONE PIECE OF STATE THIS PHASE ADDS. A POST that timed out may have been
-     * delivered. `sent` would claim a delivery we cannot prove; `failed` would deny one that may
-     * have happened. Both are lies and both are actionable by somebody, which is worse than an
-     * honest unknown.
+     * COVERS EVERY AMBIGUOUS OUTCOME, not just a timeout. A POST that timed out and a POST that
+     * came back 5xx are the same problem: Meta may have delivered the message, or may never have
+     * seen it, and nothing in the protocol tells us which. `sent` would claim a delivery we cannot
+     * prove; `failed` would deny one that may have happened. Both are lies, and both are actionable
+     * by somebody, which is worse than an honest unknown.
      *
-     * So the row STAYS `pending` — it is, genuinely, unresolved — and carries the failure code as
-     * a marker of why. A fresh pending row has `failure_code` null, so the pair
-     * (pending, delivery_unknown) is unambiguous and needs no new column: see isUnresolved().
+     * So the row STAYS `pending` — it is, genuinely, unresolved — and carries the SPECIFIC code, so
+     * the operator can still tell "Meta returned an error" from "we never heard back". A fresh
+     * pending row has `failure_code` null, so `pending` + an unresolved code is unambiguous and
+     * needs no new column.
      *
      * NO MIGRATION. `delivery_status` keeps its existing vocabulary and `failure_code` is an
-     * existing nullable varchar(32); 'delivery_unknown' is 16 characters. Adding a fourth status
-     * would have meant a migration, a backfill decision and every existing reader of
-     * `delivery_status` learning a new value — for no information that this pair does not carry.
+     * existing nullable varchar(32). Adding a fourth status would have meant a migration, a
+     * backfill decision and every existing reader learning a new value, for no information this
+     * pair does not already carry.
      */
-    public function markUnresolved(ConversationMessage $message): void
+    public function markUnresolved(ConversationMessage $message, OutboundFailureCode $code): void
     {
+        if (! $code->leavesDeliveryUnresolved()) {
+            // A caller that reaches here with a deterministic code has confused "the send failed"
+            // with "we do not know whether the send happened". Refusing is better than silently
+            // parking a resolved failure in `pending`, where nothing will ever revisit it.
+            throw new OutboundPersistenceException(sprintf(
+                'Refusing to park a resolved outcome [%s] as unresolved.',
+                $code->value,
+            ));
+        }
+
         $message->delivery_status = self::PENDING;
-        $message->failure_code = OutboundFailureCode::DeliveryUnknown->value;
+        $message->failure_code = $code->value;
         // Explicit rather than merely absent: nothing about this outcome is a delivery.
         $message->delivered_at = null;
         $message->save();
     }
 
     /**
-     * Whether a previous attempt on this row left delivery unknown.
+     * The code a previous ambiguous attempt left on this row, or null if it is not in that state.
      *
-     * The guard that makes the rule binding: the service asks this BEFORE calling a transport, so
-     * a replay of the same client request id refuses instead of posting a second time.
+     * The guard that makes the rule binding: the service asks this BEFORE calling a transport, so a
+     * replay of the same client request id refuses instead of posting a second time. Returning the
+     * CODE rather than a boolean lets the refusal name the original reason, which is the difference
+     * between an operator checking Meta's status page and an operator checking the thread.
      */
+    public function unresolvedCode(ConversationMessage $message): ?OutboundFailureCode
+    {
+        if ($message->delivery_status !== self::PENDING) {
+            return null;
+        }
+
+        $code = OutboundFailureCode::tryFrom((string) ($message->failure_code ?? ''));
+
+        return $code !== null && $code->leavesDeliveryUnresolved() ? $code : null;
+    }
+
+    /** Whether a previous attempt on this row left delivery unknown. */
     public function isUnresolved(ConversationMessage $message): bool
     {
-        return $message->delivery_status === self::PENDING
-            && $message->failure_code === OutboundFailureCode::DeliveryUnknown->value;
+        return $this->unresolvedCode($message) !== null;
     }
 
     private function find(int $orgId, string $idempotencyKey): ?ConversationMessage

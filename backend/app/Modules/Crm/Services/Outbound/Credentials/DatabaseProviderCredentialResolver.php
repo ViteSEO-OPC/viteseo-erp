@@ -50,6 +50,22 @@ final class DatabaseProviderCredentialResolver implements ProviderCredentialReso
             return null;
         }
 
+        /*
+         * THE ACCOUNT MUST STILL BE ATTACHED TO A GRANT.
+         *
+         * `ProviderAccount::isUsableForOutbound()` deliberately treats a null `connection_id` as
+         * usable, so that a hand-provisioned mapping keeps working for INBOUND routing. Outbound is
+         * a different question: speaking through an account means using somebody's authorisation,
+         * and an account attached to no grant has none. Such an account has no credential either,
+         * so in practice this returns null a step earlier — but "in practice" was exactly the
+         * problem. Before this check, fail-closed on a released account rested entirely on
+         * MetaPlatformBootstrap::release() remembering to delete the credential first; a release
+         * path that ever forgot would have left a revoked account able to send.
+         */
+        if ($account->connection_id === null) {
+            return null;
+        }
+
         $credential = ProviderConnectionCredential::query()
             ->where('org_id', $orgId)
             ->where('provider_account_id', $account->id)
@@ -64,7 +80,20 @@ final class DatabaseProviderCredentialResolver implements ProviderCredentialReso
             return null;
         }
 
-        if (! $this->connectionAllows($credential->provider_connection_id, $orgId)) {
+        /*
+         * THE ACCOUNT AND ITS CREDENTIAL MUST NAME THE SAME GRANT.
+         *
+         * Two columns previously recorded the connection — the account's and the credential's —
+         * and nothing compared them. A credential left behind by an earlier grant would therefore
+         * authorise sends from an account that had since been re-attached elsewhere, because only
+         * the credential's own column was validated. Comparing them makes the invariant structural
+         * instead of a property of whichever write path happened to run last.
+         */
+        if ((int) $credential->provider_connection_id !== (int) $account->connection_id) {
+            return null;
+        }
+
+        if (! $this->connectionAllows((int) $account->connection_id, $orgId)) {
             return null;
         }
 

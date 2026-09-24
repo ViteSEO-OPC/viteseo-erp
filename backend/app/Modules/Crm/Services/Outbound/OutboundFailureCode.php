@@ -106,17 +106,49 @@ enum OutboundFailureCode: string
     case DeliveryUnknown = 'delivery_unknown';
 
     /**
-     * Whether a caller should ever try this again unchanged.
+     * Whether this outcome leaves it genuinely unknown whether the customer got the message.
      *
-     * DeliveryUnknown is emphatically NOT retryable, and it is the case most likely to be
-     * mis-handled: it looks like a transient network error, and treating it as one is exactly how
-     * a customer receives the same message twice.
+     * THE DIVIDING LINE OF THIS WHOLE PATH, and it is about EVIDENCE, not about severity. A 4xx
+     * with a Graph error envelope is proof that Meta received the request, processed it and
+     * refused: the message was not delivered, and we know it. A 5xx is not proof of anything. A
+     * Graph 500 may be raised after the send was queued, and a 502/504 from an edge in front of
+     * Graph may mean the request never reached the backend OR that it was processed and the answer
+     * was lost on the way home. That is the same epistemic position as a timeout, so it gets the
+     * same treatment.
+     *
+     * A code that returns true here must never be written as `failed`: doing so would let a replay
+     * of the same client request id reach the transport again, and the cost of being wrong is a
+     * real customer receiving the same message twice from a business.
+     *
+     * ProviderUnavailable and DeliveryUnknown stay SEPARATE CASES even though they are handled
+     * identically, because the operator-facing question differs: "Meta returned an error" sends
+     * someone to Meta's status page, while "we never heard back" sends them to the thread.
+     */
+    public function leavesDeliveryUnresolved(): bool
+    {
+        return match ($this) {
+            self::DeliveryUnknown, self::ProviderUnavailable => true,
+            default => false,
+        };
+    }
+
+    /**
+     * Whether a caller may send this again, unchanged, on the same client request id.
+     *
+     * TRUE ONLY WHERE NON-DELIVERY IS ESTABLISHED. A 429 is rejected by the throttle before the
+     * message is processed, so replaying it cannot duplicate anything — that is the one case left.
+     *
+     * ProviderUnavailable USED TO BE LISTED HERE and is not any more. Nothing consumed this method
+     * at the time, so it never caused a double send; but it advertised the ambiguous branch as
+     * retry-safe, and the first queue written against it would have inherited that mistake. The
+     * invariant is now stated once, structurally: anything ambiguous is never retryable.
      */
     public function isRetryable(): bool
     {
-        return match ($this) {
-            self::ProviderUnavailable, self::ProviderRateLimited => true,
-            default => false,
-        };
+        if ($this->leavesDeliveryUnresolved()) {
+            return false;
+        }
+
+        return $this === self::ProviderRateLimited;
     }
 }

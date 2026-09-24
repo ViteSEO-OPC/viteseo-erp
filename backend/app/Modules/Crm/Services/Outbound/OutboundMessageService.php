@@ -185,19 +185,26 @@ final class OutboundMessageService
          * may well have been delivered — and it does not clear the marker. A human resolves this by
          * looking at the thread, which is slower and correct.
          */
-        if ($this->persister->isUnresolved($persisted)) {
-            return $this->refuse($request, OutboundFailureCode::DeliveryUnknown,
-                'A previous attempt with this request id did not return an outcome; it will not be sent again automatically.',
-                $key);
+        if ($unresolved = $this->persister->unresolvedCode($persisted)) {
+            return $this->refuse($request, $unresolved, sprintf(
+                'A previous attempt with this request id ended in [%s] and never established whether the message was delivered; it will not be sent again automatically.',
+                $unresolved->value,
+            ), $key);
         }
 
         $result = $adapter->send($request, $resource->externalId, $credential);
 
         if ($result->accepted && $result->providerMessageId !== null) {
             $this->persister->markSent($persisted, $result->providerMessageId);
-        } elseif ($result->failure === OutboundFailureCode::DeliveryUnknown) {
-            // Neither sent nor failed. Left pending, marked unresolved, never auto-retried.
-            $this->persister->markUnresolved($persisted);
+        } elseif ($result->failure?->leavesDeliveryUnresolved()) {
+            /*
+             * Neither sent nor failed: a timeout, or a 5xx that may have been raised AFTER Meta
+             * queued the message. Asking the code rather than naming one case is the fix for the
+             * original bug, where only DeliveryUnknown was parked and ProviderUnavailable fell
+             * through to `failed` — which made the row replayable and a duplicate delivery
+             * possible on the next attempt with the same client request id.
+             */
+            $this->persister->markUnresolved($persisted, $result->failure);
         } else {
             $this->persister->markFailed($persisted, $result->failure ?? OutboundFailureCode::NotConfigured);
         }
