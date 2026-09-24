@@ -36,6 +36,46 @@ export type InboxConversation = {
     latestMessage: InboxLatestMessage | null;
 };
 
+/**
+ * Delivery state, as `crm_messages.delivery_status` records it.
+ *
+ * Null on inbound turns: we never delivered them, and the API does not invent a state for them.
+ */
+export type DeliveryStatus = "pending" | "sent" | "failed";
+
+/**
+ * Our OWN failure vocabulary — never the provider's prose.
+ *
+ * Widened to `string` on purpose: the server owns this list and may add to it, and an unrecognised
+ * code must render as a neutral message rather than break the thread. The named members exist so
+ * the cases the UI must treat differently are spellable and checkable.
+ */
+export type OutboundFailureCode =
+    | "unauthorized"
+    | "tenant_mismatch"
+    | "unsupported_channel"
+    | "invalid_request"
+    | "resource_unmapped"
+    | "resource_ambiguous"
+    | "resource_unavailable"
+    | "not_configured"
+    | "provider_unavailable"
+    | "provider_rate_limited"
+    | "outside_messaging_window"
+    | "policy_violation"
+    | "credential_rejected"
+    | "delivery_unknown"
+    | (string & {});
+
+/**
+ * THE TWO CODES THAT MUST NEVER OFFER A RETRY.
+ *
+ * Both mean the message may already have reached the customer: the server leaves such a row
+ * `pending` rather than `failed` precisely so nothing re-sends it, and a Retry button in the UI
+ * would undo that guarantee from the other end.
+ */
+export const UNRESOLVED_FAILURE_CODES: readonly string[] = ["delivery_unknown", "provider_unavailable"];
+
 export type InboxMessage = {
     id: string;
     direction: "inbound" | "outbound";
@@ -45,6 +85,33 @@ export type InboxMessage = {
     occurredAt: string | null;
     receivedAt: string | null;
     processedAt: string | null;
+
+    /** Null for inbound. `pending` + a failureCode is the unresolved state, not a failure. */
+    deliveryStatus: DeliveryStatus | null;
+    failureCode: OutboundFailureCode | null;
+    deliveredAt: string | null;
+
+    /** Whether a provider message id was recorded. The identifier itself is never sent. */
+    providerMessageIdPresent: boolean;
+};
+
+/**
+ * Why the composer is not offered, when it is not.
+ *
+ * A PRESENTATION HINT ONLY. The server re-checks everything on send, so `enabled: true` is not a
+ * promise that a reply will go through — the messaging window can close between render and click.
+ * Widened to `string` for the same reason as the failure codes: the server owns the vocabulary.
+ */
+export type ReplyDisabledReason =
+    | "permission_denied"
+    | "unsupported_channel"
+    | "outbound_disabled"
+    | (string & {});
+
+export type InboxReplyCapability = {
+    enabled: boolean;
+    /** Null exactly when `enabled` is true. */
+    reason: ReplyDisabledReason | null;
 };
 
 export type InboxConversationDetail = {
@@ -58,6 +125,7 @@ export type InboxConversationDetail = {
     lead: InboxLeadSummary | null;
     messageCount: number;
     messages: InboxMessage[];
+    reply: InboxReplyCapability;
 };
 
 /** The channel filter offered in the UI. `all` is the absence of a filter, not a value we send. */

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Modules\Crm\Resources;
 
 use App\Modules\Crm\Models\Conversation;
+use App\Modules\Crm\Services\Outbound\ReplyCapability;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -17,6 +18,11 @@ use Illuminate\Http\Resources\Json\JsonResource;
  *
  * The thread is bounded by the controller, not by the client. An inbox that renders "all messages"
  * is fine on a two-message thread and a different proposition on a year-old one.
+ *
+ * `reply` is a PRESENTATION HINT (Phase 3H.0) and nothing more — see {@see ReplyCapability}. It
+ * exists so the inbox can tell "you may not reply" apart from "replies are not switched on yet"
+ * instead of silently hiding a composer, and it deliberately carries no provider account, no
+ * connection and no credential state.
  *
  * @mixin Conversation
  */
@@ -48,6 +54,10 @@ class ConversationDetailResource extends JsonResource
                 'contactName' => $this->lead->contact_name,
                 'status' => $this->lead->status,
             ] : null,
+
+            // Resolved rather than injected: a JsonResource is constructed by Laravel with the
+            // model alone, and this collaborator is stateless and query-free.
+            'reply' => app(ReplyCapability::class)->for($this->resource, $viewer),
 
             'messageCount' => (int) ($this->messages_count ?? $this->messages->count()),
             'messages' => ConversationMessageResource::collection($this->whenLoaded('messages')),
