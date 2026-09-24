@@ -65,18 +65,25 @@ final class GraphMetaSender
     }
 
     /**
-     * POST one message to one resource.
+     * POST one message to one Graph node.
      *
-     * @param  string  $resourceExternalId  the Page or IG business account id, from
-     *                                      `crm_provider_accounts` — never from a request
+     * THE NODE IS THE ADAPTER'S DECISION, NOT THIS CLASS'S. Messenger names its Page id; Instagram
+     * names `me`, because with Facebook Login the messaging edge belongs to the Page the token
+     * authorises rather than to the Instagram business account. This class stays ignorant of that
+     * distinction on purpose — it owns the token, the proof, the timeouts and the no-retry rule,
+     * and nothing about which product a channel belongs to.
+     *
+     * @param  string  $endpointNode  the Graph node to post to, chosen by the adapter — derived
+     *                                from `crm_provider_accounts` or a fixed literal, never from
+     *                                a request
      * @param  array<string, mixed>  $payload  already rendered by the adapter that owns the channel
      */
     public function send(
-        string $resourceExternalId,
+        string $endpointNode,
         array $payload,
         ProviderCredential $credential,
     ): OutboundMessageResult {
-        $url = $this->graph($resourceExternalId.'/messages');
+        $url = $this->graph($endpointNode.'/messages');
 
         try {
             $response = $this->http()
@@ -90,7 +97,7 @@ final class GraphMetaSender
              */
             unset($exception);
 
-            $this->diagnose('connection', $resourceExternalId, OutboundFailureCode::DeliveryUnknown, null);
+            $this->diagnose('connection', $endpointNode, $credential, OutboundFailureCode::DeliveryUnknown, null);
 
             return OutboundMessageResult::refused(
                 OutboundFailureCode::DeliveryUnknown,
@@ -110,7 +117,7 @@ final class GraphMetaSender
              * that almost certainly happened, and marking it `sent` would invent an identifier. It
              * is the same epistemic position as a timeout, so it gets the same answer.
              */
-            $this->diagnose('response', $resourceExternalId, OutboundFailureCode::DeliveryUnknown, null);
+            $this->diagnose('response', $endpointNode, $credential, OutboundFailureCode::DeliveryUnknown, null);
 
             return OutboundMessageResult::refused(
                 OutboundFailureCode::DeliveryUnknown,
@@ -120,7 +127,7 @@ final class GraphMetaSender
 
         $code = $this->failures->classify($response);
 
-        $this->diagnose('rejected', $resourceExternalId, $code, $this->metaErrorCode($response));
+        $this->diagnose('rejected', $endpointNode, $credential, $code, $this->metaErrorCode($response));
 
         // The reason is OUR sentence, built from OUR code. Meta's prose never reaches it.
         return OutboundMessageResult::refused(
@@ -166,15 +173,28 @@ final class GraphMetaSender
         return is_int($value) ? $value : null;
     }
 
-    /** Our code, Meta's numeric code and the resource. Never a token, a payload or a body. */
-    private function diagnose(string $stage, string $resourceExternalId, OutboundFailureCode $code, ?int $metaErrorCode): void
-    {
+    /**
+     * Our code, Meta's numeric code, the node and the resource. Never a token, a payload or a body.
+     *
+     * BOTH the node and the resource are logged, because they can now differ: an Instagram failure
+     * posts to `me` while the resource is the Instagram business account, and an operator reading
+     * this line needs to know which account was speaking as well as which object was addressed.
+     * `resourceExternalId` comes off the credential, where it is a plaintext, non-secret field.
+     */
+    private function diagnose(
+        string $stage,
+        string $endpointNode,
+        ProviderCredential $credential,
+        OutboundFailureCode $code,
+        ?int $metaErrorCode,
+    ): void {
         Log::warning('crm.outbound.meta.failed', [
             'provider' => 'meta',
             'stage' => $stage,
             'code' => $code->value,
             'meta_error_code' => $metaErrorCode,
-            'resource_external_id' => $resourceExternalId,
+            'endpoint_node' => $endpointNode,
+            'resource_external_id' => $credential->resourceExternalId,
         ]);
     }
 

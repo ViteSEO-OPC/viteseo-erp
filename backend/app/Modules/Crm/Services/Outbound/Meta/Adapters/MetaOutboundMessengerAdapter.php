@@ -42,4 +42,17 @@ final class MetaOutboundMessengerAdapter extends AbstractMetaOutboundAdapter
             'message' => ['text' => $body],
         ];
     }
+
+    /**
+     * The Page itself, named explicitly.
+     *
+     * Messenger's messaging edge hangs off the Page, and this path is PROVEN IN PRODUCTION — the
+     * first live outbound reply on 2026-09-24 went out this way and was accepted. It is written as
+     * the resolved resource id rather than `me` so that the URL states which Page is speaking, and
+     * so a future multi-Page tenant reads correctly in a request log.
+     */
+    protected function endpointNode(string $resourceExternalId): string
+    {
+        return $resourceExternalId;
+    }
 }

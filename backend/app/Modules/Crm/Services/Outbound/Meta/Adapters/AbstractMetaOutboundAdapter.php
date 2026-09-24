@@ -59,12 +59,38 @@ abstract class AbstractMetaOutboundAdapter implements OutboundProviderAdapter
     /**
      * The Send API body for this channel.
      *
-     * The one thing the two adapters genuinely disagree about, which is why it is abstract and why
+     * One of two things the adapters genuinely disagree about, which is why it is abstract and why
      * they remain two classes rather than one with a branch.
      *
      * @return array<string, mixed>
      */
     abstract protected function payloadFor(string $recipientExternalId, string $body): array;
+
+    /**
+     * The Graph node the message is POSTed to.
+     *
+     * THE SECOND THING THE TWO CHANNELS DISAGREE ABOUT, and the one that cost a live send. Both
+     * carry a Page access token, but the messaging edge does not hang off the same object:
+     *
+     *   Messenger  ->  /{page-id}/messages
+     *   Instagram  ->  /me/messages
+     *
+     * With Instagram API for FACEBOOK LOGIN the conversation graph belongs to the PAGE, not to the
+     * Instagram business account. Posting to /{ig-business-account-id}/messages is rejected with
+     * Meta error code 3, which is what production returned on 2026-09-24: the same code that a
+     * read-only GET /{ig-business-account-id}/conversations returns, while
+     * GET /{page-id}/conversations?platform=instagram succeeds. (POST /{ig-id}/messages belongs to
+     * the separate Instagram-Login product, which uses a different credential entirely.)
+     *
+     * `me` rather than a looked-up Page id BY DESIGN. A Page access token already identifies its
+     * Page, so `me` resolves to exactly the Page the credential authorises and nothing else. The
+     * alternative — querying `crm_provider_accounts` for the sibling Page row — would hand the
+     * adapter a tenancy decision the contract forbids it to make, and would let a URL and a
+     * credential disagree about which Page is speaking.
+     *
+     * @param  string  $resourceExternalId  the resolved resource, from `crm_provider_accounts`
+     */
+    abstract protected function endpointNode(string $resourceExternalId): string;
 
     public function supports(string $provider, string $channel): bool
     {
@@ -158,7 +184,7 @@ abstract class AbstractMetaOutboundAdapter implements OutboundProviderAdapter
         }
 
         return $this->sender->send(
-            $resourceExternalId,
+            $this->endpointNode($resourceExternalId),
             $this->payloadFor($recipient, $request->body),
             $credential,
         );

@@ -310,6 +310,26 @@ class MetaOutboundTransportTest extends TestCase
         });
     }
 
+    /** Messenger keeps its own node: /{page-id}/messages, the shape proven live on 2026-09-24. */
+    public function test_messenger_still_posts_to_the_page_node_with_messaging_type(): void
+    {
+        [$org, $conversation, $actor] = $this->messengerTenant();
+        $this->fakeAccepted();
+
+        $this->service()->send($this->request($conversation, $actor), $org);
+
+        Http::assertSent(function (Request $r): bool {
+            $this->assertSame(
+                '/'.self::VERSION.'/'.self::PAGE_ID.'/messages',
+                parse_url($r->url(), PHP_URL_PATH),
+            );
+            $this->assertStringNotContainsString('/me/messages', $r->url());
+            $this->assertSame('RESPONSE', $r->data()['messaging_type']);
+
+            return true;
+        });
+    }
+
     public function test_messenger_captures_the_provider_message_id_and_marks_sent(): void
     {
         [$org, $conversation, $actor] = $this->messengerTenant();
@@ -360,7 +380,17 @@ class MetaOutboundTransportTest extends TestCase
 
     // ------------------------------------------------------------- B. Instagram
 
-    public function test_instagram_posts_to_the_business_account_without_a_messaging_type(): void
+    /**
+     * Instagram posts to `me`, NOT to the Instagram business account id.
+     *
+     * THE REGRESSION TEST FOR THE 2026-09-24 LIVE FAILURE. The first production Instagram reply
+     * posted to /{ig-business-account-id}/messages and was refused with Meta error code 3: with
+     * Instagram API for Facebook Login the messaging edge belongs to the PAGE, and a Page access
+     * token resolves `me` to exactly that Page. Read-only probes confirmed the asymmetry —
+     * GET /{ig-business-account-id}/conversations returns the same code 3, while
+     * GET /{page-id}/conversations?platform=instagram returns the thread.
+     */
+    public function test_instagram_posts_to_me_and_never_to_the_business_account_node(): void
     {
         [$org, $conversation, $actor] = $this->instagramTenant();
         $this->fakeAccepted('mid_synthetic_ig');
@@ -372,9 +402,13 @@ class MetaOutboundTransportTest extends TestCase
 
         Http::assertSent(function (Request $r) use ($conversation): bool {
             $this->assertStringStartsWith(
-                self::HOST.'/'.self::VERSION.'/'.self::IG_ID.'/messages',
+                self::HOST.'/'.self::VERSION.'/me/messages',
                 $r->url(),
             );
+
+            // The defect, pinned: the IG business account id must not appear in the URL at all.
+            $this->assertStringNotContainsString(self::IG_ID, $r->url());
+            $this->assertStringNotContainsString('/'.self::IG_ID.'/messages', $r->url());
 
             $body = $r->data();
             $this->assertSame($conversation->external_contact_id, $body['recipient']['id']);
@@ -385,6 +419,40 @@ class MetaOutboundTransportTest extends TestCase
         });
     }
 
+    /**
+     * The two channels address different Graph nodes with the same kind of credential.
+     *
+     * Asserted side by side so that a future change which collapses them back into one node fails
+     * here rather than in production.
+     */
+    public function test_the_two_channels_address_different_graph_nodes(): void
+    {
+        $org = $this->tenantId();
+        $connection = $this->connection($org);
+        $page = $this->account($org, $connection);
+        $ig = $this->account($org, $connection, 'instagram_business_account', self::IG_ID);
+        $this->credential($org, $connection, $page);
+        $this->credential($org, $connection, $ig);
+        $actor = $this->actor();
+
+        $this->fakeAccepted();
+        $this->service()->send($this->request($this->conversation(), $actor, 'req-m'), $org);
+        $this->service()->send($this->request($this->conversation('instagram_dm', self::IG_ID), $actor, 'req-i'), $org);
+
+        $urls = [];
+        Http::assertSent(function (Request $r) use (&$urls): bool {
+            $urls[] = (string) parse_url($r->url(), PHP_URL_PATH);
+
+            return true;
+        });
+
+        sort($urls);
+        $this->assertSame([
+            '/'.self::VERSION.'/'.self::PAGE_ID.'/messages',
+            '/'.self::VERSION.'/me/messages',
+        ], $urls);
+    }
+
     public function test_instagram_authenticates_with_the_linked_page_credential(): void
     {
         [$org, $conversation, $actor] = $this->instagramTenant();
@@ -392,8 +460,31 @@ class MetaOutboundTransportTest extends TestCase
 
         $this->service()->send($this->request($conversation, $actor), $org);
 
-        // The same stored page_access_token the resolver returns — no second mechanism.
-        Http::assertSent(fn (Request $r): bool => $r->hasHeader('Authorization', 'Bearer '.self::TOKEN));
+        Http::assertSent(function (Request $r): bool {
+            // The same stored page_access_token the resolver returns — no second mechanism. The
+            // endpoint node changed; the credential path deliberately did not.
+            $this->assertTrue($r->hasHeader('Authorization', 'Bearer '.self::TOKEN));
+
+            // appsecret_proof survives the node change.
+            parse_str((string) parse_url($r->url(), PHP_URL_QUERY), $q);
+            $this->assertSame(hash_hmac('sha256', self::TOKEN, self::APP_SECRET), $q['appsecret_proof'] ?? null);
+
+            return true;
+        });
+    }
+
+    /** Resource resolution is untouched: the IG account still owns tenancy and the credential. */
+    public function test_instagram_still_resolves_the_business_account_as_the_resource(): void
+    {
+        [$org, $conversation] = $this->instagramTenant();
+
+        $res = app(\App\Modules\Crm\Services\Outbound\OutboundResourceResolver::class)
+            ->resolve($conversation, 'instagram_business_account');
+
+        $this->assertNotInstanceOf(OutboundFailureCode::class, $res);
+        $this->assertSame('instagram_business_account', $res->resourceType);
+        $this->assertSame(self::IG_ID, $res->externalId);
+        $this->assertSame($org, $res->orgId);
     }
 
     // -------------------------------------------------------------- C. Security

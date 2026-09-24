@@ -47,4 +47,26 @@ final class MetaOutboundInstagramAdapter extends AbstractMetaOutboundAdapter
             'message' => ['text' => $body],
         ];
     }
+
+    /**
+     * `me`, which a Page access token resolves to the Page that owns this Instagram account.
+     *
+     * NOT the Instagram business account id. That was the defect: with Instagram API for Facebook
+     * Login the messaging graph belongs to the PAGE, and POSTing to /{ig-business-account-id}/messages
+     * is refused with Meta error code 3 — verified in production, and reproduced read-only by
+     * GET /{ig-business-account-id}/conversations returning the same code while
+     * GET /{page-id}/conversations?platform=instagram returns the thread.
+     *
+     * Using `me` keeps this adapter out of the tenancy business entirely: it performs no lookup,
+     * reads no table, and cannot address a Page other than the one its credential authorises. The
+     * resolved resource is still the Instagram business account — that is what owns tenant
+     * selection and the credential — and it is deliberately ignored here, which is why the
+     * parameter is unused.
+     */
+    protected function endpointNode(string $resourceExternalId): string
+    {
+        unset($resourceExternalId);
+
+        return 'me';
+    }
 }
