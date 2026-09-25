@@ -240,6 +240,17 @@ class Lead extends Model
     }
 
     /**
+     * Further discovery lanes that found this lead beside its primary `source` (read-only; written
+     * only by DiscoveryLaneRecorder through the query builder).
+     *
+     * @return HasMany<LeadDiscoveryLane, $this>
+     */
+    public function discoveryLanes(): HasMany
+    {
+        return $this->hasMany(LeadDiscoveryLane::class);
+    }
+
+    /**
      * Ownership-visibility boundary — the single source of truth for who can see which leads.
      * Admin / Super Admin see every lead; a Business Development Manager sees only leads
      * assigned to them (so unassigned leads and other BDs' leads are hidden). Applied to the

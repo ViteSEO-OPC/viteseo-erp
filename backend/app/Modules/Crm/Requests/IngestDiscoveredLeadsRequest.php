@@ -59,6 +59,11 @@ class IngestDiscoveredLeadsRequest extends FormRequest
             // say "recorded, and AI did not shape this search", which is a different claim from
             // saying nothing at all.
             'businesses.*.discovery_ai_assisted' => ['nullable', 'boolean'],
+            // OTHER LANES THAT FOUND THIS SAME BUSINESS IN THE SAME SEARCH (change set D). Recorded as
+            // additional provenance in `crm_lead_discovery_lanes`, never on the lead. Only the AI lane
+            // may be claimed: Google Places provenance is never written through this field.
+            'businesses.*.discovery_also_found_by' => ['nullable', 'array', 'max:5'],
+            'businesses.*.discovery_also_found_by.*' => ['string', Rule::in(['openai'])],
             // The website URL (fit-data) — the input the Website Intelligence service later audits.
             //
             // LENGTH IS NORMALIZED, NOT REJECTED — the same reasoning as `website_status` above. A

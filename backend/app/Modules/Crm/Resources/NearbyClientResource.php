@@ -48,6 +48,10 @@ class NearbyClientResource extends JsonResource
             'contact' => $this->contact_name,
             'status' => $this->status,
             'foundBy' => $this->discoveryLane(),
+            // EVERY lane that found this lead: the primary lane above, plus AI-assisted when the AI
+            // lane also found it (crm_lead_discovery_lanes). One lead, one row — this only lets the
+            // board list it under each lane that genuinely found it.
+            'foundByAll' => $this->discoveryLanesAll(),
             // DERIVED prospecting priority — computed from Website Intelligence for the Nearby context
             // ONLY (see prospectingPriority). This is NOT the CRM `leads.priority` business field (which
             // stays a separate concern for qualified CRM leads); it is never read from or written to the
@@ -154,6 +158,28 @@ class NearbyClientResource extends JsonResource
             NerbyProvider::GOOGLE_PLACES->value => $aiAssisted ? 'ai-assisted-google-places' : 'google-places',
             default => 'unknown',
         };
+    }
+
+    /**
+     * The primary lane plus any additional lane recorded for this lead.
+     *
+     * Only `ai-assisted` can be added, and never to a lead whose primary lane already is AI-assisted
+     * or is either Google Places lane: Google provenance is exactly what the Google flow wrote. When
+     * the relation was not loaded this is just the primary lane, so no caller can observe a change.
+     *
+     * @return list<string>
+     */
+    private function discoveryLanesAll(): array
+    {
+        $primary = $this->discoveryLane();
+        if (! $this->resource->relationLoaded('discoveryLanes')
+            || in_array($primary, ['ai-assisted', 'google-places', 'ai-assisted-google-places'], true)) {
+            return [$primary];
+        }
+
+        $hasAi = $this->resource->discoveryLanes->contains(fn ($lane) => $lane->lane === NerbyProvider::OPENAI->value);
+
+        return $hasAi ? [$primary, 'ai-assisted'] : [$primary];
     }
 
     /**

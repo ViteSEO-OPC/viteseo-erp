@@ -136,7 +136,7 @@ export function useNearbyClients() {
       .filter((c) => (filters.niche ? c.niche === filters.niche : true))
       .filter((c) => (filters.status ? c.status === filters.status : true))
       .filter((c) => (filters.priority ? formatPriority(c.priority) === filters.priority : true))
-      .filter((c) => (filters.foundBy ? formatFoundBy(c.foundBy) === filters.foundBy : true))
+      .filter((c) => (filters.foundBy ? matchesFoundBy(c, filters.foundBy) : true))
       .filter((c) =>
         q ? c.business.toLowerCase().includes(q) || c.contact.toLowerCase().includes(q) : true,
       );
@@ -155,7 +155,7 @@ export function useNearbyClients() {
     return all
       .filter((c) => (filters.niche ? c.niche === filters.niche : true))
       .filter((c) => (filters.status ? c.status === filters.status : true))
-      .filter((c) => (filters.foundBy ? formatFoundBy(c.foundBy) === filters.foundBy : true))
+      .filter((c) => (filters.foundBy ? matchesFoundBy(c, filters.foundBy) : true))
       .filter((c) =>
         q ? c.business.toLowerCase().includes(q) || c.contact.toLowerCase().includes(q) : true,
       ).length;
@@ -316,6 +316,16 @@ const FOUND_BY_LABELS: Record<string, string> = {
   "google-places": "Google Places",
   "ai-assisted-google-places": "AI-assisted · Google Places",
 };
+
+/**
+ * Does this lead belong under the selected Found By label? True when ANY lane that found it has that
+ * label — so a lead found by both OpenStreetMap and the AI lane appears under both, as one row each
+ * time, never as two leads. Without `foundByAll` (an older backend) it is exactly the old single-lane
+ * comparison.
+ */
+function matchesFoundBy(c: NearbyClient, label: string): boolean {
+  return (c.foundByAll ?? [c.foundBy]).some((lane) => formatFoundBy(lane) === label);
+}
 
 /** Readable label for a discovery lane ("openstreetmap" → "OpenStreetMap"). */
 function formatFoundBy(foundBy: string): string {

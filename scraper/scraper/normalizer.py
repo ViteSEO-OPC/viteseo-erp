@@ -58,4 +58,6 @@ def normalize(raw: RawBusiness, source: str) -> NormalizedBusiness:
         # Passed straight through, including False. `or` would be wrong here: it collapses a
         # recorded False into None and loses the distinction the field exists to carry.
         discovery_ai_assisted=raw.ai_assisted,
+        # Sorted and de-duplicated; None when empty so a plain record's payload is unchanged.
+        discovery_also_found_by=sorted(set(raw.also_found_by)) or None,
     )

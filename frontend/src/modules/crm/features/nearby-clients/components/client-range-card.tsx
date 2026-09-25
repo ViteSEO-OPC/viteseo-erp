@@ -28,6 +28,17 @@ const FOUND_BY_CHIP: Record<string, string> = {
   openstreetmap: "OpenStreetMap",
 };
 
+// ONE LEAD, TWO LANES. OpenStreetMap found it first (its source), and the AI lane found it too. Shown
+// only for that exact combination; every other lead — Google included — keeps its chip unchanged.
+const ALSO_AI_ASSISTED_CHIP = "OpenStreetMap · also AI-assisted";
+
+function foundByChip(client: NearbyClient): string | undefined {
+  if (client.foundBy === "openstreetmap" && client.foundByAll?.includes("ai-assisted")) {
+    return ALSO_AI_ASSISTED_CHIP;
+  }
+  return FOUND_BY_CHIP[client.foundBy];
+}
+
 function Chip({ dot, text, cls }: { dot: string; text: string; cls: string }) {
   return (
     <span className={cn("inline-flex items-center gap-1.5 text-xs font-medium", cls)}>
@@ -107,12 +118,8 @@ export function ClientRangeCard({ client, selected, onSelect, onPlanVisit, onDir
       <div className="mt-3 flex flex-wrap items-center gap-3">
         {client.active && <Chip dot="bg-green-500" text="Active" cls="text-green-700" />}
         <Chip dot={p.dot} text={p.text} cls={p.cls} />
-        {FOUND_BY_CHIP[client.foundBy] !== undefined && (
-          <Chip
-            dot="bg-slate-400"
-            text={FOUND_BY_CHIP[client.foundBy]}
-            cls="text-muted-foreground"
-          />
+        {foundByChip(client) !== undefined && (
+          <Chip dot="bg-slate-400" text={foundByChip(client) as string} cls="text-muted-foreground" />
         )}
         {client.qualified && (
           <Chip dot="bg-muted-foreground" text="Already added to CRM" cls="text-muted-foreground" />

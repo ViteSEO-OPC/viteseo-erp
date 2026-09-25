@@ -859,7 +859,16 @@ const aiRun = (status: DiscoveryRun["status"], ai: DiscoveryRun["ai"], isTermina
   // renamed option would silently match nothing. This guards it staying put.
   if (!/PRIORITY_ORDER = \["High", "Medium", "Low"\]/.test(hook)) bad.push("the priority filter vocabulary changed, which silently breaks filtering");
 
-  report("AB the board names provenance and never invents it", 15 - bad.length, 15, bad);
+  // MULTI-PROVENANCE (change set D): the filter reads EVERY lane that found a lead, so one lead found
+  // by OpenStreetMap and the AI lane appears under both — as one row each time, never two leads.
+  if (!/\(c\.foundByAll \?\? \[c\.foundBy\]\)\.some\(/.test(hook)) bad.push("the Found By filter does not read foundByAll");
+  if ((hook.match(/matchesFoundBy\(c, filters\.foundBy\)/g) ?? []).length !== 2) bad.push("both Found By filter paths must use matchesFoundBy");
+  // The dual chip is earned only by exactly OpenStreetMap + AI-assisted; Google chips never change.
+  if (!/"OpenStreetMap · also AI-assisted"/.test(card)) bad.push("the dual-provenance chip text changed");
+  if (!/client\.foundBy === "openstreetmap" && client\.foundByAll\?\.includes\("ai-assisted"\)/.test(card)) bad.push("the dual chip is not limited to OpenStreetMap + AI-assisted");
+  if (!/"google-places": "Google Places",\s*"ai-assisted-google-places": "AI-assisted · Google Places",/.test(card)) bad.push("a Google chip label changed");
+
+  report("AB the board names provenance and never invents it", 20 - bad.length, 20, bad);
 }
 
 

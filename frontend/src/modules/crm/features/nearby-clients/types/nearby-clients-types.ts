@@ -118,6 +118,13 @@ export type NearbyClient = {
    */
   foundBy: "openstreetmap" | "ai-assisted" | "google-places" | "unknown";
   /**
+   * EVERY lane that found this business: `foundBy` first, then any further lane the server recorded
+   * (today only "ai-assisted", when the AI lane also found an OpenStreetMap lead). One lead, one row —
+   * this only lets the Found By filter list it under each lane that genuinely found it. Optional so a
+   * response from a backend without it behaves exactly as before (treated as `[foundBy]`).
+   */
+  foundByAll?: string[];
+  /**
    * Is this business inside the Philippines, per the same national boundary discovery enforces?
    *
    * `null` means it has no coordinates, which is NOT the same as "foreign" — a third of the pool has

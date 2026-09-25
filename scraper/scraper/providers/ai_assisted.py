@@ -65,6 +65,17 @@ EXPANSION_UNSUPPORTED = "unsupported"
 EXECUTION_ERRORED = "provider_errored"
 
 
+def _also_found_by_ai(kept: RawBusiness) -> None:
+    """Record that an AI lane found a business another lane's record already holds.
+
+    Only a BASELINE record is marked: one the AI lanes already own is AI provenance in its own
+    right, and marking it again would say nothing. The kept record's `discovered_by` — the lead's
+    primary source — is never changed; this only stops the AI finding from being lost.
+    """
+    if kept.discovered_by == LANE_BASELINE and LANE_AI not in kept.also_found_by:
+        kept.also_found_by.append(LANE_AI)
+
+
 class AiAssistedDiscoveryProvider(DiscoveryProvider):
     """OpenStreetMap first, AI expansion second, merged on the OSM key.
 
@@ -151,6 +162,7 @@ class AiAssistedDiscoveryProvider(DiscoveryProvider):
             # business, not a second one — that is exactly the property `provider_id` guarantees.
             if business.provider_id in merged:
                 duplicates += 1
+                _also_found_by_ai(merged[business.provider_id])
                 continue
             business.discovered_by = LANE_AI
             merged[business.provider_id] = business
@@ -253,6 +265,7 @@ class AiAssistedDiscoveryProvider(DiscoveryProvider):
         for business in sweep.businesses:
             if business.provider_id in merged:
                 stats["expansion_duplicates"] += 1
+                _also_found_by_ai(merged[business.provider_id])
                 continue
             business.discovered_by = LANE_AI
             merged[business.provider_id] = business

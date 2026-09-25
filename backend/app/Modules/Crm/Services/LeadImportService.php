@@ -5,6 +5,7 @@ namespace App\Modules\Crm\Services;
 use App\Models\User;
 use App\Modules\Crm\Models\Lead;
 use App\Modules\Crm\Requests\StoreLeadRequest;
+use App\Modules\Crm\Services\Discovery\DiscoveryLaneRecorder;
 use App\Modules\Crm\Services\Discovery\Geo\PhilippinesBoundary;
 use App\Modules\Crm\Models\LeadWebsiteCandidate;
 use App\Modules\Crm\Services\Website\WebsiteEvidenceService;
@@ -478,7 +479,7 @@ class LeadImportService
      *   importedCount: int
      * }
      */
-    public function ingestDiscovered(array $businesses, int $userId, bool $dryRun, ?\Closure $identityCheck = null): array
+    public function ingestDiscovered(array $businesses, int $userId, bool $dryRun, ?\Closure $identityCheck = null, ?int $discoveryRunId = null): array
     {
         $total = count($businesses);
 
@@ -500,6 +501,21 @@ class LeadImportService
 
         /** @var list<array<string, mixed>> $rows */
         $rows = array_map(fn (array $b): array => $this->normalizeDiscovered($b), $businesses);
+
+        // WHICH PLACES THE AI LANE FOUND, read before anything else can drop it: normalisation keeps
+        // only the fit-data allowlist, so the claim is taken from the raw row, which `$rows` still
+        // lines up with here. A row is an AI finding when the AI lane is its source, or when the AI
+        // lane found it in the same search as the baseline. A Google row never counts.
+        $aiPlaceIds = [];
+        foreach ($businesses as $i => $b) {
+            $source = (string) ($b['source'] ?? '');
+            $also = is_array($b['discovery_also_found_by'] ?? null) ? $b['discovery_also_found_by'] : [];
+            $placeId = (string) ($rows[$i]['place_id'] ?? '');
+            if ($placeId !== '' && $source !== 'google_places'
+                && ($source === DiscoveryLaneRecorder::LANE_AI || in_array(DiscoveryLaneRecorder::LANE_AI, $also, true))) {
+                $aiPlaceIds[$placeId] = true;
+            }
+        }
 
         // THE NATIONAL BOUNDARY, ENFORCED AT THE ONLY DOOR. Every discovered business enters the CRM
         // through this method, whichever provider found it and whichever process sent it, so this is
@@ -578,6 +594,17 @@ class LeadImportService
                     $importedCount = $this->persist($valid, $userId, null);
                 }
             });
+
+            // ADDITIONAL PROVENANCE, recorded beside the leads and never on them (change set D). Only
+            // for rows that survived identity and the national boundary; after the insert above, so a
+            // lead this batch created is found too. Never on a dry run.
+            $kept = [];
+            foreach ($rows as $row) {
+                if (isset($row['place_id']) && isset($aiPlaceIds[(string) $row['place_id']])) {
+                    $kept[] = (string) $row['place_id'];
+                }
+            }
+            app(DiscoveryLaneRecorder::class)->recordAi($kept, $discoveryRunId);
 
             $evidence = app(WebsiteEvidenceService::class);
             foreach ($websiteCandidates as $leadId => $proposal) {
