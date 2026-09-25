@@ -1,7 +1,8 @@
 "use client";
 
-import { Paperclip } from "lucide-react";
+import { AlertCircle, Check, CircleHelp, Clock, Paperclip } from "lucide-react";
 
+import { UNRESOLVED_FAILURE_CODES } from "@/modules/crm/features/inbox/types/inbox-types";
 import type { InboxMessage } from "@/modules/crm/features/inbox/types/inbox-types";
 
 function stamp(message: InboxMessage): string {
@@ -14,11 +15,49 @@ function stamp(message: InboxMessage): string {
 }
 
 /**
+ * The delivery state of one OUTBOUND turn, in words.
+ *
+ * `deliveryStatus` IS AUTHORITATIVE AND `providerMessageIdPresent` IS NOT. A provider id can exist
+ * on a row whose delivery was never confirmed, and it exists on most inbound rows too, so treating
+ * it as evidence of delivery would announce a success the server refused to claim. It is not read
+ * here at all.
+ *
+ * THE FIFTH STATE IS THE ONE THAT MATTERS. `pending` CARRYING a failure code is not "in flight" and
+ * not "failed" — it means the message may already be with the customer and nobody knows. It reads
+ * as "Delivery unconfirmed" so that an operator does not do the one thing that would make it worse,
+ * which is send it again. The codes come from UNRESOLVED_FAILURE_CODES rather than a second copy of
+ * the list.
+ *
+ * NO RAW FAILURE CODE IS EVER RENDERED. An operator sees a state, not `provider_unavailable`.
+ */
+function deliveryLabel(message: InboxMessage): { text: string; icon: typeof Check; tone: string } | null {
+    if (message.direction !== "outbound") {
+        return null;
+    }
+
+    if (message.deliveryStatus === "sent") {
+        return { text: "Sent", icon: Check, tone: "text-muted-foreground" };
+    }
+
+    if (message.deliveryStatus === "failed") {
+        return { text: "Failed", icon: AlertCircle, tone: "text-destructive" };
+    }
+
+    if (message.deliveryStatus === "pending") {
+        return message.failureCode !== null && UNRESOLVED_FAILURE_CODES.includes(message.failureCode)
+            ? { text: "Delivery unconfirmed", icon: CircleHelp, tone: "text-amber-600 dark:text-amber-400" }
+            : { text: "Pending", icon: Clock, tone: "text-muted-foreground" };
+    }
+
+    // An outbound row with no status at all predates delivery tracking; say nothing rather than guess.
+    return null;
+}
+
+/**
  * The thread, oldest first.
  *
- * Inbound and outbound are distinguished by side, colour AND a text label. Today every message is
- * inbound — there is no send path anywhere in the system — so the distinction is groundwork rather
- * than decoration, and the label keeps it legible if that ever changes.
+ * Inbound and outbound are distinguished by side, colour AND a text label, and outbound turns
+ * additionally carry their delivery state — inbound ones never do, because we did not deliver them.
  */
 export function MessageThread({ messages }: { messages: InboxMessage[] }) {
     if (messages.length === 0) {
@@ -59,6 +98,25 @@ export function MessageThread({ messages }: { messages: InboxMessage[] }) {
                             <p className="mt-1 px-1 text-xs text-muted-foreground">
                                 {inbound ? "Customer" : "Us"} · {stamp(message)}
                             </p>
+
+                            {(() => {
+                                const delivery = deliveryLabel(message);
+
+                                if (delivery === null) {
+                                    return null;
+                                }
+
+                                const Icon = delivery.icon;
+
+                                return (
+                                    <p
+                                        className={`mt-0.5 flex items-center gap-1 px-1 text-xs ${inbound ? "" : "justify-end"} ${delivery.tone}`}
+                                    >
+                                        <Icon aria-hidden className="size-3.5" />
+                                        {delivery.text}
+                                    </p>
+                                );
+                            })()}
                         </div>
                     </li>
                 );

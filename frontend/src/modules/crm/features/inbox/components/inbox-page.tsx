@@ -7,6 +7,7 @@ import axios from "axios";
 import { ChannelBadge } from "@/modules/crm/features/inbox/components/channel-badge";
 import { ConversationList } from "@/modules/crm/features/inbox/components/conversation-list";
 import { MessageThread } from "@/modules/crm/features/inbox/components/message-thread";
+import { ReplyComposer } from "@/modules/crm/features/inbox/components/reply-composer";
 import { useConversation, useConversations } from "@/modules/crm/features/inbox/hooks/use-conversations";
 import type { ChannelFilter } from "@/modules/crm/features/inbox/types/inbox-types";
 
@@ -37,16 +38,24 @@ function Notice({ icon: Icon, title, body }: { icon: typeof Inbox; title: string
 }
 
 /**
- * The Conversation Inbox — read-only by design.
+ * The Conversation Inbox.
  *
- * There is no composer, no send button and no AI action anywhere on this screen, because no
- * outbound path exists in the system behind it. A disabled reply box would imply a capability that
- * is not there and would be the first thing a reviewer tried.
+ * NOW TWO-WAY, AND THE COMPOSER IS ALWAYS PRESENT. This screen was read-only for as long as no
+ * outbound path existed behind it, on the grounds that a disabled reply box would imply a
+ * capability that was not there. That reasoning inverted once the send path shipped: the server now
+ * answers, per conversation and per viewer, WHETHER a reply is possible and why not — so hiding the
+ * box would make "you may not reply" and "replying was never built" look identical, which is the
+ * confusion the capability field exists to end. The composer therefore renders in both states and
+ * explains itself when inert.
  *
- * Its second job is evidentiary: for Meta App Review it must be possible to record a message
+ * ITS SECOND JOB IS STILL EVIDENTIARY: for Meta App Review it must be possible to record a message
  * arriving on Messenger or Instagram and appearing here, with the channel unmistakable and the text
  * readable. That is why the channel is labelled in words on both the row and the header, and why
  * this screen reads the real conversation API rather than any demo fixture.
+ *
+ * NOTHING ON THIS SCREEN DECIDES A SEND. It posts a conversation id, a body and a client request
+ * id; the provider, channel, sending account, recipient, credential and messaging window are all
+ * the server's to determine, and the browser never learns any of them.
  */
 export function InboxPage() {
     const [channel, setChannel] = useState<ChannelFilter>("all");
@@ -121,9 +130,15 @@ export function InboxPage() {
                     )}
                 </section>
 
+                {/*
+                  * `overflow-hidden` here, not `overflow-y-auto`: the THREAD scrolls (below) while
+                  * the header and the composer stay put. Scrolling the whole pane would carry the
+                  * reply box off-screen on a long conversation, which is exactly the thing it must
+                  * not do on a phone.
+                  */}
                 <section
                     aria-label="Conversation"
-                    className="min-h-0 overflow-y-auto rounded-card border border-border bg-card"
+                    className="flex min-h-0 flex-col overflow-hidden rounded-card border border-border bg-card"
                 >
                     {!effectiveId ? (
                         <Notice
@@ -136,8 +151,8 @@ export function InboxPage() {
                     ) : detail.isError ? (
                         <Notice icon={TriangleAlert} title="Could not load" body={errorMessage(detail.error)} />
                     ) : detail.data ? (
-                        <div className="flex h-full flex-col">
-                            <header className="sticky top-0 z-10 border-b border-border bg-card px-4 py-3">
+                        <div className="flex min-h-0 flex-1 flex-col">
+                            <header className="shrink-0 border-b border-border bg-card px-4 py-3">
                                 <div className="flex flex-wrap items-center gap-2">
                                     <ChannelBadge channel={detail.data.channel} />
                                     <span className="text-sm text-muted-foreground">
@@ -159,9 +174,18 @@ export function InboxPage() {
                                 </div>
                             </header>
 
-                            <div className="flex-1 px-4 py-4">
+                            <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
                                 <MessageThread messages={detail.data.messages} />
                             </div>
+
+                            <ReplyComposer
+                                // Keyed by conversation so switching threads starts a fresh draft
+                                // rather than carrying one operator's half-written reply into
+                                // somebody else's conversation.
+                                key={detail.data.id}
+                                conversationId={detail.data.id}
+                                capability={detail.data.reply}
+                            />
                         </div>
                     ) : null}
                 </section>

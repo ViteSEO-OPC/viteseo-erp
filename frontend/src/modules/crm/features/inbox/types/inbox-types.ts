@@ -128,6 +128,33 @@ export type InboxConversationDetail = {
     reply: InboxReplyCapability;
 };
 
+/**
+ * What POST /conversations/{id}/reply answers with.
+ *
+ * ARRIVES TWO DIFFERENT WAYS, WHICH IS THE THING TO KNOW ABOUT THIS TYPE. `accepted: true` comes
+ * back as a 201 and lands in a react-query `onSuccess`. Every refusal is a 4xx or 5xx — 409 for a
+ * closed window or disabled transport, 422 for a bad request, 429 for throttling, 502 for the two
+ * ambiguous outcomes — and axios throws on those, so the SAME shape arrives inside
+ * `error.response.data`. Both paths are modelled here rather than split into two types, because the
+ * body is identical and a caller that forgets the second path silently loses every failure reason.
+ *
+ * `failureCode` is the machine contract; `reason` is display copy the server owns. Never branch
+ * logic on `reason`.
+ */
+export type ReplyResponse = {
+    accepted: boolean;
+    failureCode: OutboundFailureCode | null;
+    reason: string | null;
+    /**
+     * Whether the SERVER considers a resend safe. False for both unresolved codes, because the
+     * message may already have reached the customer. 3H.2 offers no Retry affordance at all, so
+     * nothing reads this yet — it is modelled so 3H.5 cannot forget it exists.
+     */
+    retryAllowed: boolean;
+    /** The persisted row, when one exists. Null for every refusal raised before persistence. */
+    message: InboxMessage | null;
+};
+
 /** The channel filter offered in the UI. `all` is the absence of a filter, not a value we send. */
 export type ChannelFilter = "all" | InboxChannel;
 
