@@ -218,8 +218,19 @@ export function ReplyComposer({
                     {draft.length} / {MAX_BODY}
                 </span>
 
+                {/*
+                  * The variant drops to `secondary` when the button cannot be pressed.
+                  *
+                  * `disabled` remains the authoritative gate — this changes nothing about whether a
+                  * click does anything. It is purely legibility: `default` is the brand teal, and
+                  * the shared `disabled:opacity-50` still left it reading as a live call to action
+                  * against a light card. `secondary` is an existing variant, so no new colour is
+                  * introduced, and the inherited `disabled:pointer-events-none` already removes the
+                  * hover treatment that would otherwise suggest it is actionable.
+                  */}
                 <Button
                     type="button"
+                    variant={canSend ? "default" : "secondary"}
                     onClick={submit}
                     disabled={! canSend}
                     className="ml-auto"

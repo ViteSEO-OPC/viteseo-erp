@@ -77,8 +77,30 @@ export function InboxPage() {
 
     const detail = useConversation(effectiveId);
 
+    /*
+     * THE HEIGHT HAS TO ACCOUNT FOR THE SHELL, AND 10rem DID NOT.
+     *
+     * This pane is viewport-locked so the thread can scroll inside it, which means its height
+     * must equal the viewport minus everything the shell puts around it. The real chrome is
+     * roughly 16rem — the sticky PageHeader, `main`'s pt-8, the shell's own <h1> with its
+     * mb-6, and `main`'s pb-24 below. The old 10rem under-counted that by about 96px, so the
+     * bottom of the composer — the disabled-reason row specifically — sat below the fold until
+     * somebody scrolled `main`, and read as clipped.
+     *
+     * 18rem matches the precedent already in this shell (calendar's board-column uses the same
+     * figure) and leaves a little slack rather than sitting exactly on the boundary. `dvh`
+     * rather than `vh` because mobile browser chrome collapses and expands, and `vh` measures
+     * the larger state — the same reason the dialog and scheduler panel use it.
+     *
+     * The remaining pb-24 strip below this pane is what keeps the composer clear of the
+     * Copilot FAB, which is `fixed bottom-6 right-6` and 48px tall: the FAB lives entirely
+     * inside that reserved 96px, and the Send button no longer shares vertical space with it.
+     *
+     * min-h reduced from 32rem so a short window shrinks the THREAD rather than pushing the
+     * composer out of view.
+     */
     return (
-        <div className="flex h-[calc(100vh-10rem)] min-h-[32rem] flex-col gap-4">
+        <div className="flex h-[calc(100dvh-18rem)] min-h-[24rem] flex-col gap-4">
             <div className="flex flex-wrap items-center gap-2">
                 {FILTERS.map((filter) => (
                     <button
