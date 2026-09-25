@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Modules\Crm\Resources;
 
 use App\Modules\Crm\Models\Conversation;
+use App\Modules\Crm\Services\ConversationLinkCapability;
 use App\Modules\Crm\Services\Outbound\ReplyCapability;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -58,6 +59,19 @@ class ConversationDetailResource extends JsonResource
             // Resolved rather than injected: a JsonResource is constructed by Laravel with the
             // model alone, and this collaborator is stateless and query-free.
             'reply' => app(ReplyCapability::class)->for($this->resource, $viewer),
+
+            /*
+             * `link` is the same kind of hint as `reply`, for the Phase 3H.4 picker — see
+             * {@see ConversationLinkCapability}. Also query-free, and deliberately computed from
+             * `lead_id` rather than from the `lead` key above: that key is null both for an
+             * archived lead and for a viewer who may not see it, and in BOTH cases the thread is
+             * still linked. A client that inferred "unlinked" from `lead === null` would offer a
+             * Link control the server is certain to refuse with a 409.
+             *
+             * So the contract for 3H.4B is: branch on `link.enabled` and `leadLinked`, never on
+             * `lead`.
+             */
+            'link' => app(ConversationLinkCapability::class)->for($this->resource, $viewer),
 
             'messageCount' => (int) ($this->messages_count ?? $this->messages->count()),
             'messages' => ConversationMessageResource::collection($this->whenLoaded('messages')),
