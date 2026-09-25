@@ -95,9 +95,13 @@ export function useCancelDiscoveryRun() {
  * only while an id exists, and **polling stops by returning `false` from `refetchInterval` once the
  * status is terminal**, so a finished run issues no further requests.
  *
- * When the run ends, the Nearby Clients pool is invalidated exactly once so newly ingested
- * businesses appear without a page reload. That invalidation is the ONLY way this feature touches
- * the frozen pool — it refreshes the existing query, it does not change it.
+ * The Nearby Clients pool is invalidated so newly ingested businesses appear without a page reload:
+ * WHILE the run continues, each time its `inserted` counter rises, and once more when it ends. The
+ * engine commits every search's leads as that search finishes, so a nationwide sweep has usable
+ * prospects long before its last cell — waiting for the terminal state hid them for the whole run.
+ * Only a RISE refreshes: a poll that inserted nothing re-reads nothing, so a long run with sparse
+ * results costs one pool fetch per search that actually added a prospect. Invalidation is the ONLY
+ * way this feature touches the frozen pool — it refreshes the existing query, it does not change it.
  */
 export function useDiscoveryRun(runId: string | null) {
   const queryClient = useQueryClient();
@@ -107,8 +111,14 @@ export function useDiscoveryRun(runId: string | null) {
     enabled: Boolean(runId),
     refetchInterval: (query) => (isRunTerminal(query.state.data?.status) ? false : POLL_MS),
     queryFn: async () => {
+      // The previous poll's answer, read before this one replaces it.
+      const previous = queryClient.getQueryData<DiscoveryRun>(queryKeys.nearbyClients.discoveryRun(runId ?? ""));
       const res = await apiClient.get(`/discovery/runs/${runId}`);
       const run = res.data.data as DiscoveryRun;
+
+      if (!isRunTerminal(run.status) && run.counters.inserted > (previous?.counters.inserted ?? 0)) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.nearbyClients.list() });
+      }
 
       if (isRunTerminal(run.status)) {
         // The pool is the destination: a finished run may have added prospects to it.
