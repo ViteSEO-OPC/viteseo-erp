@@ -56,6 +56,7 @@ def build_openstreetmap(config: Config) -> OpenStreetMapProvider:
         # ONE geocoder, ONE country fence. Google reaches its search box through this same provider,
         # so restricting it here restricts every provider at once rather than per-adapter.
         country_code=config.discovery_country or None,
+        nominatim_state_dir=config.nominatim_state_dir or None,
     )
 
 

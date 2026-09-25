@@ -18,6 +18,7 @@ from typing import Optional
 import httpx
 
 from scraper.models import RawBusiness
+from scraper.nominatim_gate import geocode_cache_key, open_gate
 from scraper.providers.base import DiscoveryProvider
 
 # Friendly category -> OSM tag selectors (key, value). Extend freely; unknown words fall through to
@@ -196,6 +197,7 @@ class OpenStreetMapProvider(DiscoveryProvider):
         timeout: float = 60.0,
         reverse_geocode: bool = True,
         country_code: str | None = None,
+        nominatim_state_dir: str | None = None,
     ) -> None:
         self.overpass_url = overpass_url
         self.nominatim_url = nominatim_url.rstrip("/")
@@ -206,6 +208,9 @@ class OpenStreetMapProvider(DiscoveryProvider):
         # behaviour that predates the country control and is kept for callers that have no country.
         self.country_code = country_code.strip().lower() if country_code else None
         self._client = httpx.Client(timeout=timeout, headers={"User-Agent": user_agent})
+        # Host-wide Nominatim spacing + area-geocode cache (see scraper.nominatim_gate). None — the
+        # default — keeps the per-process sleep this provider has always used.
+        self._nominatim_gate = open_gate(nominatim_state_dir)
 
     def discover(
         self,
@@ -399,6 +404,9 @@ class OpenStreetMapProvider(DiscoveryProvider):
         if self.country_code:
             params["countrycodes"] = self.country_code
 
+        if self._nominatim_gate is not None:
+            return self._geocode_area_gated(area, params)
+
         resp = self._client.get(f"{self.nominatim_url}/search", params=params)
         resp.raise_for_status()
         results = resp.json()
@@ -407,6 +415,28 @@ class OpenStreetMapProvider(DiscoveryProvider):
             raise ValueError(f"Nominatim could not resolve area '{area}'{where}.")
         south, north, west, east = (float(x) for x in results[0]["boundingbox"])
         time.sleep(1.1)  # Nominatim usage policy: <=1 req/sec
+        return south, west, north, east
+
+    def _geocode_area_gated(self, area: str, params: dict[str, object]) -> tuple[float, float, float, float]:
+        """``_geocode_area`` through the shared gate: a cached answer costs no request at all, and a
+        real request takes the host-wide slot instead of sleeping per process. Same query, same
+        parsing, same refusal for an unresolvable area — which is never cached."""
+        gate = self._nominatim_gate
+        assert gate is not None
+        key = geocode_cache_key(self.nominatim_url, self.country_code, area)
+        cached = gate.cached_bbox(key)
+        if cached is not None:
+            return cached
+
+        with gate.request_slot():
+            resp = self._client.get(f"{self.nominatim_url}/search", params=params)
+            resp.raise_for_status()
+            results = resp.json()
+        if not results:
+            where = f" in country '{self.country_code.upper()}'" if self.country_code else ""
+            raise ValueError(f"Nominatim could not resolve area '{area}'{where}.")
+        south, north, west, east = (float(x) for x in results[0]["boundingbox"])
+        gate.store_bbox(key, (south, west, north, east))
         return south, west, north, east
 
     def _overpass(
@@ -447,6 +477,27 @@ class OpenStreetMapProvider(DiscoveryProvider):
         )
 
     def _fill_admin_area(self, business: RawBusiness) -> None:
+        if self._nominatim_gate is not None:
+            try:
+                with self._nominatim_gate.request_slot():
+                    resp = self._client.get(
+                        f"{self.nominatim_url}/reverse",
+                        params={
+                            "lat": business.latitude,
+                            "lon": business.longitude,
+                            "format": "jsonv2",
+                        },
+                    )
+                    resp.raise_for_status()
+                    address = resp.json().get("address") or {}
+            except (httpx.HTTPError, ValueError):
+                return
+            region, province, city = extract_admin_area(address)
+            business.region = business.region or region
+            business.province = business.province or province
+            business.city = business.city or city
+            return
+
         try:
             resp = self._client.get(
                 f"{self.nominatim_url}/reverse",

@@ -66,6 +66,11 @@ class Config:
     # upstream of every provider: the fence has to stop the search, not just discard its results.
     discovery_country: str = ""
 
+    # Where engine processes on this host share Nominatim's one-request-per-second budget and the
+    # area-geocode cache (see scraper.nominatim_gate). Empty — the default — keeps the per-process
+    # spacing that predates it. Must be writable and shared by every process that may run at once.
+    nominatim_state_dir: str = ""
+
     @classmethod
     def load(cls) -> "Config":
         _load_dotenv()
@@ -94,6 +99,7 @@ class Config:
             # starts, so the restriction travels with the request rather than depending on the
             # engine's environment being configured correctly.
             discovery_country=os.environ.get("DISCOVERY_COUNTRY", "").strip(),
+            nominatim_state_dir=os.environ.get("NOMINATIM_STATE_DIR", "").strip(),
         )
 
 
