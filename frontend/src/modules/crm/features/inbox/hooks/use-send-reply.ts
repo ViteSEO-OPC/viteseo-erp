@@ -24,16 +24,39 @@ import type { ReplyResponse } from "@/modules/crm/features/inbox/types/inbox-typ
  * server can make — and for the two ambiguous outcomes, not even it can.
  */
 
-/** Pull the reply body out of either a 201 or the thrown 4xx/5xx it shares a shape with. */
-export function replyResponseFrom(error: unknown): ReplyResponse | null {
+/**
+ * What went wrong, in the only three shapes that matter.
+ *
+ * THE DISTINCTION THAT THIS TYPE EXISTS FOR. Two of these mean the server definitely did NOT send
+ * the message; the third means nobody knows. Collapsing them — which an earlier version of this file
+ * did, by showing "please try again" for anything without a reply body — invites the operator to
+ * click Send again after a dropped connection, minting a SECOND client request id for a message the
+ * backend may already have delivered. The server's idempotency cannot help there: two ids are two
+ * sends by definition.
+ *
+ *  - `refused`         the endpoint answered with its own contract. Authoritative.
+ *  - `rejected`        an HTTP response arrived but carried no reply body: 401, a 403 from the
+ *                      permission middleware, a 422 validation error, an HTML error page. The
+ *                      request reached the server and was turned away BEFORE any send, so nothing
+ *                      was delivered and saying so is safe.
+ *  - `responseUnknown` no HTTP response at all: connection dropped, timed out, was reset. The
+ *                      request may have arrived and been fully processed. We do not know, and the
+ *                      UI must not pretend otherwise.
+ */
+export type ReplyFailure =
+    | { kind: "refused"; reply: ReplyResponse }
+    | { kind: "rejected"; status: number; message: string }
+    | { kind: "responseUnknown" };
+
+/** The reply contract body, if this error carries one. */
+function replyBody(error: unknown): ReplyResponse | null {
     if (! isAxiosError(error)) {
         return null;
     }
 
     const data = error.response?.data as Partial<ReplyResponse> | undefined;
 
-    // `accepted` is the discriminator: a genuine reply refusal always carries it. A 401, a 403 from
-    // the permission middleware, or an HTML error page will not, and must not be read as one.
+    // `accepted` is the discriminator: a genuine reply refusal always carries it.
     return data !== undefined && typeof data.accepted === "boolean"
         ? {
               accepted: data.accepted,
@@ -43,6 +66,41 @@ export function replyResponseFrom(error: unknown): ReplyResponse | null {
               message: data.message ?? null,
           }
         : null;
+}
+
+/**
+ * Classify a thrown send.
+ *
+ * THE TEST IS THE PRESENCE OF `error.response`, NOT THE ERROR CODE. A timeout, `ERR_NETWORK` and
+ * `ECONNRESET` all describe what the BROWSER observed, and none of them says whether the server
+ * received the request — so none may be read as "not sent". Only an actual HTTP response proves the
+ * request arrived, and only then is it safe to tell the operator that nothing was delivered.
+ */
+export function classifyReplyError(error: unknown): ReplyFailure {
+    const reply = replyBody(error);
+
+    if (reply !== null) {
+        return { kind: "refused", reply };
+    }
+
+    if (isAxiosError(error) && error.response !== undefined) {
+        const status = error.response.status;
+
+        return {
+            kind: "rejected",
+            status,
+            message:
+                status === 401
+                    ? "Your session has ended. Please sign in again."
+                    : status === 403
+                      ? "You are not allowed to reply to this conversation."
+                      : status === 422
+                        ? "The reply could not be sent because the request was rejected."
+                        : "The reply was not sent because the request was rejected.",
+        };
+    }
+
+    return { kind: "responseUnknown" };
 }
 
 export function useSendReply(conversationId: string | null) {
@@ -89,7 +147,7 @@ export function useSendReply(conversationId: string | null) {
              * Deliberately NOT invalidated for a transport-level failure with no reply body — there
              * is nothing new to learn from the server in that case.
              */
-            if (conversationId !== null && replyResponseFrom(error) !== null) {
+            if (conversationId !== null && classifyReplyError(error).kind === "refused") {
                 queryClient.invalidateQueries({ queryKey: queryKeys.conversations.detail(conversationId) });
             }
         },
