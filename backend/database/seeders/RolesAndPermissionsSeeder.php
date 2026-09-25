@@ -199,6 +199,19 @@ class RolesAndPermissionsSeeder extends Seeder
             // crm_bd's grant is an explicit list below, and this deliberately is not on it.
             // Nothing checks it yet beyond OutboundMessageService: Phase 3F.1 ships no endpoint.
             'crm.conversations.reply',
+            // Attaching a thread to a CRM lead by hand (Phase 3H.3A). Its own ability rather than a
+            // reuse of crm.leads.edit, for one concrete reason: in production crm_bd holds
+            // crm.leads.edit but NOT crm.conversations.view, so gating linking on the lead
+            // permission alone would authorize a user who cannot read the inbox to attach threads
+            // they cannot see. A named ability also survives a re-seed without silently widening.
+            //
+            // Like crm.conversations.reply it is in $crmPermissions, so crm_admin and super_admin
+            // hold it and crm_bd does not — crm_bd's grant is the explicit list below, and this
+            // deliberately is not on it.
+            //
+            // The route ALSO requires crm.conversations.view and LeadPolicy@update; this ability is
+            // the "may link at all" half, not the whole authorization.
+            'crm.conversations.link_lead',
             'crm.dashboard.view',
             'crm.users.view', 'crm.users.create', 'crm.users.edit', 'crm.users.delete',
         ];

@@ -10,6 +10,7 @@ use App\Modules\Crm\Controllers\AutomationEmailController;
 use App\Modules\Crm\Controllers\BusinessRuleController;
 use App\Modules\Crm\Controllers\CallController;
 use App\Modules\Crm\Controllers\ConversationController;
+use App\Modules\Crm\Controllers\ConversationLeadController;
 use App\Modules\Crm\Controllers\ConversationReplyController;
 use App\Modules\Crm\Controllers\DashboardController;
 use App\Modules\Crm\Controllers\DeliveryMonitorController;
@@ -378,6 +379,51 @@ Route::middleware(['auth:sanctum', 'set-current-org', 'subscription-active', 'fe
          */
         Route::post('/conversations/{conversation}/reply', [ConversationReplyController::class, 'store'])
             ->middleware(['permission:crm.conversations.reply', 'throttle:10,1']);
+
+        /*
+         * Phase 3H.3A — attaching a thread to a CRM lead by hand. LINK ONLY: NULL → lead. Relinking
+         * to a different lead is refused with a 409, and unlinking is not implemented.
+         *
+         * WHY A HUMAN HAS TO DO THIS AT ALL. ConversationLeadMatcher identifies a sender by exact
+         * email or exact phone, and Messenger and Instagram DM supply neither — a PSID and an IGSID
+         * are opaque. So every inbound chat thread in production matches `none` and stays unlinked
+         * forever unless a person says who it is.
+         *
+         * BOTH PARTICIPANTS ARE IN THE URL, WHICH IS THE SECURITY DESIGN, not a REST preference.
+         * Route-model binding resolves each through BelongsToOrg — and the lead through SoftDeletes
+         * as well — so a cross-org thread, a cross-org lead, a nonexistent lead and an ARCHIVED lead
+         * are one indistinguishable 404 before the controller exists. Taking a lead id in the body
+         * would have meant an `exists:crm_leads,id` rule, which ignores both the org scope and the
+         * soft-delete filter: a foreign id would validate and then 404 while a nonexistent one
+         * would 422, and the difference in answer tells a caller whether another tenant's lead
+         * exists.
+         *
+         * THREE INDEPENDENT AUTHORIZATIONS, and each removes a real hole:
+         *   - crm.conversations.view      — you may read this inbox at all. Load-bearing: in
+         *                                   production crm_bd holds crm.leads.edit but NOT this, so
+         *                                   without it a BD could attach threads they cannot see.
+         *   - crm.conversations.link_lead — you may link. Named separately from `reply` because
+         *                                   speaking to a customer and filing a thread are
+         *                                   different powers, and from crm.leads.edit so a re-seed
+         *                                   cannot silently widen who may do it.
+         *   - can:update,lead             — LeadPolicy@update: the crm.leads.edit ability AND the
+         *                                   per-BD ownership boundary, so a BD can only link to
+         *                                   leads that are actually theirs.
+         *
+         * PROSPECTS ARE VALID TARGETS. There is deliberately no `active()` constraint: an inbound
+         * enquiry from an unknown business is exactly the case most likely to already exist as an
+         * unqualified prospect in the Nearby pool, and refusing those would defeat the feature.
+         * Phase 3H.4's picker must be able to find them, which the leads list cannot do today.
+         *
+         * `throttle:10,1` matches the module's convention for mutating endpoints.
+         */
+        Route::post('/conversations/{conversation}/lead/{lead}', [ConversationLeadController::class, 'store'])
+            ->middleware([
+                'permission:crm.conversations.view',
+                'permission:crm.conversations.link_lead',
+                'throttle:10,1',
+            ])
+            ->can('update', 'lead');
 
         // Phase 3B — the trusted inbound conversation boundary. NOT a Meta webhook: it takes an
         // ALREADY NORMALIZED turn (no provider payload shape, no hub.challenge handshake) and hands

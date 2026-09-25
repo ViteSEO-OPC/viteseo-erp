@@ -7,6 +7,7 @@ namespace App\Modules\Crm\Services\Inbound;
 use App\Modules\Crm\Events\InboundConversationMessageReceived;
 use App\Modules\Crm\Models\Conversation;
 use App\Modules\Crm\Models\ConversationMessage;
+use App\Modules\Crm\Models\Lead;
 use App\Support\CurrentOrg;
 use Illuminate\Database\QueryException;
 use Illuminate\Database\UniqueConstraintViolationException;
@@ -246,9 +247,7 @@ final class InboundConversationService
             'lead_match_strategy' => $strategy,
         ];
 
-        $subject = $conversation->lead_id !== null
-            ? $conversation->lead()->firstOrFail()
-            : $conversation;
+        $subject = $this->activitySubject($conversation);
 
         $subject->activities()->create([
             'event' => 'conversation.message_received',
@@ -256,6 +255,57 @@ final class InboundConversationService
             'properties' => $properties,
             'causer_id' => null,
         ]);
+    }
+
+    /**
+     * Where this turn's Activity is filed: the lead when the thread names a resolvable one, the
+     * conversation otherwise.
+     *
+     * THE FALLBACK IS NOT DEFENSIVE PROGRAMMING; IT CLOSES A REAL WAY TO KILL A THREAD. This used
+     * to be `$conversation->lead()->firstOrFail()`. `Lead` uses SoftDeletes, so the relation query
+     * carries `deleted_at IS NULL` — and archiving a lead does NOT clear `crm_conversations.lead_id`
+     * (nothing in the archive path touches conversations, and the FK's ON DELETE SET NULL fires
+     * only on a hard delete, which the module never performs). So a linked-then-archived lead made
+     * that call throw ModelNotFoundException, INSIDE the ingest transaction, which `ingest()` does
+     * not catch — it handles UniqueConstraintViolationException and QueryException and nothing
+     * else. The message rolled back, the provider retried, and every retry failed identically:
+     * the thread went permanently deaf to inbound.
+     *
+     * It also spread. `ConversationLeadMatcher::byContactIdentity()` reads other conversations'
+     * `lead_id` without excluding trashed leads, so a brand-new thread from the same contact would
+     * auto-attach to the archived lead and die on its very first message.
+     *
+     * Nothing triggers it in production today — zero conversations are linked — but Phase 3H.3A
+     * ships manual linking, and six leads are already archived. The fix had to land in the same
+     * slice.
+     *
+     * WHAT THIS DELIBERATELY DOES NOT DO: it does not clear `lead_id`, does not re-run matching,
+     * does not restore the lead and does not touch ConversationLeadMatcher. The association is
+     * still a true statement about the thread; only the Activity's SUBJECT falls back, so the
+     * audit trail exists somewhere rather than nowhere. If the lead is restored, later turns file
+     * against it again with no further action.
+     */
+    private function activitySubject(Conversation $conversation): Conversation|Lead
+    {
+        if ($conversation->lead_id === null) {
+            return $conversation;
+        }
+
+        $lead = $conversation->lead()->first();
+
+        if ($lead !== null) {
+            return $lead;
+        }
+
+        // Rare and worth seeing: it means a linked lead was archived out from under a live thread.
+        // Identifiers only, consistent with every other log line in this class.
+        Log::warning('crm.inbound.conversation.lead_unresolved', [
+            'org_id' => (int) $conversation->org_id,
+            'conversation_id' => (int) $conversation->id,
+            'lead_id' => (int) $conversation->lead_id,
+        ]);
+
+        return $conversation;
     }
 
     /**
