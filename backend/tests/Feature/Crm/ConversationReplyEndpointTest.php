@@ -14,6 +14,7 @@ use App\Modules\Crm\Requests\ConversationReplyRequest;
 use App\Modules\Crm\Services\Outbound\OutboundFailureCode;
 use App\Modules\Crm\Services\Outbound\OutboundMessagePersister;
 use App\Modules\Crm\Services\Outbound\OutboundMessageService;
+use App\Modules\Crm\Support\ReplyFailureCopy;
 use App\Support\CurrentOrg;
 use Database\Seeders\RolesAndPermissionsSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -49,6 +50,22 @@ class ConversationReplyEndpointTest extends TestCase
     private const IG_ID = '900000000000002';
 
     private const HOST = 'https://graph.test.invalid';
+
+    /** Implementation detail that must never appear in a browser-visible response. */
+    private const INTERNAL_MARKERS = [
+        'meta-messenger-outbound',
+        'meta-instagram-outbound',
+        'GraphMetaSender',
+        'OutboundAdapter',
+        'ProviderCredential',
+        'ProviderAccount',
+        'ProviderConnection',
+        'access_token',
+        'appsecret_proof',
+        'external_message_id',
+        'sender_external_id',
+        'recipient_external_id',
+    ];
 
     protected function setUp(): void
     {
@@ -375,8 +392,67 @@ class ConversationReplyEndpointTest extends TestCase
         $response->assertJsonPath('retryAllowed', false);
         $response->assertJsonPath('message', null);
 
+        // The exact operator-facing sentence, pinned: this is the one a real user will read most.
+        $response->assertJsonPath('reason', 'Replies are not currently enabled for this conversation.');
+
+        // And emphatically NOT the service's internal sentence.
+        $this->assertStringNotContainsString('meta-messenger-outbound', $response->getContent());
+        $this->assertStringNotContainsString('has no transport', $response->getContent());
+        $this->assertStringNotContainsString('pending message is written', $response->getContent());
+
         Http::assertNothingSent();
         $this->assertSame(0, ConversationMessage::query()->withoutGlobalScopes()->where('direction', 'outbound')->count());
+    }
+
+    /**
+     * Every failure code maps to a stable, provider-neutral sentence.
+     *
+     * Driven off `OutboundFailureCode::cases()` rather than a hand-written list, so a code added
+     * later cannot slip through untested — the match in ReplyFailureCopy is exhaustive, and this
+     * asserts the sentences it produces are actually fit to ship.
+     */
+    #[DataProvider('everyFailureCode')]
+    public function test_every_failure_code_has_safe_operator_copy(string $codeValue): void
+    {
+        $code = OutboundFailureCode::from($codeValue);
+        $reason = ReplyFailureCopy::for($code);
+
+        $this->assertNotSame('', trim($reason), $codeValue.' must have copy.');
+        $this->assertMatchesRegularExpression('/[.!?]$/', $reason, $codeValue.' copy should read as a sentence.');
+
+        foreach (self::INTERNAL_MARKERS as $marker) {
+            $this->assertStringNotContainsStringIgnoringCase($marker, $reason,
+                $codeValue.' copy must not mention '.$marker);
+        }
+    }
+
+    /** @return array<string, array{string}> */
+    public static function everyFailureCode(): array
+    {
+        $out = [];
+        foreach (OutboundFailureCode::cases() as $case) {
+            $out[$case->value] = [$case->value];
+        }
+
+        return $out;
+    }
+
+    /** Retry semantics are untouched by the copy change — asserted against the enum itself. */
+    #[DataProvider('everyFailureCode')]
+    public function test_retry_semantics_are_unchanged(string $codeValue): void
+    {
+        $code = OutboundFailureCode::from($codeValue);
+
+        $expected = $codeValue === OutboundFailureCode::ProviderRateLimited->value;
+        $this->assertSame($expected, $code->isRetryable(), $codeValue);
+
+        if (in_array($codeValue, [
+            OutboundFailureCode::ProviderUnavailable->value,
+            OutboundFailureCode::DeliveryUnknown->value,
+        ], true)) {
+            $this->assertFalse($code->isRetryable(), $codeValue.' must never invite a retry.');
+            $this->assertTrue($code->leavesDeliveryUnresolved(), $codeValue);
+        }
     }
 
     // ------------------------------------------------------------- SUCCESS
@@ -474,9 +550,13 @@ class ConversationReplyEndpointTest extends TestCase
         $response->assertJsonPath('accepted', false);
         $response->assertJsonPath('failureCode', $expected->value);
         $response->assertJsonPath('retryAllowed', $retryAllowed);
+        $response->assertJsonPath('reason', ReplyFailureCopy::for($expected));
 
-        // Meta's prose never reaches the client.
+        // Meta's prose never reaches the client, and neither does ours.
         $this->assertStringNotContainsString('META_PROSE_CANARY_9001', $response->getContent());
+        foreach (self::INTERNAL_MARKERS as $marker) {
+            $this->assertStringNotContainsString($marker, $response->getContent(), $marker.' leaked.');
+        }
 
         $row = ConversationMessage::query()->withoutGlobalScopes()->where('direction', 'outbound')->firstOrFail();
         $this->assertSame($rowStatus, $row->delivery_status);
@@ -546,21 +626,16 @@ class ConversationReplyEndpointTest extends TestCase
         $content = $this->postJson($this->url($conversation), $this->payload())
             ->assertStatus(201)->getContent();
 
-        foreach ([
+        foreach (array_merge(self::INTERNAL_MARKERS, [
             self::TOKEN,
             self::APP_SECRET,
             self::PAGE_ID,
             (string) $conversation->external_contact_id,
-            'external_message_id',
             'externalMessageId',
-            'sender_external_id',
-            'recipient_external_id',
             'provider_account_id',
             'provider_connection_id',
-            'access_token',
             'idempotency_key',
-            'appsecret_proof',
-        ] as $forbidden) {
+        ]) as $forbidden) {
             $this->assertStringNotContainsString($forbidden, (string) $content, $forbidden.' must never reach the client.');
         }
     }

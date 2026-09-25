@@ -14,8 +14,10 @@ use App\Modules\Crm\Services\Outbound\OutboundIdempotency;
 use App\Modules\Crm\Services\Outbound\OutboundMessageRequest;
 use App\Modules\Crm\Services\Outbound\OutboundMessageResult;
 use App\Modules\Crm\Services\Outbound\OutboundMessageService;
+use App\Modules\Crm\Support\ReplyFailureCopy;
 use App\Support\CurrentOrg;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Log;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
@@ -99,17 +101,36 @@ class ConversationReplyController extends Controller
     {
         $code = $result->failure ?? OutboundFailureCode::NotConfigured;
 
+        /*
+         * THE INTERNAL REASON IS LOGGED, NOT SHIPPED.
+         *
+         * The service's own sentences are written for a logfile and read like it — "Adapter
+         * [meta-messenger-outbound] has no transport; refusing before a pending message is
+         * written." None of that is secret, but all of it is internal vocabulary, and a string a
+         * browser receives becomes part of the API contract: somebody parses it, pastes it into a
+         * ticket, or translates it, and then renaming an adapter breaks a client. So the detailed
+         * sentence goes here, where an engineer looks, and the client gets stable copy.
+         *
+         * Safe to log: every `reason` in this path is composed by our own code. GraphMetaSender
+         * builds its from the failure code and never reads `error.message`, which can quote the
+         * customer's own text back at us. No token, no payload, no customer body.
+         */
+        Log::warning('crm.reply.refused', [
+            'code' => $code->value,
+            'conversation_id' => (int) $conversation->id,
+            'org_id' => (int) $conversation->org_id,
+            'internal_reason' => (string) $result->reason,
+        ]);
+
         return response()->json([
             'accepted' => false,
             'failureCode' => $code->value,
 
             /*
-             * OUR sentence, never Meta's. Every `reason` on an OutboundMessageResult is composed by
-             * our own code — GraphMetaSender builds it from the failure code and never reads
-             * `error.message`, which can quote the customer's own text back at us. It is here for
-             * a human reading a support ticket; a client must branch on `failureCode`.
+             * STABLE, PROVIDER-NEUTRAL COPY — see ReplyFailureCopy. `failureCode` above stays the
+             * machine contract; a client must branch on it and never on this sentence.
              */
-            'reason' => (string) $result->reason,
+            'reason' => ReplyFailureCopy::for($code),
 
             /*
              * THE FIELD THAT MATTERS MOST ON THIS RESPONSE. `isRetryable()` returns true only where
