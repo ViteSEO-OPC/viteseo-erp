@@ -1,0 +1,53 @@
+name: Test CI
+
+on:
+  pull_request:
+    branches:
+      - centralization
+    push:
+      branches:
+        - centralization
+        
+    jobs:
+      frontend:
+        name: Frontend CI
+        runs-on: ubuntu-latest
+
+        defaults:
+          run:
+            working-directory: frontend
+
+        steps:
+          - uses: actions/checkout@v4
+
+          - uses: actions/setup-node@v4
+            with:
+              node-vetsion: 22
+              cache: npm
+              cache-dependency-path: frontend/package-lock.json
+
+          - run: npm ci
+          - run: npm run lint
+          - run: npm run typecheck
+          - run: npm run build
+
+      backend:
+        name: Backend CI
+        runs-on: ubuntu-latest
+
+        defaults:
+          run:
+            working-directory: backend
+
+        steps:
+          - uses: actions/checkout@v4
+
+          - uses: shivammathur/setup-php@v2
+            with:
+              php-version: '8.4'
+          
+          - run: composer install --no-interaction --prefer-dist
+          - run: php artisan test
+          
+
+      
