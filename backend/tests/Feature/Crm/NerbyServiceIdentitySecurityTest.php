@@ -265,6 +265,36 @@ class NerbyServiceIdentitySecurityTest extends TestCase
         $this->putJson("/api/v1/crm/leads/{$mine->id}/website-enrichment", ['homepage_status' => 200])->assertNotFound();
     }
 
+    /**
+     * A token reaches a lead of ITS OWN org through the `{lead}`-bound callbacks.
+     *
+     * Route-model binding runs as part of the request, so the tenant must already be pinned when
+     * `{lead}` is resolved. The service user belongs to no org, so nothing but the token's binding
+     * can name that tenant — resolve the lead first and it resolves in no org and 404s. A real
+     * request starts with no org pinned; this test clears it to match, because the org the test's
+     * own setup pinned would otherwise mask exactly that ordering.
+     */
+    public function test_a_token_reaches_its_own_orgs_lead_through_the_lead_bound_callbacks(): void
+    {
+        $lead = CurrentOrg::runAs($this->tenant()->id, fn () => Lead::factory()->create([
+            'created_by' => $this->human('crm_admin')->id, 'source' => 'openstreetmap',
+            'website' => null, 'qualified_at' => null,
+        ]));
+
+        $this->actingAsNerbyService($this->tenant()->id);
+        CurrentOrg::clear();
+
+        $this->postJson("/api/v1/crm/leads/{$lead->id}/website-candidates", [
+            'candidates' => [], 'tiers_run' => ['probe'],
+        ])->assertOk();
+
+        // The audit write-back shares the ordering: reaching validation (not a 404) proves the lead
+        // resolved in the token's org.
+        CurrentOrg::clear();
+        $this->putJson("/api/v1/crm/leads/{$lead->id}/website-enrichment", [])
+            ->assertUnprocessable();
+    }
+
     public function test_the_query_ledger_is_written_to_the_tokens_org(): void
     {
         $other = $this->otherOrg();
