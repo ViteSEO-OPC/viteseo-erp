@@ -10,6 +10,7 @@ use App\Modules\Crm\Controllers\AutomationEmailController;
 use App\Modules\Crm\Controllers\BusinessRuleController;
 use App\Modules\Crm\Controllers\CallController;
 use App\Modules\Crm\Controllers\ConversationController;
+use App\Modules\Crm\Controllers\ConversationReplyController;
 use App\Modules\Crm\Controllers\DashboardController;
 use App\Modules\Crm\Controllers\DeliveryMonitorController;
 use App\Modules\Crm\Controllers\EmailController;
@@ -357,6 +358,26 @@ Route::middleware(['auth:sanctum', 'set-current-org', 'subscription-active', 'fe
             ->middleware('permission:crm.conversations.view');
         Route::get('/conversations/{conversation}', [ConversationController::class, 'show'])
             ->middleware('permission:crm.conversations.view');
+
+        /*
+         * Phase 3H.1 — replying in a thread. The FIRST write this module has ever exposed.
+         *
+         * A SEPARATE ABILITY FROM VIEWING, and the separation is the point: reading what a customer
+         * wrote and speaking to that customer AS THE BUSINESS are different powers. The second one
+         * reaches a real person's phone under the company's name and cannot be taken back, so
+         * `crm.conversations.view` deliberately does not imply it. The middleware here is defence
+         * in depth — OutboundMessageService re-checks the same ability, because a future queued job
+         * will have no middleware at all.
+         *
+         * `throttle:10,1` matches the module's existing convention for mutating endpoints (the Meta
+         * authorization and Nerby provider-test routes use the same). Ten replies a minute is far
+         * above human typing speed and far below anything that could be used to hammer Meta.
+         *
+         * Tenancy is not enforced here either: Conversation uses BelongsToOrg, so another tenant's
+         * id is a 404 at binding time, before the controller exists.
+         */
+        Route::post('/conversations/{conversation}/reply', [ConversationReplyController::class, 'store'])
+            ->middleware(['permission:crm.conversations.reply', 'throttle:10,1']);
 
         // Phase 3B — the trusted inbound conversation boundary. NOT a Meta webhook: it takes an
         // ALREADY NORMALIZED turn (no provider payload shape, no hub.challenge handshake) and hands
