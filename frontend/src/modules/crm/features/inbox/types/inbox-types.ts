@@ -126,6 +126,62 @@ export type InboxConversationDetail = {
     messageCount: number;
     messages: InboxMessage[];
     reply: InboxReplyCapability;
+    link: InboxLinkCapability;
+};
+
+/**
+ * Why the "Link lead" control is not offered, when it is not.
+ *
+ * Widened to `string` for the same reason as the reply reasons: the server owns this vocabulary,
+ * and a reason this build does not know must render as "no action" rather than break the header.
+ */
+export type LinkDisabledReason = "permission_denied" | "already_linked" | (string & {});
+
+/**
+ * Whether this viewer may attach this conversation to a lead — computed by the SERVER.
+ *
+ * THE BUTTON IS DECIDED HERE AND NOWHERE ELSE. A browser-side permission check would read the auth
+ * payload's permission list, which cannot see the backend's super_admin bypass, and would hide the
+ * control from exactly the people allowed to use it. Like `reply`, this is a hint: the endpoint
+ * re-checks everything, so a stale `enabled: true` ends in a 403 or 409, never in a wrong link.
+ */
+export type InboxLinkCapability = {
+    enabled: boolean;
+    /** Null exactly when `enabled` is true. */
+    reason: LinkDisabledReason | null;
+};
+
+/**
+ * One row of GET /crm/leads?scope=linkable — the picker's own compact resource, NOT the Leads
+ * table's LeadResource. These five fields are all the endpoint returns; there is no email, phone or
+ * address to show, by design.
+ */
+export type LeadPickerCandidate = {
+    id: string;
+    businessName: string | null;
+    contactName: string | null;
+    status: string;
+    /** A discovered business not yet qualified into the CRM pipeline. Both kinds are linkable. */
+    isProspect: boolean;
+};
+
+/** The paginated envelope around picker rows. Ten per page, set by the server. */
+export type LeadPickerPage = {
+    data: LeadPickerCandidate[];
+    meta: { current_page: number; last_page: number; per_page: number; total: number };
+};
+
+/**
+ * What POST /conversations/{id}/lead/{lead} answers with.
+ *
+ * `changed: false` on a 200 is an idempotent success — the thread already named this lead — and is
+ * treated exactly like `true`. On a 409 the SAME shape arrives inside the axios error with
+ * `lead: null`: the server deliberately does not name the lead that won, so neither does the UI.
+ */
+export type LinkLeadResponse = {
+    changed: boolean;
+    lead: InboxLeadSummary | null;
+    message?: string;
 };
 
 /**
@@ -169,4 +225,38 @@ export const CHANNEL_LABELS: Record<string, string> = {
 
 export function channelLabel(channel: string): string {
     return CHANNEL_LABELS[channel] ?? channel;
+}
+
+/**
+ * Shown when a conversation IS linked but the lead cannot be displayed. Deliberately neutral: the
+ * lead may be archived, or simply not visible to this viewer, and the screen must not say which.
+ * Shared by the detail header and the list row so the two can never disagree.
+ */
+export const LINKED_LEAD_UNAVAILABLE = "Linked — lead details unavailable";
+
+/**
+ * The four things the conversation header can say about its lead.
+ *
+ *  - `unlinked_actionable` — not linked, and the server says this viewer may link it.
+ *  - `unlinked`            — not linked; no action for this viewer.
+ *  - `linked`              — linked to a lead this viewer can see.
+ *  - `linked_unavailable`  — linked, but the lead cannot be shown. NOT actionable: `lead_id` is set,
+ *                            and a second link would be refused.
+ */
+export type LeadLinkHeaderState = "unlinked_actionable" | "unlinked" | "linked" | "linked_unavailable";
+
+/**
+ * `leadLinked` decides linked vs. unlinked — never `lead !== null`, which is also null on a linked
+ * thread whose lead is archived or hidden. And only the server's `link.enabled` makes it actionable:
+ * the browser's own permission list cannot see the backend's super_admin bypass. `link` is read
+ * defensively so a response without it shows no button rather than crashing.
+ */
+export function leadLinkHeaderState(
+    detail: Pick<InboxConversationDetail, "leadLinked" | "lead" | "link">,
+): LeadLinkHeaderState {
+    if (detail.leadLinked) {
+        return detail.lead !== null ? "linked" : "linked_unavailable";
+    }
+
+    return detail.link?.enabled === true ? "unlinked_actionable" : "unlinked";
 }

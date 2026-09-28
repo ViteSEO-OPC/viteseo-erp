@@ -4,12 +4,19 @@ import { useMemo, useState } from "react";
 import { Inbox, Link2, Link2Off, Loader2, TriangleAlert } from "lucide-react";
 import axios from "axios";
 
+import { Button } from "@/modules/crm/components/ui/button";
 import { ChannelBadge } from "@/modules/crm/features/inbox/components/channel-badge";
 import { ConversationList } from "@/modules/crm/features/inbox/components/conversation-list";
+import { LinkLeadDialog } from "@/modules/crm/features/inbox/components/link-lead-dialog";
 import { MessageThread } from "@/modules/crm/features/inbox/components/message-thread";
 import { ReplyComposer } from "@/modules/crm/features/inbox/components/reply-composer";
 import { useConversation, useConversations } from "@/modules/crm/features/inbox/hooks/use-conversations";
-import type { ChannelFilter } from "@/modules/crm/features/inbox/types/inbox-types";
+import {
+    LINKED_LEAD_UNAVAILABLE,
+    leadLinkHeaderState,
+    type ChannelFilter,
+    type InboxConversationDetail,
+} from "@/modules/crm/features/inbox/types/inbox-types";
 
 const FILTERS: { value: ChannelFilter; label: string }[] = [
     { value: "all", label: "All" },
@@ -25,6 +32,46 @@ function errorMessage(error: unknown): string {
         if (error.response?.status === 404) return "That conversation is no longer available.";
     }
     return "The inbox could not be loaded. Please try again.";
+}
+
+/**
+ * What the header says about the conversation's lead, and — only when the server allows it — the
+ * control to link one. See `leadLinkHeaderState` for why the decision reads `leadLinked` and
+ * `link.enabled`, and never `lead !== null` or the browser's permission list.
+ *
+ * There is deliberately no unlink, relink or "change lead" affordance in any state: a link is
+ * permanent in the app for now.
+ */
+function LeadLinkStatus({ detail, onLink }: { detail: InboxConversationDetail; onLink: () => void }) {
+    const state = leadLinkHeaderState(detail);
+
+    return (
+        <span className="ml-auto inline-flex min-w-0 flex-wrap items-center justify-end gap-x-2 gap-y-1 text-xs text-muted-foreground">
+            {state === "linked" ? (
+                <span className="inline-flex min-w-0 items-center gap-1.5">
+                    <Link2 aria-hidden className="size-3.5 shrink-0" />
+                    <span className="truncate">{detail.lead?.businessName ?? "Linked to a lead"}</span>
+                </span>
+            ) : state === "linked_unavailable" ? (
+                <span className="inline-flex items-center gap-1.5">
+                    <Link2 aria-hidden className="size-3.5 shrink-0" />
+                    {LINKED_LEAD_UNAVAILABLE}
+                </span>
+            ) : (
+                <>
+                    <span className="inline-flex items-center gap-1.5">
+                        <Link2Off aria-hidden className="size-3.5 shrink-0" />
+                        Not linked to a lead
+                    </span>
+                    {state === "unlinked_actionable" ? (
+                        <Button variant="outline" size="sm" onClick={onLink}>
+                            Link lead
+                        </Button>
+                    ) : null}
+                </>
+            )}
+        </span>
+    );
 }
 
 function Notice({ icon: Icon, title, body }: { icon: typeof Inbox; title: string; body: string }) {
@@ -60,6 +107,13 @@ function Notice({ icon: Icon, title, body }: { icon: typeof Inbox; title: string
 export function InboxPage() {
     const [channel, setChannel] = useState<ChannelFilter>("all");
     const [selectedId, setSelectedId] = useState<string | null>(null);
+
+    /*
+     * Which conversation the link dialog is open FOR, rather than a bare boolean: the dialog is
+     * modal, so the selection cannot change underneath it, but tying the open state to an id means a
+     * stale `true` can never open the dialog over a different thread.
+     */
+    const [linkDialogFor, setLinkDialogFor] = useState<string | null>(null);
 
     const list = useConversations(channel);
     const conversations = useMemo(() => list.data?.data ?? [], [list.data]);
@@ -180,21 +234,26 @@ export function InboxPage() {
                                     <span className="text-sm text-muted-foreground">
                                         {detail.data.messageCount} message{detail.data.messageCount === 1 ? "" : "s"}
                                     </span>
-                                    <span className="ml-auto inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-                                        {detail.data.leadLinked ? (
-                                            <>
-                                                <Link2 aria-hidden className="size-3.5" />
-                                                {detail.data.lead?.businessName ?? "Linked to a lead"}
-                                            </>
-                                        ) : (
-                                            <>
-                                                <Link2Off aria-hidden className="size-3.5" />
-                                                Not linked to a lead
-                                            </>
-                                        )}
-                                    </span>
+                                    <LeadLinkStatus
+                                        detail={detail.data}
+                                        onLink={() => setLinkDialogFor(detail.data.id)}
+                                    />
                                 </div>
                             </header>
+
+                            {/*
+                              * Always mounted while a thread is open, not only while it is linkable:
+                              * an uncertain outcome re-reads the conversation, which can flip it to
+                              * "linked" mid-dialog, and unmounting then would swallow the message
+                              * explaining what happened. Closed, it renders nothing and fetches
+                              * nothing. Keyed by id so another thread starts from a clean slate.
+                              */}
+                            <LinkLeadDialog
+                                key={detail.data.id}
+                                conversationId={detail.data.id}
+                                open={linkDialogFor === detail.data.id}
+                                onOpenChange={(open) => setLinkDialogFor(open ? detail.data.id : null)}
+                            />
 
                             <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
                                 <MessageThread messages={detail.data.messages} />

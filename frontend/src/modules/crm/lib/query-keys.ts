@@ -65,6 +65,11 @@ export const queryKeys = {
     // active-call session. Nested under detail(id), like activities/notes, so lead-detail invalidations
     // cascade and call writes touch only this lead's data by prefix.
     calls: (id: string) => [...queryKeys.leads.detail(id), "calls"] as const,
+    // Conversation → lead picker search (GET /leads?scope=linkable). Under leads.all but deliberately
+    // NOT under lists(): the Leads table invalidates lists() on nearly every lead write, and a picker
+    // that is only open for a few seconds has no reason to refetch on each of them.
+    linkable: (params: { search: string; page: number }) =>
+      [...queryKeys.leads.all, "linkable", params] as const,
   },
   niches: {
     // Business Niche registry (GET /niches) — the vocabulary behind the shared Business Niche
