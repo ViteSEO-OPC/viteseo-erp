@@ -88,10 +88,10 @@ export function DatePicker({
   const [viewMonth, setViewMonth] = React.useState<Date>(selected ?? startOfToday());
 
   // Re-sync the shown month to the value whenever the popover opens.
-  React.useEffect(() => {
-    if (open) setViewMonth(selected ?? startOfToday());
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  function handleOpenChange(next: boolean) {
+    if (next) setViewMonth(selected ?? startOfToday());
+    setOpen(next);
+  }
 
   const days = eachDayOfInterval({
     start: startOfWeek(startOfMonth(viewMonth)),
@@ -136,7 +136,7 @@ export function DatePicker({
   }
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger
         id={id}
         type="button"

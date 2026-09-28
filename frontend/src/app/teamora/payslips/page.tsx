@@ -100,7 +100,7 @@ export default function PayslipsPage() {
   const [inqCancelId, setInqCancelId] = useState<number | null>(null);
   const cancelInquiryMut = useCancelPayrollInquiry();
 
-  const inquiryList = inquiries ?? [];
+  const inquiryList = useMemo(() => inquiries ?? [], [inquiries]);
   const inqDetail = inquiryList.find((q) => q.id === inqDetailId) ?? null;
   const inqTotalPages = Math.max(1, Math.ceil(inquiryList.length / PAGE_SIZE));
   const inqSafePage = Math.min(inqPage, inqTotalPages);

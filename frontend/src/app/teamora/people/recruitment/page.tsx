@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   Plus,
@@ -107,10 +107,11 @@ export default function RecruitmentPage() {
     setReqDialog(true);
   }
 
-  function openEditReq(req: Requisition) {
+  // Stable identity — the columns memo below depends on it.
+  const openEditReq = useCallback((req: Requisition) => {
     setEditingReq(req);
     setReqDialog(true);
-  }
+  }, []);
 
   // Default to the requisition with the most candidates until the user picks one
   // (derived, not an effect — avoids a setState-on-render cascade).

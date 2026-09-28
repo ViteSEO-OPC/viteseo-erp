@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { notify as toast } from "@/core/lib/notify";
 
 import { Button } from "@/components/ui/button";
@@ -38,13 +38,17 @@ export function AttendanceMeetingDialog({
   const [location, setLocation] = useState("");
   const [agenda, setAgenda] = useState("");
 
-  useEffect(() => {
+  // Reset whenever the dialog opens — during render (React's recommended pattern) rather
+  // than in an effect. Starts false so a dialog mounted already-open resets too.
+  const [synced, setSynced] = useState({ open: false, employeeName });
+  if (open !== synced.open || employeeName !== synced.employeeName) {
+    setSynced({ open, employeeName });
     if (open) {
       setWhen("");
       setLocation("");
       setAgenda(`Discuss recent attendance — lateness and violations with ${employeeName ?? "the employee"}.`);
     }
-  }, [open, employeeName]);
+  }
 
   async function submit() {
     if (!employeeId || !when) return;

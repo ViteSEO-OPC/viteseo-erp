@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Trash2 } from "lucide-react";
 import { notify as toast } from "@/core/lib/notify";
 
@@ -45,9 +45,13 @@ function SharedPoolEditor({ employeeId }: { employeeId: number }) {
   const upsert = useUpsertEmployeeSharedBalance(employeeId);
   const [local, setLocal] = useState<string>("");
 
-  useEffect(() => {
+  // Mirror the loaded balance into the field — during render rather than in an effect.
+  // Null (never a query value) so the first render syncs too.
+  const [syncedFrom, setSyncedFrom] = useState<typeof data | null>(null);
+  if (data !== syncedFrom) {
+    setSyncedFrom(data);
     setLocal(data ? String(data.entitled_days) : "0");
-  }, [data]);
+  }
 
   async function save() {
     const days = Number(local);

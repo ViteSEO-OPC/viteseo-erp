@@ -1,6 +1,6 @@
 "use client";
 
-import { useForm, Controller } from "react-hook-form";
+import { useForm, useWatch, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { AxiosError } from "axios";
@@ -76,7 +76,6 @@ export function LeaveRequestForm({
     register,
     control,
     handleSubmit,
-    watch,
     setError,
     reset,
     formState: { errors, isSubmitting },
@@ -92,12 +91,10 @@ export function LeaveRequestForm({
     },
   });
 
-  const [typeId, start, end, isHalfDay] = watch([
-    "leave_type_id",
-    "start_date",
-    "end_date",
-    "is_half_day",
-  ]);
+  const [typeId, start, end, isHalfDay] = useWatch({
+    control,
+    name: ["leave_type_id", "start_date", "end_date", "is_half_day"],
+  });
 
   // Live balance preview (mirrors the server; the 422 is still the real gate).
   const requested = computeLeaveDays(start, isHalfDay ? start : end, isHalfDay);

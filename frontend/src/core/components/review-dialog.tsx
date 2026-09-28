@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Check, X } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -41,9 +41,15 @@ export function ReviewDialog({
   const [reason, setReason] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
-  useEffect(() => {
-    if (open) setReason("");
-  }, [open]);
+  // Reset whenever the dialog opens — during render (React's recommended pattern) rather
+  // than in an effect. Starts false so a dialog mounted already-open resets too.
+  const [wasOpen, setWasOpen] = useState(false);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) {
+      setReason("");
+    }
+  }
 
   const missingReason = isReject && reasonRequired && !reason.trim();
 

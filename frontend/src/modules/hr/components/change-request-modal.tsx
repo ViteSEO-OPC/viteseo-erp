@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { AxiosError } from "axios";
 import { notify as toast } from "@/core/lib/notify";
@@ -66,9 +66,15 @@ export function ChangeRequestModal({
   const [detailId, setDetailId] = useState<number | null>(null);
   const detail = (history ?? []).find((c) => c.id === detailId) ?? null;
 
-  useEffect(() => {
-    if (open) setRows([newRow()]);
-  }, [open]);
+  // Reset whenever the dialog opens — during render (React's recommended pattern) rather
+  // than in an effect. Starts false so a dialog mounted already-open resets too.
+  const [wasOpen, setWasOpen] = useState(false);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) {
+      setRows([newRow()]);
+    }
+  }
 
   function currentValue(field: string): string {
     const v = employee?.[field];

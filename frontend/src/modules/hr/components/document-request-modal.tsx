@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Download } from "lucide-react";
 import { notify as toast } from "@/core/lib/notify";
 
@@ -53,13 +53,17 @@ export function DocumentRequestModal({
 
   const isOther = type === "other";
 
-  useEffect(() => {
+  // Reset whenever the dialog opens — during render (React's recommended pattern) rather
+  // than in an effect. Starts false so a dialog mounted already-open resets too.
+  const [wasOpen, setWasOpen] = useState(false);
+  if (open !== wasOpen) {
+    setWasOpen(open);
     if (open) {
       setType(DOCUMENT_TYPES[0].value);
       setOtherDetail("");
       setReason("");
     }
-  }, [open]);
+  }
 
   const canSubmit = !isOther || otherDetail.trim() !== "";
 

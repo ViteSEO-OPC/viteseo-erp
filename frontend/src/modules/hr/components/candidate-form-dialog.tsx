@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useForm, Controller } from "react-hook-form";
+import { useForm, useWatch, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { UserPlus, FileUp, X, FileText } from "lucide-react";
@@ -79,7 +79,6 @@ export function CandidateFormDialog({
   const {
     register,
     control,
-    watch,
     handleSubmit,
     reset,
     formState: { errors, isSubmitting },
@@ -97,15 +96,23 @@ export function CandidateFormDialog({
    * standard one is not. Keyed off the SELECTED requisition's pipeline — the same column
    * the server guards on — so the form and the record it writes always agree.
    */
-  const chosenReq = activeReqs.find((r) => String(r.id) === watch("requisition_id"));
+  const requisitionIdValue = useWatch({ control, name: "requisition_id" });
+  const chosenReq = activeReqs.find((r) => String(r.id) === requisitionIdValue);
   const ojtApplication = isOjt(chosenReq?.pipeline);
 
-  useEffect(() => {
+  // The picked file clears on close — during render rather than in the effect below, which
+  // only refills the form (RHF, not React state).
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
     if (!open) {
       setResume(null);
       setDragOver(false);
-      return;
     }
+  }
+
+  useEffect(() => {
+    if (!open) return;
     reset({
       name: "", email: "", phone: "", requisition_id: String(requisitionId),
       source: "referral", expected_salary: "", location: "",

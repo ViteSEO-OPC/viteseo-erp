@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useForm, Controller } from "react-hook-form";
+import { useForm, useWatch, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { AxiosError } from "axios";
@@ -31,7 +31,6 @@ import {
   numberOrNull,
   optionalChoice,
   optionalCount,
-  optionalMoney,
   optionalPastDate,
   optionalPhone,
   optionalText,
@@ -158,7 +157,6 @@ const EMPTY: FormValues = {
   bank_account_name: "",
   tin: "", sss_number: "", philhealth_number: "", pagibig_number: "",
 };
-
 export function EmployeeFormDialog({
   open,
   onOpenChange,
@@ -185,18 +183,21 @@ export function EmployeeFormDialog({
     reset,
     setError,
     setValue,
-    watch,
     formState: { errors, isSubmitting },
   } = useForm<FormValues>({ resolver: zodResolver(schema), defaultValues: EMPTY });
 
   useEffect(() => {
-    if (open) {
-      reset(EMPTY);
-      // Cleared on the way IN rather than on the way out, so the card stays put
-      // while the dialog animates closed.
-      setHandover(null);
-    }
+    if (open) reset(EMPTY);
   }, [open, reset]);
+
+  // Cleared on the way IN rather than on the way out, so the card stays put while the dialog
+  // animates closed — during render rather than in the effect above. Starts false so an
+  // already-open mount clears too.
+  const [wasOpen, setWasOpen] = useState(false);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) setHandover(null);
+  }
 
   async function onSubmit(v: FormValues) {
     // Blank optional fields are omitted; the columns default to empty.
@@ -286,7 +287,10 @@ export function EmployeeFormDialog({
 
   // Employee role options come from the selected department's positions catalog.
   // Falls back to a free-text input when that department has no positions yet.
-  const selectedDeptId = watch("department_id");
+  const [selectedDeptId, siblings, numberOfSiblings, employmentStatus] = useWatch({
+    control,
+    name: ["department_id", "siblings", "number_of_siblings", "employment_status"],
+  });
   const positionOptions =
     (departments ?? []).find((d) => String(d.id) === selectedDeptId)?.positions ?? [];
 
@@ -451,9 +455,9 @@ export function EmployeeFormDialog({
                   Siblings
                 </p>
                 <SiblingsFields
-                  siblings={watch("siblings")}
+                  siblings={siblings}
                   onSiblingsChange={(next) => setValue("siblings", next, { shouldDirty: true })}
-                  count={watch("number_of_siblings")}
+                  count={numberOfSiblings}
                   onCountChange={(next) =>
                     setValue("number_of_siblings", next, {
                       shouldDirty: true,
@@ -461,7 +465,7 @@ export function EmployeeFormDialog({
                     })
                   }
                   countError={errors.number_of_siblings?.message}
-                  nameErrors={watch("siblings").map((_, i) => errors.siblings?.[i]?.name?.message)}
+                  nameErrors={siblings.map((_, i) => errors.siblings?.[i]?.name?.message)}
                 />
               </div>
 
@@ -604,7 +608,7 @@ export function EmployeeFormDialog({
                 <GrantAccessSection
                   value={field.value}
                   onChange={field.onChange}
-                  employmentStatus={watch("employment_status")}
+                  employmentStatus={employmentStatus}
                 />
               )}
             />

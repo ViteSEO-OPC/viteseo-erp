@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import { parseAmount } from "@/core/lib/format";
 import { Modal } from "@/core/ui/modal";
@@ -47,9 +47,13 @@ export function PromptModal({
 }: PromptModalProps) {
   const [value, setValue] = useState(initialValue);
 
-  useEffect(() => {
+  // Re-seed whenever the modal opens (or its seed changes while open) — during render
+  // rather than in an effect.
+  const [synced, setSynced] = useState({ open, initialValue });
+  if (open !== synced.open || initialValue !== synced.initialValue) {
+    setSynced({ open, initialValue });
     if (open) setValue(initialValue);
-  }, [open, initialValue]);
+  }
 
   const submit = () => {
     if (value.trim() === "") return;
