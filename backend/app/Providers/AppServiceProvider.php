@@ -2,6 +2,15 @@
 
 namespace App\Providers;
 
+use App\Support\MachineTokens;
+use App\Models\User;
+use App\Support\AccessLifecycle;
+use Spatie\Permission\Events\PermissionAttached;
+use Spatie\Permission\Events\PermissionDetached;
+use Spatie\Permission\Events\RoleAttached;
+use Spatie\Permission\Events\RoleDetached;
+use Illuminate\Support\Facades\Event;
+use Laravel\Sanctum\PersonalAccessToken;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Queue\Events\JobProcessing;
 use App\Modules\Hr\Services\InternAllowanceService;
@@ -43,6 +52,34 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        /*
+         * No token without an expiry.
+         *
+         * The guard no longer ages tokens by created_at (config/sanctum.php), so a
+         * token's own expires_at is the only thing that ends it -- and NULL would
+         * mean never. A token minted without saying lives thirty days; machine
+         * tokens say ninety through MachineTokens::issue().
+         */
+        PersonalAccessToken::creating(function (PersonalAccessToken $token): void {
+            $token->expires_at ??= now()->addDays(MachineTokens::UNSTATED_DAYS);
+        });
+
+        /*
+         * A role or permission granted to or taken from a person: their open sessions
+         * are judged again (AccessLifecycle). Spatie announces these only with
+         * permission.events_enabled, switched on for this. A change to a ROLE's own
+         * permissions is a deploy-time seeder operation, not a person's access
+         * changing, and is not followed here.
+         */
+        Event::listen(
+            [RoleAttached::class, RoleDetached::class, PermissionAttached::class, PermissionDetached::class],
+            function (RoleAttached|RoleDetached|PermissionAttached|PermissionDetached $event): void {
+                if ($event->model instanceof User) {
+                    AccessLifecycle::schedule($event->model, 'roles');
+                }
+            },
+        );
+
         /*
          * A JOB DOES NOT INHERIT THE PIN OF WHOEVER DISPATCHED IT.
          *

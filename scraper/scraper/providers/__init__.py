@@ -28,6 +28,7 @@ from scraper.providers.openstreetmap import OpenStreetMapProvider
 _PROVIDERS = {
     "openstreetmap": "OpenStreetMap Overpass/Nominatim (default, no API key)",
     "openai": "OpenStreetMap baseline PLUS AI-proposed candidates resolved against OSM",
+    "google_places": "Google Places (API New) Text Search, made by the CRM (which holds the key)",
 }
 
 #: The permanent baseline, and the end of every fallback chain. Named so the fallback path reads as
@@ -52,6 +53,9 @@ def build_openstreetmap(config: Config) -> OpenStreetMapProvider:
         nominatim_url=config.nominatim_url,
         user_agent=config.user_agent,
         timeout=config.request_timeout,
+        # ONE geocoder, ONE country fence. Google reaches its search box through this same provider,
+        # so restricting it here restricts every provider at once rather than per-adapter.
+        country_code=config.discovery_country or None,
     )
 
 
@@ -151,8 +155,25 @@ def get_provider(config: Config) -> DiscoveryProvider:
             ),
         )
 
+    if name == "google_places":
+        # Imported HERE, like the AI provider, so an OSM run never loads this path.
+        from scraper.providers.google_places import GooglePlacesProvider
+
+        # AN ADDITIONAL PROVIDER, NOT A REPLACEMENT: OpenStreetMap stays the default and the fallback.
+        # The OSM client is used only for its geocoder, so Google is restricted to the same bounding
+        # box an OSM run would sweep. No Google key here — the CRM holds it and makes the call.
+        return GooglePlacesProvider(
+            crm_base_url=config.crm_base_url,
+            crm_token=config.crm_token,
+            timeout=config.request_timeout,
+            osm=build_openstreetmap(config),
+            # EXPLICIT, and off unless an environment opts in. A Google-only run is factual discovery
+            # and must reach no model; the planner stays available for the future AI-enabled flow.
+            use_strategy=config.use_ai_strategy,
+        )
+
     raise ValueError(
         f"Unknown discovery provider '{config.discovery_provider}'. "
         f"Available: {', '.join(sorted(_PROVIDERS))} (alias: osm). "
-        f"Google Places and other providers are planned; add them here — no other code changes."
+        f"Add a provider here — no other code changes."
     )

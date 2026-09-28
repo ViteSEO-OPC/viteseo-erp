@@ -276,6 +276,16 @@
   html {
     @apply font-sans;
   }
+  /* The list a native <select> opens is drawn by the browser, not by our DOM, so no
+     utility on the <select> reaches it. Windows Chrome and Firefox paint it from the
+     <option>'s own colours and fall back to white when there are none -- a white list
+     on a dark page. Give the options the popover tokens, which flip with the theme
+     (and with the Zerem scope, which carries .dark on its own wrapper). */
+  select option,
+  select optgroup {
+    background-color: var(--popover);
+    color: var(--popover-foreground);
+  }
 }
 
 /* Payslip "Download PDF" = browser print, isolated to the .print-area element

@@ -1,5 +1,6 @@
 "use client";
 
+import { isAxiosError } from "axios";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { notify as toast } from "@/core/lib/notify";
 import { apiClient } from "@/modules/crm/lib/axios";
@@ -29,6 +30,18 @@ export function useQualifyProspect() {
       toast.success("Prospect qualified — added to your CRM leads");
     },
     onError: (err) => {
+      // 409 = another BD won the claim while this client's list was stale. Nothing broke and nothing
+      // was created, so report it the way the duplicate-Deal guard does (see use-lead-outcome) —
+      // neutral information, not a red failure. The backend sentence names the winner.
+      //
+      // Refetching the pool is the point. The board keeps claimed prospects listed, so the row comes
+      // back marked "Already in CRM" with its Accept disabled; without this it survives on a stale
+      // cache and the BD can press a live button repeatedly, getting the same 409 each time.
+      if (isAxiosError(err) && err.response?.status === 409) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.nearbyClients.all });
+        toast.info(getApiErrorMessage(err, "This prospect has already been added to the CRM."));
+        return;
+      }
       toast.error(getApiErrorMessage(err, "Failed to qualify prospect"));
     },
   });

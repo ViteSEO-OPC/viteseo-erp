@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import Link from "next/link";
-import { Zap, LogOut, ArrowRight, Lock, CreditCard, Building2, Waypoints } from "lucide-react";
+import { Zap, LogOut, ArrowRight, Lock, CreditCard, Building2, Waypoints, PhoneCall } from "lucide-react";
 
 import { useAuth, RequireAuth } from "@/core/auth-context";
 import { getModuleTiles } from "@/core/access";
@@ -208,6 +208,28 @@ function LauncherContent() {
                   <h2 className="text-h3 font-bold">Integrations</h2>
                   <p className="mt-1.5 text-caption text-muted-foreground">
                     Connect a customer’s systems — turn cross-module data flow on or off.
+                  </p>
+                </div>
+              </Link>
+              {/*
+                Read-only. A client's Twilio account is changed by their own admin on their own
+                settings screen; this is the only place the platform can SEE all of them at once,
+                because Zerem has no organization switcher.
+              */}
+              <Link
+                href="/admin/calling"
+                className="group flex flex-col rounded-card border border-border bg-card p-6 shadow-sm transition-all hover:-translate-y-0.5 hover:border-brand hover:shadow-md"
+              >
+                <div className="flex items-start justify-between">
+                  <span className="flex size-12 items-center justify-center rounded-xl bg-brand-subtle text-dark-teal">
+                    <PhoneCall className="size-6" />
+                  </span>
+                  <ArrowRight className="size-5 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-brand" />
+                </div>
+                <div className="mt-5">
+                  <h2 className="text-h3 font-bold">Calling</h2>
+                  <p className="mt-1.5 text-caption text-muted-foreground">
+                    Which customers have browser calling set up, and what each one is still missing.
                   </p>
                 </div>
               </Link>

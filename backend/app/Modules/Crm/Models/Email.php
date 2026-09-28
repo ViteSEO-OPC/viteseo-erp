@@ -22,6 +22,7 @@ use Illuminate\Support\Carbon;
  * @property Carbon|null $queued_at Cast to datetime; declared so static analysis applies the cast.
  * @property Carbon|null $failed_at Cast to datetime; declared so static analysis applies the cast.
  * @property Carbon|null $cancelled_at Cast to datetime; declared so static analysis applies the cast.
+ * @property array<string, mixed>|null $body_doc Tiptap document of a formatted reply; null = plain text.
  */
 #[Fillable([
     'lead_id',
@@ -34,6 +35,9 @@ use Illuminate\Support\Carbon;
     'to_name',
     'subject',
     'body',
+    // Formatted replies only (Lead Detail's composer): the validated Tiptap document the text/html
+    // part is rendered from at send time. Null for every other email — `body` stays canonical.
+    'body_doc',
     // RC3 Outreach Automation Pack — business purpose of the send (e.g. proposal, introduction,
     // thank_you). Nullable; set only by the automation send path. Drives the `proposal.sent` event.
     'purpose',
@@ -69,6 +73,7 @@ class Email extends Model
             'sent_at' => 'datetime',
             'received_at' => 'datetime',
             'raw_headers' => 'array',
+            'body_doc' => 'array',
             'scheduled_at' => 'datetime',
             'queued_at' => 'datetime',
             'failed_at' => 'datetime',

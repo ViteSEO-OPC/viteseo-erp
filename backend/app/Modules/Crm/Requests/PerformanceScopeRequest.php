@@ -9,7 +9,6 @@ use App\Support\OrgUserRule;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Foundation\Http\FormRequest;
-use Illuminate\Validation\Rule;
 
 /**
  * Resolves the reporting scope for the shared Performance endpoints (performance-summary, kpi-metrics,

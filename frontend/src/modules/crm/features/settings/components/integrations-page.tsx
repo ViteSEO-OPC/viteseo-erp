@@ -2,6 +2,7 @@
 
 import { GmailIntegrationPage } from "@/modules/crm/features/settings/components/gmail-integration-page";
 import { NerbyIntegrationCard } from "@/modules/crm/features/settings/components/nerby-integration-card";
+import { TwilioCallingCard } from "@/modules/crm/features/settings/components/twilio-calling-card";
 
 /**
  * Settings → Integrations. The page that owns the heading; each integration owns its own card.
@@ -38,6 +39,8 @@ export function IntegrationsPage({
       />
 
       <NerbyIntegrationCard />
+
+      <TwilioCallingCard />
     </div>
   );
 }

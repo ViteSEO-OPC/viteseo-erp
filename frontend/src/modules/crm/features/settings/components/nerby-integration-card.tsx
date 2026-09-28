@@ -42,7 +42,7 @@ const cardClass = "border border-border bg-card p-6 shadow-card";
  */
 type ProviderState = {
   label: string;
-  tone: "active" | "ready" | "pending" | "idle";
+  tone: "active" | "ready" | "pending" | "blocked" | "idle";
   hint: string;
 };
 
@@ -51,6 +51,19 @@ function providerState(
   integration: NerbyIntegration,
 ): ProviderState {
   const isRunning = provider.provider === integration.effectiveProvider;
+
+  // CHECKED BEFORE "Active", deliberately. A credential we KNOW cannot pay must never be painted as
+  // healthy, and that holds whether or not it is the provider currently selected — this is the same
+  // rule stated at the top of this file ("a provider that is selected but cannot run is Configured
+  // or Verified, never Active"), applied to the one failure that is certain to persist until a
+  // person acts on it. Every other status keeps its existing precedence.
+  if (provider.lastTestStatus === "insufficient_credit") {
+    return {
+      label: "No credit",
+      tone: "blocked",
+      hint: "The key works, but the account has no credit left. Add credit at the provider, then run Test connection again.",
+    };
+  }
 
   if (isRunning) {
     return {
@@ -93,9 +106,18 @@ function providerState(
 }
 
 const STATE_CLASS: Record<ProviderState["tone"], string> = {
-  active: "bg-teal-600 text-white",
-  ready: "border-teal-600 text-teal-800",
-  pending: "border-amber-300 text-amber-800",
+  // teal-600 (#009588) under white is 3.7:1 — below the 4.5:1 AA floor for this 12px label.
+  // teal-700 takes it to 5.2:1 while staying the same solid teal chip. Dark only; light is unchanged.
+  active: "bg-teal-600 text-white dark:bg-teal-700",
+  // `ready`/`pending` were written as OUTLINE chips — border + text, no surface. The call sites use
+  // Badge's default variant, whose `bg-primary` (bright cyan) therefore survives tailwind-merge and
+  // ends up under this text. Amber-on-cyan measured 1.17:1. Each state now carries its own surface,
+  // using the same amber/teal chip pattern as website-intel-badge.tsx.
+  ready: "border-teal-600 bg-teal-100 text-teal-800 dark:border-teal-700 dark:bg-teal-950/50 dark:text-teal-300",
+  pending: "border-amber-300 bg-amber-100 text-amber-800 dark:border-amber-800 dark:bg-amber-950/50 dark:text-amber-300",
+  // Same chip pattern as `ready`/`pending`, in the destructive hue: this is a blocker an operator
+  // has to act on, not a step that has yet to happen. rose-800 on rose-100 measures 7.4:1.
+  blocked: "border-rose-300 bg-rose-100 text-rose-800 dark:border-rose-800 dark:bg-rose-950/50 dark:text-rose-300",
   idle: "border-border text-muted-foreground",
 };
 
@@ -127,7 +149,7 @@ export function NerbyIntegrationCard() {
         <header className="flex items-start justify-between gap-4">
           <div className="flex items-start gap-3">
             <span className="mt-0.5 flex size-9 items-center justify-center rounded-lg bg-muted">
-              <Radar className="size-4 text-teal-700" aria-hidden />
+              <Radar className="size-4 text-teal-700 dark:text-teal-400" aria-hidden />
             </span>
             <div>
               <h3 className="text-base font-semibold text-foreground">Nearby Lead Generation</h3>
@@ -163,28 +185,76 @@ export function NerbyIntegrationCard() {
   );
 }
 
+/**
+ * The one provider that is an INTELLIGENCE layer rather than a source of businesses.
+ *
+ * Everything else in the list supplies facts — records, identifiers, coordinates — and belongs in
+ * the factual group automatically, including any provider added later. Only this one is special,
+ * so only this one is named.
+ */
+const INTELLIGENCE_PROVIDER = "openai";
+
+function SectionHeading({ title, detail }: { title: string; detail: string }) {
+  return (
+    <div className="mb-2">
+      <h4 className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+        {title}
+      </h4>
+      <p className="mt-1 text-xs text-muted-foreground">{detail}</p>
+    </div>
+  );
+}
+
+/**
+ * TWO SECTIONS, BECAUSE THERE ARE TWO DECISIONS.
+ *
+ * Presenting all three options as one radio list made them read as rivals, so choosing AI looked
+ * like the way to "turn AI on" — when it actually selects the AI-assisted OpenStreetMap lane, which
+ * is why enabling AI appeared to give an OSM map instead of Google's. Splitting the list says what
+ * the backend has always done: one choice decides where businesses come FROM (and therefore which
+ * map draws them), and a separate switch decides whether AI helps plan the search.
+ *
+ * The radio itself is unchanged — selecting AI still selects the AI-assisted OSM lane, because that
+ * is currently the only way to reach it. Nothing here alters provider resolution.
+ */
 function Body({ integration }: { integration: NerbyIntegration }) {
+  const factual = integration.providers.filter((p) => p.provider !== INTELLIGENCE_PROVIDER);
+  const intelligence = integration.providers.filter((p) => p.provider === INTELLIGENCE_PROVIDER);
+
   return (
     <>
       <EffectiveProviderSummary integration={integration} />
 
-      <div className="flex flex-col gap-3">
-        {integration.providers.map((provider) => (
-          <ProviderOption
-            key={provider.provider}
-            provider={provider}
-            integration={integration}
-          />
-        ))}
-
-        {/* ROADMAP ONLY — deliberately hard-coded rather than driven by the API, because Google
-            Places is not a provider the backend knows about. Rendering it from a real provider list
-            would mean inventing an option that cannot be selected. Disabled, no controls. */}
-        <ComingSoonOption
-          label="Google Places"
-          description="Structured places data with stable Place IDs, coordinates and website fields. Pending an evaluation of Philippine coverage, pricing, quotas and data-persistence licensing."
+      <section>
+        <SectionHeading
+          title="Factual discovery provider"
+          detail="Where discovered businesses actually come from. This choice also decides which map the Nearby board draws — OpenStreetMap results on the OpenStreetMap map, Google Places results on Google's."
         />
-      </div>
+        <div className="flex flex-col gap-3">
+          {factual.map((provider) => (
+            <ProviderOption key={provider.provider} provider={provider} integration={integration} />
+          ))}
+        </div>
+      </section>
+
+      {intelligence.length > 0 ? (
+        <section>
+          <SectionHeading
+            title="AI intelligence"
+            detail="Optional. AI plans HOW to search — query wording, place types, sub-areas — and never supplies a business, identifier or coordinate. Turning it ON assists whichever factual provider is selected, including Google Places. Selecting it below instead makes AI-assisted OpenStreetMap the factual provider."
+          />
+          <div className="flex flex-col gap-3">
+            {intelligence.map((provider) => (
+              <ProviderOption
+                key={provider.provider}
+                provider={provider}
+                integration={integration}
+                isIntelligence
+              />
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       <CapabilityTiers />
     </>
@@ -218,7 +288,9 @@ function EffectiveProviderSummary({ integration }: { integration: NerbyIntegrati
         <div
           className={cn(
             "flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2",
-            isFallback ? "border-amber-300 bg-amber-50/50" : "border-teal-600/40 bg-teal-50/40",
+            isFallback
+              ? "border-amber-300 bg-amber-50/50 dark:border-amber-700/60 dark:bg-muted/40"
+              : "border-teal-600/40 bg-teal-50/40 dark:border-teal-700/60 dark:bg-muted/40",
           )}
         >
           <span className="text-xs font-semibold uppercase tracking-[0.06em] text-muted-foreground">
@@ -241,7 +313,7 @@ function EffectiveProviderSummary({ integration }: { integration: NerbyIntegrati
       {isFallback ? (
         <div
           role="status"
-          className="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2.5 text-sm text-amber-900"
+          className="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2.5 text-sm text-amber-900 dark:border-amber-700/60 dark:bg-amber-950/20 dark:text-amber-200"
         >
           <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />
           <p>{fallbackMessage(integration)}</p>
@@ -272,9 +344,12 @@ function fallbackMessage(integration: NerbyIntegration): string {
 function ProviderOption({
   provider,
   integration,
+  isIntelligence = false,
 }: {
   provider: NerbyProviderConfig;
   integration: NerbyIntegration;
+  /** Renders this row as the optional intelligence layer rather than a source of businesses. */
+  isIntelligence?: boolean;
 }) {
   const select = useSelectNerbyProvider();
   const isSelected = provider.provider === integration.activeProvider;
@@ -289,9 +364,9 @@ function ProviderOption({
       className={cn(
         "rounded-lg border p-4 transition-colors",
         selectedButIdle
-          ? "border-amber-300 bg-amber-50/40"
+          ? "border-amber-300 bg-amber-50/40 dark:border-amber-700/60 dark:bg-card"
           : isSelected
-            ? "border-teal-600 bg-teal-50/40"
+            ? "border-teal-600 bg-teal-50/40 dark:border-teal-700/60 dark:bg-card"
             : "border-border bg-card",
       )}
     >
@@ -300,14 +375,20 @@ function ProviderOption({
           <input
             type="radio"
             name="nerby-provider"
-            className="mt-1 size-4 accent-teal-700"
+            className="mt-1 size-4 accent-teal-700 dark:accent-teal-400"
             checked={isSelected}
             disabled={select.isPending}
             onChange={() => select.mutate(provider.provider)}
           />
           <span>
             <span className="flex flex-wrap items-center gap-2">
-              <span className="text-sm font-semibold text-foreground">{provider.label}</span>
+              {/* Named for what SELECTING it does. The server's label ("OpenAI (AI-Powered)") reads
+                  as a peer provider, which is the confusion this card exists to remove; the factual
+                  lane it actually selects is OpenStreetMap. Presentation only — the server's
+                  vocabulary is untouched. */}
+              <span className="text-sm font-semibold text-foreground">
+                {isIntelligence ? "AI-assisted OpenStreetMap" : provider.label}
+              </span>
               {/* ONE state chip, not a pile of overlapping badges. Which lifecycle stage this
                   provider is at, ending at Active only when it is genuinely running. */}
               <Badge
@@ -321,14 +402,17 @@ function ProviderOption({
                   Baseline
                 </Badge>
               ) : null}
-              {provider.requiresCredentials ? (
+              {/* Only the intelligence layer is AI-powered. This was keyed to `requiresCredentials`,
+                  which is also true of Google Places — so a purely factual provider wore an AI badge,
+                  the exact conflation this grouping removes. */}
+              {isIntelligence ? (
                 <Badge variant="outline" className="gap-1">
                   <Sparkles className="size-3" aria-hidden />
                   AI-Powered
                 </Badge>
               ) : null}
               {isSelected && !isRunning ? (
-                <Badge variant="outline" className="border-amber-300 text-amber-800">
+                <Badge variant="outline" className="border-amber-300 text-amber-800 dark:border-amber-800 dark:text-amber-300">
                   Selected, not running
                 </Badge>
               ) : null}
@@ -491,7 +575,7 @@ function CredentialPanel({ provider }: { provider: NerbyProviderConfig }) {
       ) : null}
 
       {/* --- Connection status --- */}
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-muted/40 px-3 py-2.5">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-muted/40 px-3 py-2.5 dark:bg-muted/60">
         <div className="flex flex-col gap-0.5">
           <span className="flex items-center gap-2 text-sm text-foreground">
             <TestStatusChip provider={provider} />
@@ -537,7 +621,7 @@ function TestStatusChip({ provider }: { provider: NerbyProviderConfig }) {
   if (status === "ok") {
     return (
       <Badge variant="secondary" className="gap-1">
-        <CheckCircle2 className="size-3 text-teal-700" aria-hidden />
+        <CheckCircle2 className="size-3 text-teal-700 dark:text-teal-400" aria-hidden />
         {testStatusLabel(status)}
       </Badge>
     );
@@ -545,7 +629,7 @@ function TestStatusChip({ provider }: { provider: NerbyProviderConfig }) {
 
   if (status === "auth_failed" || status === "unreachable" || status === "rate_limited") {
     return (
-      <Badge variant="outline" className="gap-1 border-amber-300 text-amber-800">
+      <Badge variant="outline" className="gap-1 border-amber-300 text-amber-800 dark:border-amber-800 dark:text-amber-300">
         <AlertTriangle className="size-3" aria-hidden />
         {testStatusLabel(status)}
       </Badge>
@@ -556,30 +640,6 @@ function TestStatusChip({ provider }: { provider: NerbyProviderConfig }) {
   return <Badge variant="outline">{testStatusLabel(status)}</Badge>;
 }
 
-/** A roadmap entry. No controls, cannot be selected, and not backed by any provider. */
-function ComingSoonOption({ label, description }: { label: string; description: string }) {
-  return (
-    <div className="rounded-lg border border-dashed border-border bg-muted/20 p-4 opacity-70">
-      <div className="flex items-start gap-3">
-        <input
-          type="radio"
-          name="nerby-provider"
-          className="mt-1 size-4"
-          disabled
-          checked={false}
-          aria-label={`${label} — not yet available`}
-        />
-        <div>
-          <span className="flex flex-wrap items-center gap-2">
-            <span className="text-sm font-semibold text-muted-foreground">{label}</span>
-            <Badge variant="outline">Coming soon</Badge>
-          </span>
-          <p className="mt-1 text-xs text-muted-foreground">{description}</p>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 /**
  * What the AI provider can do today, what it needs, and what has yet to be proven — as three
@@ -592,7 +652,7 @@ function ComingSoonOption({ label, description }: { label: string; description: 
 const CAPABILITY_TIERS: { title: string; tone: string; items: string[] }[] = [
   {
     title: "Available now",
-    tone: "text-teal-800",
+    tone: "text-teal-800 dark:text-teal-300",
     items: [
       "Provider architecture and switching",
       "Secure server-side credential storage",
@@ -601,7 +661,7 @@ const CAPABILITY_TIERS: { title: string; tone: string; items: string[] }[] = [
   },
   {
     title: "Requires an API key",
-    tone: "text-amber-800",
+    tone: "text-amber-800 dark:text-amber-300",
     items: [
       "Broader business and niche discovery",
       "Natural-language discovery",
@@ -624,7 +684,7 @@ const CAPABILITY_TIERS: { title: string; tone: string; items: string[] }[] = [
 
 function CapabilityTiers() {
   return (
-    <section className="rounded-lg border border-border-subtle bg-muted/20 p-4">
+    <section className="rounded-lg border border-border-subtle bg-muted/20 p-4 dark:border-border dark:bg-muted/40">
       <h4 className="text-sm font-semibold text-foreground">AI-powered discovery</h4>
       <p className="mt-1 text-xs text-muted-foreground">
         These capabilities are potential advantages, not measured ones. No provider comparison has
@@ -634,7 +694,7 @@ function CapabilityTiers() {
       {/* The distinction that matters commercially AND for trust: a provider supplies FACTS, it does
           not supply judgements. Better facts may lead the existing scorer to a different answer; the
           scorer's rules never move, and no provider can hand the CRM a score or a priority. */}
-      <p className="mt-2 rounded-lg bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+      <p className="mt-2 rounded-lg bg-muted/50 px-3 py-2 text-xs text-muted-foreground dark:bg-muted/70">
         <span className="font-medium text-foreground">No provider sets Lead Score or Priority.</span>{" "}
         Discovery supplies candidate and fit data only, which is deterministically verified before a
         lead exists. The existing scoring rules — formulas, weights and caps — are unchanged and are

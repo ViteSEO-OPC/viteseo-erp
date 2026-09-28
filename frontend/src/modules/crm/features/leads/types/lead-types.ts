@@ -1,7 +1,5 @@
 import type { PriorityLevel, LeadStatus } from "@/modules/crm/features/dashboard/types/dashboard-types";
 
-export type { PriorityLevel, LeadStatus };
-
 export type WebsiteStatus =
   | "has-website"
   | "no-website"

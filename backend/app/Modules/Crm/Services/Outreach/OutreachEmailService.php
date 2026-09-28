@@ -8,6 +8,7 @@ use App\Modules\Crm\Models\EmailEvent;
 use App\Modules\Crm\Models\Lead;
 use App\Models\User;
 use App\Modules\Crm\Services\Mail\Contracts\EmailProvider;
+use App\Modules\Crm\Services\Mail\EmailDocument;
 use App\Modules\Crm\Services\Mail\EmailMessage;
 use App\Modules\Crm\Services\Mail\SentEmail;
 use App\Support\Mail\Module;
@@ -46,9 +47,13 @@ class OutreachEmailService
     }
 
     /**
+     * @param  array<string, mixed>|null  $bodyDoc  a VALIDATED email document for a formatted reply
+     *                                              (see SendEmailRequest), or null for plain text.
+     *                                              `$body` must already be its text projection.
+     *
      * @throws ValidationException when no recipient can be resolved
      */
-    public function sendToLead(Lead $lead, User $sender, string $subject, string $body, ?string $to = null): Email
+    public function sendToLead(Lead $lead, User $sender, string $subject, string $body, ?string $to = null, ?array $bodyDoc = null): Email
     {
         // Pre-flight recipient validation (422) BEFORE anything is persisted — a missing recipient is a
         // request error, not a delivery failure, so it must never create a history row.
@@ -70,6 +75,7 @@ class OutreachEmailService
             'to_name' => $lead->contact_name,
             'subject' => $subject,
             'body' => $body,
+            'body_doc' => $bodyDoc,
             'status' => 'sending',
             'attempts' => 1,
             // NOTE: queued_at is intentionally NOT set — it means "claimed by the background sender job"
@@ -128,7 +134,7 @@ class OutreachEmailService
 
         $toEmail = $this->resolveRecipient($lead, $email->to_email);
         $subject = (string) $email->subject;
-        $sent = $this->dispatch($lead, $toEmail, $subject, (string) $email->body);
+        $sent = $this->dispatch($lead, $toEmail, $subject, (string) $email->body, $this->htmlFor($email));
 
         $email = DB::transaction(function () use ($email, $lead, $sender, $subject, $toEmail, $sent): Email {
             $email->update([
@@ -151,6 +157,32 @@ class OutreachEmailService
         $this->announceIfSent($email);
 
         return $email;
+    }
+
+    /**
+     * The text/html part for this row, or null to send plain text exactly as before.
+     *
+     * Rendered HERE, at send time, from the stored document — which is what lets a scheduled email
+     * keep its formatting: the scheduler re-reads the row when it is due and arrives at this same
+     * line. The document is re-validated rather than trusted because it has been at rest in the
+     * database since it was accepted; a row that no longer validates is sent as plain text, never
+     * rendered on a best-effort basis.
+     */
+    private function htmlFor(Email $email): ?string
+    {
+        $doc = $email->body_doc;
+
+        if (! is_array($doc)) {
+            return null;
+        }
+
+        if (EmailDocument::problem($doc) !== null) {
+            Log::warning('outreach.body_doc.invalid', ['email_id' => $email->id]);
+
+            return null;
+        }
+
+        return EmailDocument::toHtml($doc);
     }
 
     /**
@@ -179,7 +211,7 @@ class OutreachEmailService
     }
 
     /** Hand the message to the configured transport (provider-agnostic). */
-    private function dispatch(Lead $lead, string $toEmail, string $subject, string $body): SentEmail
+    private function dispatch(Lead $lead, string $toEmail, string $subject, string $body, ?string $htmlBody = null): SentEmail
     {
         $from = $this->sender();
 
@@ -190,6 +222,7 @@ class OutreachEmailService
             body: $body,
             fromEmail: $from->address,
             fromName: $from->name,
+            htmlBody: $htmlBody,
         ));
     }
 

@@ -23,6 +23,8 @@ import { useBdUsers } from "@/modules/crm/hooks/use-bd-users";
 import { NicheSelect } from "@/modules/crm/components/shared/niche-select/niche-select";
 import {
   createLeadSchema,
+  UNASSIGNED_BD,
+  isUnassignedBd,
   SERVER_FIELD_TO_FORM,
   STEP_COUNT,
   STEP_FIELDS,
@@ -91,7 +93,7 @@ export function CreateLeadWizard({ open, onOpenChange }: Props) {
   // Only Admin/SA need the BD list (BDs lack users.view — avoid a 403).
   const { bdUsers } = useBdUsers(isManager);
 
-  const schema = useMemo(() => createLeadSchema(isManager), [isManager]);
+  const schema = useMemo(() => createLeadSchema(), []);
   const {
     register,
     control,
@@ -174,7 +176,10 @@ export function CreateLeadWizard({ open, onOpenChange }: Props) {
         ...(values.phone.trim() ? { phone: values.phone.trim() } : {}),
         ...(values.niche.trim() ? { industry: values.niche.trim() } : {}),
         ...(values.amount.trim() ? { amount: Number(values.amount) } : {}),
-        ...(values.assignedTo ? { assigned_to: Number(values.assignedTo) } : {}),
+        // Unassigned — the placeholder or the explicit option — sends no `assigned_to` at all,
+        // rather than a null or a 0 the backend would have to interpret. A BD creator never reaches
+        // this branch meaningfully: the server assigns their leads to them regardless.
+        ...(isUnassignedBd(values.assignedTo) ? {} : { assigned_to: Number(values.assignedTo) }),
         ...(values.website.trim() ? { website: values.website.trim() } : {}),
         ...(values.address.trim() ? { address: values.address.trim() } : {}),
         ...(values.notes.trim() ? { note: values.notes.trim() } : {}),
@@ -364,18 +369,22 @@ export function CreateLeadWizard({ open, onOpenChange }: Props) {
                 />
               </FormField>
 
+              {/* Optional: a lead may be created with no owner. Marked `optional` rather than
+                  `required`, and the explicit Unassigned option below the BD list makes "nobody
+                  yet" a choice instead of something expressed by not choosing. */}
               {isManager ? (
                 <FormField
                   label="Assign to Business Development Manager"
-                  required
+                  optional
                   error={errors.assignedTo?.message}
                 >
                   <SelectShell>
-                    <select className={SELECT} aria-required="true" {...register("assignedTo")}>
+                    <select className={SELECT} {...register("assignedTo")}>
                       <option value="">Select a BD&hellip;</option>
                       {bdUsers.map((u) => (
                         <option key={u.id} value={u.id}>{u.name}</option>
                       ))}
+                      <option value={UNASSIGNED_BD}>Unassigned</option>
                     </select>
                   </SelectShell>
                 </FormField>

@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Middleware\EndSessionsPastTheirCeiling;
+use App\Support\AccessLifecycle;
 use App\Http\Requests\Auth\LoginRequest;
 use App\Models\User;
 use App\Http\Resources\UserResource;
@@ -9,6 +11,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\ValidationException;
+use Laravel\Sanctum\PersonalAccessToken;
 
 /**
  * Core (shared) authentication controller.
@@ -38,6 +41,21 @@ class AuthController extends Controller
          * record saying it had signed in. Credentials first, account state second,
          * and only then a login that is true.
          */
+        /*
+         * The browser, and only the browser.
+         *
+         * A first-party request -- Origin or Referer on the app's own domain -- is
+         * given a session by Sanctum before it reaches here. Anything else is a
+         * script, and all this endpoint could hand a script is a bearer token: a
+         * 30-day credential that shows in no session list and ignores the idle
+         * timeout. Machine clients get theirs from `crm:n8n-token` instead.
+         *
+         * Refused before the password is checked, so it is no password oracle either.
+         */
+        if (! $request->hasSession()) {
+            abort(403, 'Sign in from the app.');
+        }
+
         if (! Auth::validate($credentials)) {
             // Same generic error whether the email or the password was wrong —
             // don't reveal which, and keep the { message, errors } envelope.
@@ -67,12 +85,22 @@ class AuthController extends Controller
         // and writes the audit row.
         Auth::login($user);
 
-        // A named token so it's identifiable; the plain text is shown once.
-        $token = $user->createToken('web')->plainTextToken;
+        // A new id for a new identity: a session id planted before sign-in is worth
+        // nothing after it.
+        $request->session()->regenerate();
+
+        $request->session()->put([
+            // What EndSessionsPastTheirCeiling counts thirty days from.
+            EndSessionsPastTheirCeiling::SIGNED_IN_AT => now()->getTimestamp(),
+            // Sanctum's AuthenticateSession ends a session whose stored hash no longer
+            // matches the password -- but it stores that hash only on the session's
+            // SECOND request, so a session that signed in and never came back would
+            // survive a password change. Stored here, it cannot.
+            'password_hash_web' => Auth::guard('web')->hashPasswordForCookie($user->getAuthPassword()),
+        ]);
 
         return response()->json([
             'data' => [
-                'token' => $token,
                 'user' => new UserResource($user),
                 'roles' => $user->getRoleNames(),
                 'employee' => $this->employeePayload($user),
@@ -136,7 +164,28 @@ class AuthController extends Controller
 
         $user = $request->user();
         $user->forceFill(['password' => \Illuminate\Support\Facades\Hash::make($data['password'])])->save();
-        $user->tokens()->where('id', '!=', $user->currentAccessToken()->id)->delete();
+        /*
+         * Every other device signs in again; this one does not.
+         *
+         * Other browser sessions end on their next request, when AuthenticateSession
+         * finds their stored hash no longer matches. This one survives because the
+         * new hash is stored in it -- under a NEW id, so a copy of this very cookie,
+         * which is what someone who stole it holds, dies with the old password.
+         * Tokens are revoked outright, except the one making this request when a
+         * machine client is the one making it.
+         */
+        $current = $user->currentAccessToken();
+
+        if ($current instanceof PersonalAccessToken) {
+            $user->tokens()->where('id', '!=', $current->id)->delete();
+        } else {
+            $user->tokens()->delete();
+            $request->session()->regenerate();
+            $request->session()->put('password_hash_web', Auth::guard('web')->hashPasswordForCookie($user->getAuthPassword()));
+        }
+
+        // Told now, so those browsers sign out at once rather than on their next click.
+        app(AccessLifecycle::class)->sessionEnded($user, 'password-changed');
 
         return response()->json(['data' => ['message' => 'Password updated.']]);
     }
@@ -144,11 +193,20 @@ class AuthController extends Controller
     /**
      * POST /api/v1/auth/logout
      *
-     * Revoke just the token used for this request (other devices stay logged in).
+     * End just the credential this request used -- other devices stay signed in.
+     * A browser ends its session; a machine client (n8n) revokes its token.
      */
     public function logout(Request $request): JsonResponse
     {
-        $request->user()->currentAccessToken()->delete();
+        $token = $request->user()->currentAccessToken();
+
+        if ($token instanceof PersonalAccessToken) {
+            $token->delete();
+        } else {
+            Auth::guard('web')->logout();
+            $request->session()->invalidate();
+            $request->session()->regenerateToken();
+        }
 
         return response()->json(['data' => ['message' => 'Logged out.']]);
     }

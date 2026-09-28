@@ -10,6 +10,8 @@ from scraper.website_discovery.tier0 import (
     TIER_WIKIDATA,
     LeadCandidates,
     candidates_for,
+    match_elements_to_leads,
+    name_match_score,
     parse_place_id,
 )
 
@@ -132,3 +134,189 @@ def test_every_lead_in_the_batch_gets_a_result():
 
     assert [r.lead_id for r in results] == ["1", "2", "3"]
     assert [len(r.candidates) for r in results] == [0, 1, 0]
+
+
+# --- a tier is only "run" where it could actually look ---------------------------------------------
+
+
+def test_osm_tiers_are_not_reported_as_run_for_a_google_place_id():
+    """THE EXHAUSTION HONESTY RULE.
+
+    Both tiers here resolve through an OSM element id. A Google Places lead carries
+    ``places/ChIJ…``, which this resolver cannot parse — so there is no element to read a ``website``
+    tag from and no ``brand:wikidata`` to follow. Reporting them as run would tell the CRM that two
+    independent tiers found nothing, and the CRM builds its exhaustion claim on exactly that list:
+    with every required tier reported, a search with no candidates resolves itself to ``no-website``
+    and the lead becomes High priority. Measured on the live pool, that would have asserted "this
+    business has no website" for hundreds of Google leads on the strength of one DNS probe.
+    """
+    leads = [{"id": "1", "placeId": "places/ChIJ_anF5hvJlzMR9ku"}]
+    result = candidates_for(leads, {}, {})[0]
+
+    assert result.tiers_run == []
+    # Still exhausted in the LOCAL sense — this tier found nothing — but the CRM will refuse to call
+    # that absence, because the tiers it requires were never reported.
+    assert result.exhausted is True
+
+
+def test_osm_tiers_are_still_reported_as_run_when_the_element_simply_had_no_website():
+    """ATTEMPTED-AND-EMPTY IS STILL RUN. An element with no ``website`` tag is a real negative
+    answer, and claiming the tier was skipped would understate that search."""
+    leads = [{"id": "2", "placeId": "node/12099865676"}]
+    result = candidates_for(leads, {"node/12099865676": {"amenity": "cafe"}}, {})[0]
+
+    assert result.tiers_run == [TIER_OSM_TAG, TIER_WIKIDATA]
+    assert result.candidates == []
+
+
+def test_an_osm_lead_with_a_website_tag_still_yields_its_candidate():
+    """The working path is untouched."""
+    leads = [{"id": "3", "placeId": "way/555"}]
+    result = candidates_for(leads, {"way/555": {"website": "https://example.ph"}}, {})[0]
+
+    assert [c["url"] for c in result.candidates] == ["https://example.ph"]
+    assert result.candidates[0]["source"] == TIER_OSM_TAG
+    assert result.exhausted is False
+
+
+# --- location resolution: giving Tier 0 somewhere to look for a Google lead -------------------------
+#
+# The Google pool's `places/ChIJ…` is not an OSM id and cannot be converted into one, so Tier 0 had
+# nowhere to look for every Google lead and `tiers_run` was honestly empty forever. These pin the
+# second way to reach the same element — the lead's own coordinates and name — and, just as hard,
+# every case where that must NOT produce a match.
+
+
+def google_lead(lead_id="1", name="Aling Nena Bakery", lat=14.5995, lon=120.9842,
+                place_id="places/ChIJ_anF5hvJlzMR9ku") -> dict:
+    return {"id": lead_id, "business": name, "placeId": place_id,
+            "latitude": lat, "longitude": lon}
+
+
+def osm_element(element_id=100, name="Aling Nena Bakery", lat=14.5995, lon=120.9842,
+                kind="node", **tags) -> dict:
+    return {"type": kind, "id": element_id, "lat": lat, "lon": lon,
+            "tags": {"name": name, **tags}}
+
+
+def test_a_google_lead_matches_a_real_element_by_coordinates_and_name():
+    resolved = match_elements_to_leads([google_lead()], [osm_element()])
+
+    assert resolved["places/ChIJ_anF5hvJlzMR9ku"]["osm_id"] == "node/100"
+    assert resolved["places/ChIJ_anF5hvJlzMR9ku"]["distance_m"] == 0.0
+
+
+def test_a_matched_element_makes_tier_0_genuinely_runnable():
+    """THE WHOLE POINT. With an element resolved, both tiers can look — so both are reported, and
+    the CRM's REQUIRED_TIERS can finally be satisfied by a search that actually happened."""
+    leads = [google_lead()]
+    resolved = match_elements_to_leads(leads, [osm_element()])
+    result = candidates_for(
+        leads,
+        {"places/ChIJ_anF5hvJlzMR9ku": resolved["places/ChIJ_anF5hvJlzMR9ku"]["tags"]},
+        {},
+        {"places/ChIJ_anF5hvJlzMR9ku": "node/100"},
+    )[0]
+
+    assert result.tiers_run == [TIER_OSM_TAG, TIER_WIKIDATA]
+    assert result.candidates == []          # the element had no website tag — a real negative answer
+
+
+def test_a_matched_element_yields_its_website_tag_with_the_element_named():
+    leads = [google_lead()]
+    result = candidates_for(
+        leads,
+        {"places/ChIJ_anF5hvJlzMR9ku": {"name": "Aling Nena Bakery", "website": "https://nena.ph"}},
+        {},
+        {"places/ChIJ_anF5hvJlzMR9ku": "node/100"},
+    )[0]
+
+    assert [c["url"] for c in result.candidates] == ["https://nena.ph"]
+    # Provenance names the matched element, so a reviewer can check the match instead of trusting it.
+    assert result.candidates[0]["source_detail"] == "website via node/100"
+
+
+def test_no_element_within_the_radius_is_not_a_match():
+    """~1.1 km away. Tier 0 stays unrun and the lead stays un-exhausted — the honest outcome."""
+    far = osm_element(lat=14.6095, lon=120.9842)
+
+    assert match_elements_to_leads([google_lead()], [far]) == {}
+
+
+def test_a_nearby_business_with_a_different_name_is_not_a_match():
+    """COORDINATES ARE NOT IDENTITY. At 120 m in a commercial district there are many businesses;
+    the name is what decides which of them this is."""
+    neighbour = osm_element(name="Mang Tomas Hardware")
+
+    assert match_elements_to_leads([google_lead()], [neighbour]) == {}
+
+
+def test_a_shared_generic_word_alone_is_not_a_match():
+    """Two unrelated businesses both being 'Inc' is not evidence they are the same one."""
+    lead_row = google_lead(name="Silver Oak Consultancy Inc")
+    other = osm_element(name="Golden Pacific Realty Inc")
+
+    assert match_elements_to_leads([lead_row], [other]) == {}
+
+
+def test_a_more_specific_osm_name_still_matches():
+    """OSM is routinely more specific than the Google record — the same restaurant, named longer."""
+    lead_row = google_lead(name="Jollibee")
+    branch = osm_element(name="Jollibee SM North EDSA")
+
+    assert match_elements_to_leads([lead_row], [branch])["places/ChIJ_anF5hvJlzMR9ku"]["score"] == 1.0
+
+
+def test_one_element_is_never_credited_to_two_leads():
+    """Two different businesses cannot be the same OSM element. Without this, same-named branches
+    would each be credited with the other's evidence."""
+    a = google_lead("1", lat=14.59950, lon=120.98420)
+    b = google_lead("2", lat=14.59951, lon=120.98421, place_id="places/ChIJ_second")
+    resolved = match_elements_to_leads([a, b], [osm_element()])
+
+    assert len(resolved) == 1
+
+
+def test_a_lead_without_coordinates_cannot_be_matched():
+    without = {"id": "9", "business": "Aling Nena Bakery", "placeId": "places/ChIJ_x",
+               "latitude": None, "longitude": None}
+
+    assert match_elements_to_leads([without], [osm_element()]) == {}
+
+
+def test_an_element_without_a_position_is_ignored_rather_than_assumed():
+    positionless = {"type": "way", "id": 7, "tags": {"name": "Aling Nena Bakery"}}
+
+    assert match_elements_to_leads([google_lead()], [positionless]) == {}
+
+
+def test_a_way_is_matched_through_its_centre():
+    way = {"type": "way", "id": 42, "center": {"lat": 14.5995, "lon": 120.9842},
+           "tags": {"name": "Aling Nena Bakery"}}
+
+    assert match_elements_to_leads([google_lead()], [way])["places/ChIJ_anF5hvJlzMR9ku"]["osm_id"] == "way/42"
+
+
+def test_an_unmatched_google_lead_keeps_tier_0_unrun():
+    """P2, restated against the new path: the resolver widens where we can look, never what we may
+    claim. No element resolved, no tiers reported, no exhaustion."""
+    result = candidates_for([google_lead()], {}, {}, {})[0]
+
+    assert result.tiers_run == []
+    assert result.exhausted is True
+
+
+def test_matching_is_case_and_accent_insensitive():
+    lead_row = google_lead(name="CAFÉ ADRIÁTICO")
+    element = osm_element(name="Cafe Adriatico")
+
+    assert match_elements_to_leads([lead_row], [element]) != {}
+
+
+def test_the_score_measures_the_lead_name_not_the_element_name():
+    """Asymmetric on purpose: the LEAD's words are what must be accounted for, and an element that
+    adds detail is still the same business."""
+    assert name_match_score("Mercury Drug Ayala", "Mercury Drug") == 2 / 3
+    assert name_match_score("Mercury Drug", "Mercury Drug Ayala Center Cebu") == 1.0
+    # Nothing distinctive on either side is nothing to corroborate.
+    assert name_match_score("Inc", "Inc") == 0.0

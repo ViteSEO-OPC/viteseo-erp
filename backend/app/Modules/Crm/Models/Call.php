@@ -6,6 +6,7 @@ use App\Models\Concerns\BelongsToOrg;
 use App\Models\User;
 use App\Modules\Crm\Database\Factories\CallFactory;
 use App\Modules\Crm\Enums\CallDirection;
+use App\Modules\Crm\Enums\CallDurationSource;
 use App\Modules\Crm\Enums\CallOutcome;
 use App\Modules\Crm\Enums\CallStatus;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -38,6 +39,7 @@ use Illuminate\Support\Carbon;
  * @property Carbon|null $started_at Cast to datetime; declared so static analysis applies the cast.
  * @property Carbon|null $ended_at Cast to datetime; declared so static analysis applies the cast.
  * @property int|null $duration_seconds
+ * @property CallDurationSource $duration_source Cast to enum; who measured $duration_seconds.
  * @property array<string, mixed>|null $signals Cast to array; RESERVED (unused in P1).
  */
 #[Fillable([
@@ -46,11 +48,16 @@ use Illuminate\Support\Carbon;
     // relationships / explicit association in CallSessionService, never mass-assigned from a client.
     'direction',
     'provider',
+    // The E.164 number handed to a carrier for this attempt. Null for a manual call — the CRM does
+    // not dial then, so it does not claim to know what was.
+    'to_number',
     'status',
     'outcome',
     'started_at',
     'ended_at',
     'duration_seconds',
+    // Whether $duration_seconds is the CRM's own measurement or a carrier's verified talk time.
+    'duration_source',
     'notes',
     'signals',
     'external_call_id',
@@ -93,6 +100,7 @@ class Call extends Model
             'started_at' => 'datetime',
             'ended_at' => 'datetime',
             'duration_seconds' => 'integer',
+            'duration_source' => CallDurationSource::class,
             'signals' => 'array',
         ];
     }

@@ -10,6 +10,7 @@ use App\Modules\Crm\Services\Website\WebsiteEvidenceService;
 use Database\Seeders\RolesAndPermissionsSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
+use Tests\Concerns\ActsAsNerbyService;
 use Tests\TestCase;
 
 /**
@@ -31,6 +32,7 @@ use Tests\TestCase;
  */
 class WebsiteEvidenceTierGateTest extends TestCase
 {
+    use ActsAsNerbyService;
     use RefreshDatabase;
 
     protected function setUp(): void
@@ -213,6 +215,57 @@ class WebsiteEvidenceTierGateTest extends TestCase
         $this->assertSame('high', (new NearbyClientResource($lead))->toArray(request())['priority']);
     }
 
+    public function test_a_live_candidate_refused_on_identity_withholds_the_absence_determination(): void
+    {
+        // A REFUSED CANDIDATE IS NOT AN ABSENT ONE. Exhaustion says every tier ran and nothing was
+        // VERIFIED; it does not say nothing was FOUND. A live page answered, bearing this business's
+        // name closely enough for a tier to propose it, and the verifier could not confirm it belonged
+        // to them — that is "we do not know", not "there is nothing".
+        //
+        // MEASURED: of the first 41 automatic determinations on the live pool, 12 held a live
+        // name-matching domain refused on identity alone. Matabungkay Beach Hotel was told it had no
+        // website while `matabungkaybeachhotel.com` was answering.
+        $lead = $this->discoveredLead();
+
+        $this->service()->recordCandidates($lead, [
+            ['url' => 'https://vigandentalcare.ph', 'source' => LeadWebsiteCandidate::SOURCE_PROBE],
+        ], WebsiteEvidenceService::REQUIRED_TIERS);
+
+        // A reachable page the verifier cannot tie to this business.
+        $this->service()->recordVerification(
+            LeadWebsiteCandidate::query()->where('lead_id', $lead->id)->firstOrFail(),
+            $this->weakFindings('https://vigandentalcare.ph'),
+        );
+        $this->service()->markExhausted($lead);
+
+        // The SEARCH still exhausts — there is nothing further to try, and that is evidence.
+        $this->assertTrue($this->service()->searchFor($lead)->isExhausted());
+        // The CONCLUSION is withheld. Insufficient evidence stays `website-unknown`.
+        $this->assertSame('website-unknown', $lead->refresh()->website_status);
+        $this->assertNull($this->service()->searchFor($lead)->confirmed_absent_at);
+    }
+
+    public function test_an_unreachable_candidate_does_not_withhold_the_determination(): void
+    {
+        // A name resolved and nothing answered. That is not a website, and it does not weaken an
+        // absence claim — the distinction the guard above turns on.
+        $lead = $this->discoveredLead();
+
+        $this->service()->recordCandidates($lead, [
+            ['url' => 'https://vigandentalcare.ph', 'source' => LeadWebsiteCandidate::SOURCE_PROBE],
+        ], WebsiteEvidenceService::REQUIRED_TIERS);
+
+        $this->service()->recordVerification(
+            LeadWebsiteCandidate::query()->where('lead_id', $lead->id)->firstOrFail(),
+            ['website_reachable' => false, 'final_url' => null, 'canonical_url' => null,
+             'website_title' => null, 'website_description' => null,
+             'phones_found' => [], 'emails_found' => []],
+        );
+        $this->service()->markExhausted($lead);
+
+        $this->assertSame('no-website', $lead->refresh()->website_status);
+    }
+
     public function test_the_determination_is_attributed_to_nobody(): void
     {
         // NULL `confirmed_by` is the marker distinguishing a machine determination from a signature.
@@ -248,10 +301,20 @@ class WebsiteEvidenceTierGateTest extends TestCase
         $this->assertSame('website-unknown', $lead->refresh()->website_status);
     }
 
-    public function test_a_refused_candidate_still_yields_a_determination(): void
+    public function test_a_refused_candidate_does_not_block_exhaustion_but_does_block_the_conclusion(): void
     {
-        // A candidate that was found and DISPROVED is stronger evidence than none at all; it must not
-        // block the conclusion the way an unchecked one does.
+        // THIS TEST USED TO ASSERT `no-website` HERE, on the reasoning that a candidate found and
+        // DISPROVED is stronger evidence than none at all. The first half is right and is still
+        // pinned below: a refused candidate must not stall the SEARCH the way an unchecked one does.
+        //
+        // The second half conflated two different refusals. `weakFindings()` is a page that ANSWERED
+        // and could not be tied to this business — "not proved theirs", not "disproved". On the live
+        // pool that same path refused `matabungkaybeachhotel.com` for Matabungkay Beach Hotel, and
+        // the lead was then told it had no website while its website was answering. Twelve of the
+        // first forty-one automatic determinations were that shape.
+        //
+        // So: the search exhausts, the evidence stands, and the machine declines to conclude. A human
+        // can still confirm absence against the trail through confirmAbsent().
         $lead = $this->discoveredLead();
 
         $this->service()->recordCandidates($lead, [
@@ -263,7 +326,8 @@ class WebsiteEvidenceTierGateTest extends TestCase
         $this->service()->markExhausted($lead);
 
         $this->assertFalse($candidate->refresh()->verified);
-        $this->assertSame('no-website', $lead->refresh()->website_status);
+        $this->assertTrue($this->service()->searchFor($lead)->isExhausted());
+        $this->assertSame('website-unknown', $lead->refresh()->website_status);
     }
 
     public function test_it_never_overwrites_a_status_somebody_else_set(): void
@@ -302,7 +366,7 @@ class WebsiteEvidenceTierGateTest extends TestCase
 
     public function test_a_probe_candidate_is_accepted_and_keeps_its_provenance(): void
     {
-        Sanctum::actingAs($this->user('crm_admin'));
+        $this->actingAsNerbyService();
         $lead = $this->discoveredLead();
 
         $this->postJson("/api/v1/crm/leads/{$lead->id}/website-candidates", [

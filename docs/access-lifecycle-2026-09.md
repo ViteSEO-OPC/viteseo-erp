@@ -168,11 +168,179 @@ a second click.
 
 ---
 
+## 4 · The browser holds no token
+
+### What was wrong
+
+A successful sign-in answered with a Sanctum token in the JSON body, and the
+frontend kept it in `localStorage["token"]`. Anything that runs on the page can
+read localStorage -- a compromised npm dependency, an injected script -- and so can
+anyone who opens DevTools. The token then worked from any machine for 30 days,
+used or not. Every sign-in minted a new one: 68 on live, 33 still valid.
+
+### What changed
+
+- The browser signs in with an **httpOnly session cookie** (Sanctum SPA mode,
+  `statefulApi()`). The login response carries no token, and a sign-in that does
+  not come from the app's own origin is refused (403) before the password is checked.
+- `/api/sanctum/csrf-cookie` -- moved under `/api`, because nginx sends only `/api/*`
+  to Laravel; the default `/sanctum/` would land on Next.js and 404.
+- `/broadcasting/auth` starts its own session; it is not in the `api` group.
+- Frontend: `withCredentials` + `withXSRFToken` on both axios clients; the two `fetch`
+  callers (realtime auth, keepalive note save) send the cookie and `X-XSRF-TOKEN`;
+  the sign-in probe on load is quiet, so `/forgot-password` is not bounced; 419 is
+  treated as 401; the old `localStorage["token"]` is deleted on every load.
+- Machine clients (n8n, the Zerem scraper) keep bearer tokens.
+- CORS offers credentials **only to origins named in `CORS_ALLOWED_ORIGINS`**.
+
+### Why it was built this way
+
+- nginx serves the frontend and the API from one origin, so the cookie needs no
+  cross-site arrangement -- and the `sessions` table already records the user,
+  address, browser and last activity of every session, which is the device list in §6.
+- **No token fallback for scripts.** A stolen password would otherwise buy a 30-day
+  credential that appears in no device list and ignores the idle timeout. In the
+  retained access logs every non-browser sign-in on live was an ops check, and all
+  of them failed (422).
+- **CORS credentials follow from naming origins, never from a flag.** With `'*'` the
+  CORS package answers credentialed requests by echoing whatever Origin asked, and
+  Lax cookies ride same-site requests -- so n8n, erp or portfolio on `viteseo.ph`
+  could read a signed-in user's API responses.
+- **"Not visible in inspect" means not readable by script.** The person at the
+  keyboard can still see their own cookie in DevTools → Application → Cookies; no
+  system can prevent that. `XSRF-TOKEN` is readable on purpose -- it is not a
+  credential, only proof a request came from a page on this site.
+- **Keep the Referer.** Chrome sends no `Origin` on same-origin GETs, so Sanctum
+  recognises the browser by `Referer`. A `Referrer-Policy: no-referrer` anywhere
+  (nginx, Next) would turn every GET into a 401. There is none today.
+
+---
+
+## 5 · How long a session lives
+
+| Rule | Where |
+|---|---|
+| **2 days without use** ends it | `SESSION_LIFETIME` (default now 2880). Live's `.env` says `120` -- **remove that line** or the idle timeout is two hours |
+| **30 days** ends it however busy | `EndSessionsPastTheirCeiling` -- the ceiling tokens had; sessions have none by default |
+| Changing the password keeps **this** device, under a new id, and ends every other | `AuthController::changePassword` |
+
+The password hash Sanctum's `AuthenticateSession` checks is stored at sign-in.
+Sanctum itself stores it only on a session's *second* request, so a session that
+signed in and never came back would have survived a password change. And because
+this device continues under a new session id, a copy of its cookie -- what someone
+who stole it holds -- dies with the old password too.
+
+---
+
+## 6 · Every signed-in device, and ending any of them
+
+"One device only", read literally, signs the HR officer's payroll screen out the
+moment they check something on their phone. Chosen instead: see every session,
+end any of them.
+
+- `GET /auth/sessions`, `DELETE /auth/sessions/{key}`, `DELETE /auth/sessions` (all others).
+- The key is the **SHA-256 of the session id**. The id itself is the cookie's
+  content -- a credential -- and never leaves the server.
+- A "Signed-in devices" card on the TeamOra, Zerem and Sprintly profile pages.
+
+---
+
+## 7 · Losing access reaches the page that is already open
+
+Refusing the next request was not enough: a page left open went on showing what
+its user could no longer see. `AccessLifecycle` now hears every change to what
+someone may use -- a role or permission (Spatie's events, switched on for this), a
+CRM suspension, the account's status, its deletion -- and:
+
+- **Nothing left** (the launcher's own rule: no `hr.`/`crm.`/`projects.`/`accounting.`/
+  `kiosk.` permission, `crm.` not counted while CRM-suspended, `hr_employee` always
+  counts) → every session and token ends **on the server**, then `AccessChanged`.
+- **Something left** → `AccessChanged` only. The browser re-reads who it is, and
+  `RequireModule` walks it out of the system it lost.
+
+### Why it is judged after the request, not on the spot
+
+Every `TeamController` swaps a module's presets by removing one role and then
+assigning the next. Judged between the two, a person whose only role was being
+swapped looks as if they have nothing left -- and would be signed out for being
+promoted. So the judgement is deferred to the end of the request, command or job,
+named per person so a burst of changes is judged once, and `always` so it runs even
+if the request then failed after the change landed.
+
+### How the page hears it
+
+CRM and Projects hold a socket and listen on `user.{id}`. HRIS and Accounting hold
+none, by design; they re-check when a tab comes back to the front -- **not on a
+timer**, which would keep an unattended session alive past its idle timeout -- and
+are refused on their next request regardless. The broadcast is queued: sessions
+and tokens are already gone by then, so a slow Reverb cannot fail a separation.
+
+Kiosk has no `RequireModule`: no role on live carries a `kiosk.*` permission, not
+even `super_admin`, so a gate would lock everyone out of it.
+
+---
+
+## 8 · Every token carries its own expiry
+
+The guard used to age tokens by `created_at` against `sanctum.expiration` (30 days)
+while `expires_at` sat NULL -- **alongside** `expires_at`, not instead of it, whatever
+the stock comment in `config/sanctum.php` says. With browsers on sessions, the
+tokens left are machine credentials, for which 30 days is a silent outage a month.
+
+- `sanctum.expiration` is off; each token's own `expires_at` is the only rule.
+- Migration `2026_09_10_010000` first writes into every existing row the expiry the
+  old rule implied (`created_at + 30 days`) -- nothing dead comes back, nothing alive
+  dies early -- and deletes every `web` token.
+- A token minted without an expiry gets 30 days. Machine tokens get 90:
+  `MachineTokens::issue()`, `n8n:token`, and `tokens:issue {email} {name} --days= --rotate`.
+- **The scraper's token (#137) still expires 2026-09-16 under the old rule.** After
+  this deploy: `php8.4 artisan tokens:issue scraper-service@crm.local scraper --rotate`,
+  then put the new value in `/var/lib/vss-scraper/.env`.
+
+### Found by the tests
+
+Three singletons carry state from one request to the next inside a single test
+process -- the auth guard, the session store (whose load *merges* into what it
+holds), and `auth.driver`, which is the `Guard::class` the database session driver
+asks whose session it is writing. Each is reset for every simulated browser
+request. Under PHP-FPM every request starts clean; this is a test concern only.
+
+---
+
 ## Deploying this branch
 
-**No migrations.** No dependency changes. `git pull` → `npm run build` →
-`pm2 restart` → `php8.4 artisan optimize:clear`. Rollback is
-`git reset --hard 1b22f59` and rebuild — the database is untouched by it.
+Two deploys are recorded here. The first (§1–§3) had no migrations and is live.
+**The second (§4–§8) has one, and changes how everyone signs in.**
+
+**Before:** back up the database, `personal_access_tokens` included, and tell staff
+that **everyone will be signed out once** and simply signs back in.
+
+1. `.env` — **delete `SESSION_LIFETIME=120`** (the default is now two days; left in,
+   the idle timeout is two hours) and **add `SESSION_SECURE_COOKIE=true`**. Leave
+   `CORS_ALLOWED_ORIGINS` unset in production.
+2. `git pull` → **`npm run build` first** → `php8.4 artisan migrate --force` (token
+   expiry; deletes the `web` tokens) → `optimize:clear` → `permission:cache-reset` →
+   reload `php8.4-fpm` → restart `vss-queue` and `vss-reverb` (`AccessChanged` is
+   queued and broadcast through them) → `pm2 restart`.
+
+   **Build before migrating.** The migration deletes the tokens the old frontend is
+   still sending, and the old frontend cannot sign anyone in against the new
+   backend. Built first, the new frontend replaces it seconds after the migration
+   instead of minutes.
+3. Re-mint the scraper's token (§8) and put it in `/var/lib/vss-scraper/.env`.
+4. Check from outside: `/api/sanctum/csrf-cookie` answers 204 and sets `XSRF-TOKEN`;
+   a sign-in without an `Origin` is 403; a real sign-in sets an `HttpOnly; Secure;
+   SameSite=Lax` cookie and returns no token; `/broadcasting/auth` without the
+   `X-XSRF-TOKEN` header is 419.
+
+**Rollback** is the previous commit and a rebuild, and is safe: the old frontend
+finds no token, its users sign in once more and get new ones. The migration is not
+undone -- deleted browser tokens stay deleted, and the explicit `expires_at` it wrote
+is honoured by the old code too.
+
+**Local development** needs `CORS_ALLOWED_ORIGINS=http://localhost:3000` in the
+backend `.env` (now in `.env.example`); without it the Next dev server's cookie never
+reaches `:8000`.
 
 `hr:apply-separations` runs from `HrServiceProvider`'s schedule, so it needs
 `php artisan schedule:run` on cron, which this host already has.

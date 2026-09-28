@@ -51,7 +51,15 @@ class IngestDiscoveredLeadsRequest extends FormRequest
             'businesses.*.place_id' => ['nullable', 'string', 'max:255'],
             'businesses.*.source' => ['required', 'string', 'max:255'],
             // The website URL (fit-data) — the input the Website Intelligence service later audits.
-            'businesses.*.website' => ['nullable', 'string', 'max:2048'],
+            //
+            // LENGTH IS NORMALIZED, NOT REJECTED — the same reasoning as `website_status` above. A
+            // `max:` here fails the WHOLE request, so a single pathological provider URL would 422 a
+            // batch of 500 good businesses; the scraper raises on that response and the entire
+            // discovery target dies, which is precisely the data loss this rule would appear to be
+            // preventing. LeadImportService drops a value beyond the storage ceiling
+            // (`WEBSITE_MAX_LENGTH`) and keeps the business, so an oversized URL costs its own field
+            // and nothing else. Body size is bounded by the 500-business cap and PHP's own limits.
+            'businesses.*.website' => ['nullable', 'string'],
         ];
     }
 }

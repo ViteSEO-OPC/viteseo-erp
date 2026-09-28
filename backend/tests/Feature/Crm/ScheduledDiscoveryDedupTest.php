@@ -4,9 +4,11 @@ namespace Tests\Feature\Crm;
 
 use App\Models\User;
 use App\Modules\Crm\Models\Lead;
+use App\Modules\Crm\Models\LeadWebsiteCandidate;
 use Database\Seeders\RolesAndPermissionsSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
+use Tests\Concerns\ActsAsNerbyService;
 use Tests\TestCase;
 
 /**
@@ -37,6 +39,7 @@ use Tests\TestCase;
  */
 class ScheduledDiscoveryDedupTest extends TestCase
 {
+    use ActsAsNerbyService;
     use RefreshDatabase;
 
     private const INGEST = '/api/v1/crm/leads/discovered';
@@ -67,7 +70,7 @@ class ScheduledDiscoveryDedupTest extends TestCase
     /** A scheduled run: the scraper POSTs one batch per target with dry_run = !--commit. */
     private function nightlyRun(array $businesses): array
     {
-        return $this->postJson(self::INGEST, ['dry_run' => false, 'businesses' => $businesses])
+        return $this->ingestDiscovered(['dry_run' => false, 'businesses' => $businesses])
             ->assertOk()
             ->json('data');
     }
@@ -176,23 +179,34 @@ class ScheduledDiscoveryDedupTest extends TestCase
 
     // ── Re-discovery refreshes fit-data without duplicating ─────────────────────────────────────
 
-    public function test_a_newly_found_website_is_backfilled_onto_the_existing_lead(): void
+    public function test_a_newly_found_website_is_proposed_to_website_intelligence_not_written(): void
     {
+        // H-3: discovery used to write a re-discovered URL straight into `website`, bypassing Website
+        // Intelligence (and able to replace an audited URL). It is now only a candidate for the
+        // identity verifier; the lead itself is not touched.
         $this->nightlyRun([$this->business('Alpha Pharmacy', 'node/1')]);
 
         $result = $this->nightlyRun([
             $this->business('Alpha Pharmacy', 'node/1', ['website' => 'https://alpha.ph']),
         ]);
 
+        $lead = Lead::query()->firstOrFail();
         $this->assertSame(0, $result['importedCount']);
-        $this->assertSame(1, $result['summary']['updated']);
-        $this->assertSame('https://alpha.ph', Lead::query()->first()->website);
+        $this->assertSame(0, $result['summary']['updated']);
+        $this->assertSame(1, $result['summary']['websiteCandidates']);
+        $this->assertNull($lead->website, 'discovery must never write an existing lead\'s website');
         $this->assertSame(1, Lead::query()->count());
+
+        $candidate = LeadWebsiteCandidate::query()->where('lead_id', $lead->id)->firstOrFail();
+        $this->assertSame('https://alpha.ph', $candidate->url);
+        $this->assertSame(LeadWebsiteCandidate::SOURCE_SEARCH, $candidate->source);
+        $this->assertSame('discovery:openstreetmap', $candidate->source_detail);
+        $this->assertNull($candidate->verified, 'only the identity verifier may accept it');
     }
 
     public function test_a_dry_run_never_writes(): void
     {
-        $this->postJson(self::INGEST, [
+        $this->ingestDiscovered([
             'dry_run' => true,
             'businesses' => [$this->business('Alpha Pharmacy', 'node/1')],
         ])->assertOk();

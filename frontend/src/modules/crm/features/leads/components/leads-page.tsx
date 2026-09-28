@@ -28,6 +28,8 @@ import { BulkStatusModal } from "@/modules/crm/features/leads/components/bulk-st
 import {
   useDeleteLead,
   useBulkDeleteLeads,
+  useDeleteAllLeads,
+  useDeletableLeadCount,
   useBulkAssignLeads,
   useBulkUpdateLeadStatus,
 } from "@/modules/crm/features/leads/hooks/use-lead-mutations";
@@ -44,6 +46,10 @@ export function LeadsPageLayout() {
   // page — the reset effect below clears it whenever the page or filters change.
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkOpen, setBulkOpen] = useState(false);
+  // "Archive all leads" is a separate dialog from the shared delete one below, not another mode of
+  // it: it needs its own copy, a server-supplied count, and an acknowledgement the others do not.
+  const [deleteAllOpen, setDeleteAllOpen] = useState(false);
+  const [deleteAllAcknowledged, setDeleteAllAcknowledged] = useState(false);
   const [bulkStatusOpen, setBulkStatusOpen] = useState(false);
   // Bulk Assign BD is a two-step flow: confirm the intent, THEN pick the BD. Two flags rather than
   // one so Cancel on the confirmation never opens the picker.
@@ -51,6 +57,9 @@ export function LeadsPageLayout() {
   const [bulkAssignPickerOpen, setBulkAssignPickerOpen] = useState(false);
   const deleteLead = useDeleteLead();
   const bulkDelete = useBulkDeleteLeads();
+  const deleteAll = useDeleteAllLeads();
+  // Fetched only while the dialog is open — a count for a decision, not page furniture.
+  const deletableCount = useDeletableLeadCount(deleteAllOpen);
   const bulkAssign = useBulkAssignLeads();
   const bulkStatus = useBulkUpdateLeadStatus();
   // Assign/Reassign ownership is Admin/SA only (leads.assign is not held by BD).
@@ -88,6 +97,24 @@ export function LeadsPageLayout() {
           return next;
         });
         setBulkOpen(false);
+      },
+    });
+  };
+
+  const openDeleteAll = () => {
+    // The acknowledgement resets every time, so a previous confirmation can never carry over into
+    // a later one.
+    setDeleteAllAcknowledged(false);
+    setDeleteAllOpen(true);
+  };
+
+  const handleDeleteAll = () => {
+    deleteAll.mutate(undefined, {
+      onSuccess: () => {
+        setDeleteAllOpen(false);
+        // Every lead in scope is gone from the live list, so any surviving selection refers to rows
+        // that are no longer there.
+        setSelectedIds(new Set());
       },
     });
   };
@@ -370,6 +397,7 @@ export function LeadsPageLayout() {
             onToggleSelectAll={toggleSelectAll}
             onClearSelection={clearSelection}
             onBulkDelete={() => setBulkOpen(true)}
+            onBulkDeleteAll={openDeleteAll}
             onBulkExport={handleBulkExport}
             onBulkStatus={() => setBulkStatusOpen(true)}
             bulkDeleting={bulkDelete.isPending}
@@ -477,6 +505,68 @@ export function LeadsPageLayout() {
           pending={bulkStatus.isPending}
         />
       ) : null}
+
+      {/* Archive all leads — its own dialog, because it is the one action here whose scope is not
+          what the user selected. The copy leads with what it actually does (archive, recoverable)
+          rather than with the word "delete", and the acknowledgement makes confirming a deliberate
+          act rather than a second click in the same place as Cancel. */}
+      <ConfirmDialog
+        open={deleteAllOpen}
+        onOpenChange={(o) => {
+          if (o) return;
+          if (deleteAll.isPending) return;
+          setDeleteAllOpen(false);
+        }}
+        title="Archive all leads?"
+        description="This affects every lead you have access to — not just the ones selected, and not just this page."
+        confirmLabel="Archive All Leads"
+        onConfirm={handleDeleteAll}
+        loading={deleteAll.isPending}
+        confirmDisabled={!deleteAllAcknowledged}
+        destructive
+      >
+        <div className="flex flex-col gap-3 text-sm">
+          <p className="text-muted-foreground">
+            {deletableCount.isLoading
+              ? "Counting affected leads…"
+              : deletableCount.isError || deletableCount.count === undefined
+                ? "Every lead in your scope will be moved to Archive."
+                : deletableCount.count === 0
+                  ? "There are no leads to archive."
+                  : null}
+            {!deletableCount.isLoading &&
+            !deletableCount.isError &&
+            typeof deletableCount.count === "number" &&
+            deletableCount.count > 0 ? (
+              <>
+                <span className="font-semibold text-card-foreground">
+                  {deletableCount.count.toLocaleString("en-PH")} lead
+                  {deletableCount.count === 1 ? "" : "s"}
+                </span>{" "}
+                will be moved to Archive.
+              </>
+            ) : null}
+          </p>
+          {/* The reassurance is the point: without it "delete all" reads as destruction, and the
+              team's instinct is to never touch it even when archiving is what they want. */}
+          <p className="text-muted-foreground">
+            They are <span className="font-medium text-card-foreground">not permanently deleted</span>{" "}
+            — you can find them under Archive and restore them from there.
+          </p>
+          <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-border bg-muted p-3">
+            <input
+              type="checkbox"
+              checked={deleteAllAcknowledged}
+              onChange={(e) => setDeleteAllAcknowledged(e.target.checked)}
+              disabled={deleteAll.isPending}
+              className="mt-0.5 h-4 w-4 shrink-0 accent-teal-400"
+            />
+            <span className="text-xs text-card-foreground">
+              I understand this archives every lead I have access to.
+            </span>
+          </label>
+        </div>
+      </ConfirmDialog>
 
       {/* One shared ConfirmDialog serves both single- and bulk-delete; only its text switches. */}
       <ConfirmDialog

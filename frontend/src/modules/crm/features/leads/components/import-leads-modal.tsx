@@ -270,7 +270,7 @@ export function ImportLeadsModal({ open, onOpenChange }: Props) {
                 Import Leads
               </DialogTitle>
               <DialogDescription className="mt-0.5 text-sm text-muted-foreground">
-                Upload CSV or XLSX file to bulk import leads into Viteseo
+                Bulk import leads from a CSV or Excel file — only Business Name is required
               </DialogDescription>
             </div>
             <button
@@ -303,7 +303,10 @@ export function ImportLeadsModal({ open, onOpenChange }: Props) {
             ) : null}
 
             {step === "empty" && (
-              <UploadDropzone onFile={handleFile} disabled={importLeads.isPending} />
+              <>
+                <UploadDropzone onFile={handleFile} disabled={importLeads.isPending} />
+                <FileRequirements />
+              </>
             )}
 
             {(step === "uploading" || step === "analyzing") && file && (
@@ -453,5 +456,62 @@ export function ImportLeadsModal({ open, onOpenChange }: Props) {
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/**
+ * What the importer actually expects, shown beside the dropzone at the upload step only.
+ *
+ * Every sentence here is the verified behaviour of LeadImportService, not a restatement of intent:
+ * `ImportLeadsRequest` caps the upload at 10 MB across csv/txt/xls/xlsx, `import()` shifts row 1 off
+ * as the header row, `business_name` is the sole required mapping, and `unknownColumns()` reports
+ * unrecognised headers rather than failing the file.
+ *
+ * The full column list sits behind a disclosure: twenty names are reference material a user consults
+ * once while preparing a sheet, and leaving them expanded pushes the dropzone off a laptop screen.
+ * The Website Domain warning stays outside it, because it is the one mistake a user makes silently —
+ * a column named "Website" maps to PRIORITY, so a sheet of domains imports as priorities and nothing
+ * reports an error.
+ */
+function FileRequirements() {
+  return (
+    <div className="rounded-lg border border-border-subtle bg-muted/30 p-4 dark:bg-muted/40">
+      <p className="text-sm font-semibold text-card-foreground">Before you upload</p>
+
+      <ul className="mt-2 flex flex-col gap-1 text-sm text-muted-foreground">
+        <li>• CSV or Excel (.csv, .xls, .xlsx) — up to 10 MB</li>
+        <li>• The first row must be your column headers</li>
+        <li>
+          • Only <span className="font-medium text-card-foreground">Business Name</span> is required.
+          Every other column is optional and can be in any order
+        </li>
+        <li>• Header names are flexible — “Company”, “Business” and “Organization” all work</li>
+        <li>• Columns we don’t recognise are listed in the preview and skipped, never rejected</li>
+        <li>• Duplicate email addresses are detected and skipped</li>
+        <li>• Imported leads are assigned to the Business Development Manager selected above</li>
+      </ul>
+
+      <p className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-700/60 dark:bg-amber-950/20 dark:text-amber-200">
+        <span className="font-semibold">Naming a website column:</span> use{" "}
+        <span className="font-semibold">“Website Domain”</span>. A column named just “Website” is read
+        as <span className="font-semibold">Priority</span>, not the site address.
+      </p>
+
+      <details className="group mt-3">
+        {/* teal-700, not `text-brand`: --brand is #4fdbd7, a bright cyan that only carries contrast
+            as a BACKGROUND (bg-brand text-brand-foreground). Every inline link in this module uses
+            the teal-700 / dark:teal-400 pair for exactly that reason. */}
+        <summary className="cursor-pointer list-none text-sm font-medium text-teal-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:text-teal-400">
+          <span className="group-open:hidden">Show recognised column names</span>
+          <span className="hidden group-open:inline">Hide recognised column names</span>
+        </summary>
+        <p className="mt-2 text-sm text-muted-foreground">
+          Business Name · Contact Name · Email Address · Phone Number · Industry · Address ·
+          Acquisition Channel · Website Domain · Priority · Email Outreach · Cold Calling ·
+          Update Status · Facebook · Instagram · TikTok · LinkedIn · Shopee · Lazada · TikTok Shop ·
+          Other Marketplace · Lead Note
+        </p>
+      </details>
+    </div>
   );
 }

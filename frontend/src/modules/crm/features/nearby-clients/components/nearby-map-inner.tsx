@@ -252,8 +252,27 @@ export function NearbyMapInner({ clients, origin, radiusKm, selectedId, onSelect
                       <WebsiteIntelBadge website={c.website} compact />
                     </div>
                   )}
+                  {/* Shared pool: a claimed prospect keeps its pin. Say who took it, so the popup
+                      explains the disabled button instead of just presenting one. */}
+                  {c.qualified && c.qualifiedBy && (
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Added by: <span className="font-medium">{c.qualifiedBy.name}</span>
+                    </p>
+                  )}
                   <div className="mt-2 flex flex-wrap items-center gap-2">
-                    <Button variant="default" size="sm" onClick={() => onQualify(c)}>Accept into CRM</Button>
+                    <Button
+                      variant="default"
+                      size="sm"
+                      disabled={c.qualified}
+                      onClick={() => onQualify(c)}
+                      title={
+                        c.qualified
+                          ? `Already accepted into the CRM${c.qualifiedBy ? ` by ${c.qualifiedBy.name}` : " by another BD"} — it can no longer be accepted.`
+                          : "Accept this prospect into your CRM leads"
+                      }
+                    >
+                      {c.qualified ? "Already in CRM" : "Accept into CRM"}
+                    </Button>
                     <Button variant="outline" size="sm" onClick={() => onPlanVisit(c)}>Plan visit</Button>
                     <Button variant="ghost" size="sm" onClick={() => onDirections(c)}>Directions</Button>
                   </div>

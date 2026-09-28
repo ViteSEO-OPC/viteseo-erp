@@ -18,6 +18,12 @@ export type SendEmailVars = {
    * same pipeline, no second send path. Omit it for the unchanged immediate send.
    */
   scheduledAt?: string;
+  /**
+   * A formatted reply's Tiptap document (Lead Detail's composer). Sent as `body_doc`; the server
+   * validates it, derives `body` from it and renders the HTML part itself — JSON only, never HTML.
+   * Omit it for the unchanged plain-text send every other caller makes.
+   */
+  bodyDoc?: import("@tiptap/react").JSONContent;
 };
 
 export type SentEmail = {
@@ -58,11 +64,13 @@ const draftsKey = [...queryKeys.followUps.all, "drafts"] as const;
 export function useSendEmail() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ leadId, subject, body, to, scheduledAt }: SendEmailVars) =>
+    mutationFn: ({ leadId, subject, body, to, scheduledAt, bodyDoc }: SendEmailVars) =>
       apiClient
         .post(`/leads/${leadId}/emails`, {
           subject,
           body,
+          // Only a formatted reply carries a document; every other caller's payload is unchanged.
+          ...(bodyDoc ? { body_doc: bodyDoc } : {}),
           ...(to ? { to } : {}),
           // Only sent when scheduling — its ABSENCE is what selects the immediate-send branch
           // server-side (`isset($data['scheduled_at'])`), so a null/empty value must never be sent.

@@ -9,6 +9,7 @@ use App\Modules\Crm\Services\Scoring\LeadScorer;
 use Database\Seeders\RolesAndPermissionsSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
+use Tests\Concerns\ActsAsNerbyService;
 use Tests\TestCase;
 
 /**
@@ -42,6 +43,7 @@ use Tests\TestCase;
  */
 class DiscoveryProviderScoringBoundaryTest extends TestCase
 {
+    use ActsAsNerbyService;
     use RefreshDatabase;
 
     private const FAKE_KEY = 'sk-test-not-a-real-credential-0000abcd';
@@ -102,7 +104,7 @@ class DiscoveryProviderScoringBoundaryTest extends TestCase
     /** Ingest one business and return the scoring-relevant state of the lead it produced. */
     private function ingestAndSnapshot(string $source, string $placeId, ?string $contactName = null): array
     {
-        $this->postJson('/api/v1/crm/leads/discovered', [
+        $this->ingestDiscovered([
             'businesses' => [$this->business($source, $placeId, $contactName)],
         ])->assertOk();
 
@@ -225,7 +227,7 @@ class DiscoveryProviderScoringBoundaryTest extends TestCase
 
         // The ingest allowlist excludes these entirely, so a provider cannot reach them even by
         // sending them. Asserted for the AI path specifically, since it is the new one.
-        $this->postJson('/api/v1/crm/leads/discovered', [
+        $this->ingestDiscovered([
             'businesses' => [[
                 ...$this->business('openai', 'node/444'),
                 'priority' => 'high',

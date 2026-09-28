@@ -1,5 +1,9 @@
 import { ClientRangeCard } from "@/modules/crm/features/nearby-clients/components/client-range-card";
 import { EmptyState } from "@/modules/crm/components/shared/empty-state/empty-state";
+import {
+  nearbyEmptyMessage,
+  nearbyEmptyReason,
+} from "@/modules/crm/features/nearby-clients/lib/empty-reason";
 import type { NearbyClient } from "@/modules/crm/features/nearby-clients/types/nearby-clients-types";
 
 type Props = {
@@ -16,14 +20,25 @@ type Props = {
    * mean opposite things to a BD, so they must not share a message.
    */
   poolIsEmpty: boolean;
+  /** The selected priority label, or "" when none is chosen. */
+  priorityFilter: string;
+  /** How many rows would show if the priority filter alone were dropped. */
+  matchesIgnoringPriority: number;
 };
 
-export function ClientsInRangeList({ clients, selectedId, onSelect, onPlanVisit, onDirections, onQualify, qualifyingId, poolIsEmpty }: Props) {
+export function ClientsInRangeList({ clients, selectedId, onSelect, onPlanVisit, onDirections, onQualify, qualifyingId, poolIsEmpty, priorityFilter, matchesIgnoringPriority }: Props) {
   const nearest = clients[0]?.distanceKm ?? null;
   const activeCount = clients.filter((c) => c.active).length;
 
   return (
     <div className="flex flex-col gap-3">
+      {/* THIS COUNT IS THE POOL, NOT A DISCOVERY RESULT, and the distinction is worth stating on
+          screen rather than assuming. "Clients in range: 438" sitting beside a map of the Philippines
+          invites exactly one reading — that a nationwide search found 438 businesses in the country —
+          and that reading is false in both directions: the pool holds everything ever discovered by
+          any lane plus whatever the current filters allow through, while a nationwide run's own
+          totals live in its progress panel and nowhere else. Naming it "in your pool" and saying so
+          underneath costs one line and removes the ambiguity. */}
       <div>
         <div className="flex items-center gap-2">
           <h3 className="text-sm font-bold text-card-foreground">Clients in range</h3>
@@ -32,8 +47,11 @@ export function ClientsInRangeList({ clients, selectedId, onSelect, onPlanVisit,
           </span>
         </div>
         <p className="mt-0.5 text-xs text-muted-foreground">
-          {nearest !== null ? `Nearest ${nearest.toFixed(1)} km · ` : ""}
-          {activeCount} active
+          {clients.length} in your prospect pool
+          {nearest !== null ? ` · nearest ${nearest.toFixed(1)} km` : ""} · {activeCount} active
+        </p>
+        <p className="mt-0.5 text-[11px] text-muted-foreground">
+          Your existing pool and current filters — not a discovery total.
         </p>
       </div>
 
@@ -54,11 +72,16 @@ export function ClientsInRangeList({ clients, selectedId, onSelect, onPlanVisit,
         </div>
       ) : (
         <EmptyState
-          message={
-            poolIsEmpty
-              ? "No discovered businesses yet. Run discovery to populate the Prospect Pool."
-              : "No clients match these filters."
-          }
+          message={nearbyEmptyMessage(
+            // Never null here: this branch only renders when there are no rows.
+            nearbyEmptyReason({
+              visibleCount: clients.length,
+              poolIsEmpty,
+              priorityFilter,
+              matchesIgnoringPriority,
+            }) ?? "filters-excluded-all",
+            priorityFilter,
+          )}
         />
       )}
     </div>

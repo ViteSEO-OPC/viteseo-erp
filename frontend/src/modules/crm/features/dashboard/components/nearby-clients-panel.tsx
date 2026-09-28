@@ -1,6 +1,8 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { useAuth } from "@/modules/crm/providers/auth-provider";
+import { canAccessPath } from "@/modules/crm/lib/rbac";
 import { SectionHeader } from "@/modules/crm/components/shared/section-header/section-header";
 import { EmptyState } from "@/modules/crm/components/shared/empty-state/empty-state";
 import { ErrorState } from "@/modules/crm/components/shared/error-state/error-state";
@@ -28,6 +30,9 @@ const LIST_LIMIT = 12;
 // the client list scrolling internally rather than growing the card.
 const PANEL_HEIGHT = "h-[380px]";
 
+/** The page this card previews. Gating on the href keeps the two answers from ever disagreeing. */
+const NEARBY_HREF = "/zerem/nearby-clients";
+
 /**
  * Dashboard "Nearby Clients" widget — map plus the closest saved clients.
  *
@@ -38,12 +43,29 @@ const PANEL_HEIGHT = "h-[380px]";
  * Distance: `distanceKm` is only defined once a search origin is chosen (a target location or
  * browser geolocation), which happens on the Nearby Clients page. The dashboard does not prompt for
  * location, so distance renders as "—" with an explanation rather than a fabricated figure.
+ *
+ * Role-gated against the page it previews (🔒 RBAC Hardening R-2: Nearby is BD + Super Admin). Today
+ * only a BD reaches this file at all — /zerem/dashboard routes Admin/Super Admin to the Management
+ * Dashboard — so the gate changes nothing yet. It exists because that routing, and PAGE_ACCESS, are
+ * each one edit away from putting a card here that links somewhere the RoleGuard bounces.
  */
 export function NearbyClientsPanel() {
+  const { user } = useAuth();
+
+  // Gate BEFORE the inner component mounts, not inside it: `useNearbyClients` fetches on mount with
+  // no `enabled` option, so gating in one component would still fire GET /nearby-clients and render
+  // the "Failed to load" ErrorState for a caller the API is correctly refusing. Splitting keeps the
+  // hook unconditional within each component (rules of hooks) while the request never leaves.
+  if (!canAccessPath(user?.roles, NEARBY_HREF)) return null;
+
+  return <NearbyClientsPanelBody />;
+}
+
+function NearbyClientsPanelBody() {
   const router = useRouter();
   const { clients, origin, filters, isLoading, isError } = useNearbyClients();
 
-  const goToPage = () => router.push("/zerem/nearby-clients");
+  const goToPage = () => router.push(NEARBY_HREF);
   const visible = clients.slice(0, LIST_LIMIT);
 
   return (
@@ -51,7 +73,7 @@ export function NearbyClientsPanel() {
       <SectionHeader
         title="Nearby Clients"
         linkText="View Nearby Clients"
-        linkHref="/zerem/nearby-clients"
+        linkHref={NEARBY_HREF}
         linkClassName="text-dashboard-link"
       />
 

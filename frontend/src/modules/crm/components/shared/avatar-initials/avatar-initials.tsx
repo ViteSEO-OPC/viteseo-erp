@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { cn } from "@/modules/crm/lib/utils";
 
 type AvatarInitialsProps = {
@@ -22,20 +22,50 @@ const sizeMap = {
  * Next could be configured for — running it through the optimiser would mean caching a link that
  * expires. Same call the HR employee avatar already makes.
  *
- * `onError` is what makes an expired or unreachable link harmless: it falls back to initials rather
- * than leaving a broken-image glyph in the header.
+ * A failed load — an expired link, or a photo whose file is gone — falls back to initials rather than
+ * leaving a broken-image glyph in the header.
+ *
+ * ── Why the failure is not handled with an `onError` prop ──
+ * React sets an `<img>`'s `src` while RENDERING, on an element not yet in the page, and the browser
+ * starts fetching at that moment. A URL that fails fast (a 404 answers in milliseconds) can fire
+ * `error` before React has committed this component, and `onError={() => setBroken(true)}` then
+ * updates a component that has not mounted — React's "Can't perform a React state update on a
+ * component that hasn't mounted yet" warning, raised from the topbar on every CRM page for an
+ * account whose stored photo is missing.
+ *
+ * So the image is watched from a ref callback instead, which React only calls once the element is
+ * committed to the page. A failure that already happened is read from the element itself
+ * (`complete` with no intrinsic width means the request is broken); anything later arrives through
+ * the listener. The fallback is exactly what it was — only WHEN the state is set has changed.
  */
 export function AvatarInitials({ src, initials, size = "sm" }: AvatarInitialsProps) {
   const [broken, setBroken] = useState(false);
   const fallback = initials.slice(0, 2).toUpperCase();
 
+  // Stable on purpose: a new function identity would make React detach and re-attach the ref on
+  // every render. The listener stays on the element when only `src` changes, so a later failure is
+  // still heard.
+  const watchForFailure = useCallback((img: HTMLImageElement | null) => {
+    if (!img) return;
+
+    const markBroken = () => setBroken(true);
+
+    if (img.complete && img.naturalWidth === 0) {
+      markBroken();
+      return;
+    }
+
+    img.addEventListener("error", markBroken);
+    return () => img.removeEventListener("error", markBroken);
+  }, []);
+
   if (src && !broken) {
     return (
       // eslint-disable-next-line @next/next/no-img-element -- signed URL from the API origin, not an optimised Next asset
       <img
+        ref={watchForFailure}
         src={src}
         alt={initials}
-        onError={() => setBroken(true)}
         className={cn("shrink-0 rounded-full object-cover", sizeMap[size])}
       />
     );

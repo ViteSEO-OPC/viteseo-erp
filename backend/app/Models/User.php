@@ -11,6 +11,7 @@ use App\Modules\Projects\Models\Link;
 use App\Modules\Projects\Models\Project;
 use App\Modules\Projects\Models\Subtask;
 use App\Modules\Projects\Models\Task;
+use App\Support\AccessLifecycle;
 use App\Support\CurrentOrg;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -37,6 +38,21 @@ class User extends Authenticatable
 {
     /** @use HasFactory<UserFactory> */
     use HasApiTokens, HasRoles, HasFactory, Notifiable, SoftDeletes;
+
+    /**
+     * Closing, reopening or deleting the account changes everything they may use at
+     * once, so their open sessions are judged again (AccessLifecycle).
+     */
+    protected static function booted(): void
+    {
+        static::updated(function (User $user): void {
+            if ($user->wasChanged('status')) {
+                AccessLifecycle::schedule($user, 'status');
+            }
+        });
+
+        static::deleted(fn (User $user) => AccessLifecycle::schedule($user, 'deleted'));
+    }
 
     /**
      * Platform-level account state — whether this person may sign in at all.

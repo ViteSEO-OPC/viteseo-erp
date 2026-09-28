@@ -10,6 +10,7 @@ use Database\Seeders\RolesAndPermissionsSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Defer\DeferredCallbackCollection;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -362,6 +363,12 @@ class DashboardBdPerformanceTest extends TestCase
             $this->plannerEvent($bd, 'follow-up');
             $this->plannerEvent($bd, 'email');
         }
+
+        // Granting each new BD their role queued an access check for them (AccessLifecycle). In
+        // production that runs after the response of the request that granted it; a test has no
+        // such request, so it would drain inside the next one -- this measurement -- and be read
+        // as queries the dashboard made. Run it here, where it belongs.
+        app(DeferredCallbackCollection::class)->invoke();
 
         DB::flushQueryLog();
         DB::enableQueryLog();

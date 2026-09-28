@@ -3,6 +3,7 @@
 namespace App\Modules\Crm\Services\Calling;
 
 use App\Models\User;
+use App\Modules\Crm\Enums\CallDurationSource;
 use App\Modules\Crm\Enums\CallOutcome;
 use App\Modules\Crm\Enums\CallStatus;
 use App\Modules\Crm\Models\Call;
@@ -45,9 +46,13 @@ class CallSessionService
      * "Start Call" on a scheduled call task). The event must be lead-linked; the single-active-call
      * invariant is enforced. Returns the freshly opened `in_progress` Call.
      */
-    public function startForEvent(PlannerEvent $event, User $agent): Call
-    {
-        return DB::transaction(fn (): Call => $this->open($event, $agent));
+    public function startForEvent(
+        PlannerEvent $event,
+        User $agent,
+        string $provider = ManualCallProvider::NAME,
+        ?string $toNumber = null,
+    ): Call {
+        return DB::transaction(fn (): Call => $this->open($event, $agent, $provider, $toNumber));
     }
 
     /**
@@ -55,9 +60,13 @@ class CallSessionService
      * (so Planner stays the source of truth), then opens the Call against it, atomically. The event is
      * owned by the lead's BD when there is one, else the acting agent.
      */
-    public function startAdHoc(Lead $lead, User $agent): Call
-    {
-        return DB::transaction(function () use ($lead, $agent): Call {
+    public function startAdHoc(
+        Lead $lead,
+        User $agent,
+        string $provider = ManualCallProvider::NAME,
+        ?string $toNumber = null,
+    ): Call {
+        return DB::transaction(function () use ($lead, $agent, $provider, $toNumber): Call {
             $event = PlannerEvent::create([
                 'event_type' => 'call',
                 'title' => "{$this->leadName($lead)} — call",
@@ -71,7 +80,7 @@ class CallSessionService
                 'created_by' => $agent->id,
             ]);
 
-            return $this->open($event, $agent);
+            return $this->open($event, $agent, $provider, $toNumber);
         });
     }
 
@@ -95,12 +104,113 @@ class CallSessionService
     }
 
     /**
+     * Record the provider's own id for a call (Twilio's Call SID), once its webhook first reaches us.
+     *
+     * Idempotent and write-once: a retried webhook re-sends the same SID and must not churn the row,
+     * and a DIFFERENT sid arriving for a call that already has one is ignored rather than allowed to
+     * overwrite — that would silently re-point a CRM record at another provider call.
+     */
+    public function attachProviderCall(Call $call, string $externalCallId): Call
+    {
+        if ($call->external_call_id === null && $externalCallId !== '') {
+            $call->forceFill(['external_call_id' => $externalCallId])->save();
+        }
+
+        return $call;
+    }
+
+    /**
+     * Conclude a call from the PROVIDER's report rather than a BD's selection.
+     *
+     * Two things separate this from {@see complete}, and both exist because the caller is an
+     * unauthenticated webhook that may fire more than once:
+     *
+     *  - It is IDEMPOTENT. A duplicate callback for an already-concluded call is a no-op that returns
+     *    the row untouched, instead of {@see assertActive}'s ValidationException. Twilio retries on any
+     *    non-2xx, so throwing here would turn one delivery hiccup into an error loop.
+     *  - The duration is the CARRIER's, not the wall-clock between two API calls. `$durationSeconds`
+     *    is the dialed leg's real talk time; it is only trusted when the provider actually reported
+     *    one, and the CRM's own measurement is used as the fallback.
+     *
+     * There is no acting user — nobody clicked anything — so the Activity is attributed to the agent
+     * who opened the call, which is who placed it.
+     */
+    public function completeFromProvider(Call $call, CallOutcome $outcome, ?int $durationSeconds): Call
+    {
+        return DB::transaction(function () use ($call, $outcome, $durationSeconds): Call {
+            // Re-read under a lock: two Twilio retries can land concurrently, and without this both
+            // would see `in_progress` and both would finalize.
+            //
+            // Unscoped for the same reason the webhook's lookup is: the caller is an unauthenticated
+            // provider callback, so the tenant scope would resolve to the wrong org and lose the row.
+            // Identity is not at stake — this re-reads BY PRIMARY KEY a model the caller already
+            // holds, whose org was fixed when an authenticated BD opened it.
+            $locked = Call::query()
+                ->withoutGlobalScope('org')
+                ->whereKey($call->getKey())
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            if ($locked->status !== CallStatus::IN_PROGRESS) {
+                return $locked;
+            }
+
+            $agent = $locked->agent()->first();
+            $endedAt = now();
+
+            $locked->status = CallStatus::COMPLETED;
+            $locked->outcome = $outcome;
+            $locked->ended_at = $endedAt;
+            // The carrier's number when it reported one, the CRM's own clock otherwise — and the row
+            // records WHICH, because `provider = twilio` alone would present a fallback measurement as
+            // verified talk time.
+            $locked->duration_seconds = $durationSeconds ?? $this->durationSeconds($locked->started_at, $endedAt);
+            $locked->duration_source = $durationSeconds === null
+                ? CallDurationSource::MANUAL
+                : CallDurationSource::PROVIDER;
+            $locked->save();
+
+            $event = $locked->plannerEvent()->firstOrFail();
+
+            // The SAME frozen disposition policy the manual path uses — only a connected call fulfills
+            // the planned activity. Deliberately not re-implemented differently for providers.
+            if ($outcome === CallOutcome::CONNECTED && $event->status !== 'completed') {
+                $event->update(['status' => 'completed']);
+            }
+
+            if ($agent !== null) {
+                $this->logActivity(
+                    $locked->lead()->firstOrFail(),
+                    $agent,
+                    'call.completed',
+                    "{$agent->name} logged a {$outcome->label()} call with {$this->leadName($locked->lead)}",
+                    [
+                        'call_id' => $locked->id,
+                        'planner_event_id' => $locked->planner_event_id,
+                        'outcome' => $outcome->value,
+                        'duration_seconds' => $locked->duration_seconds,
+                        // Marks the disposition as carrier-reported rather than BD-selected, so the
+                        // timeline can never be mistaken for a human judgement.
+                        'reported_by' => $locked->provider,
+                    ],
+                );
+            }
+
+            return $locked;
+        });
+    }
+
+    /**
      * Shared open path (runs inside a transaction opened by the caller). Locks the owning event row so
      * concurrent starts serialize, enforces the lead + single-active-call invariants, creates the Call,
      * reflects the start on the Planner board, and logs `call.started`.
      */
-    private function open(PlannerEvent $event, User $agent): Call
-    {
+    private function open(
+        PlannerEvent $event,
+        User $agent,
+        string $provider = ManualCallProvider::NAME,
+        ?string $toNumber = null,
+    ): Call {
         // Row lock on the owning event — the single-active-call guard below is only safe under it.
         $event = PlannerEvent::query()->whereKey($event->getKey())->lockForUpdate()->firstOrFail();
 
@@ -123,7 +233,18 @@ class CallSessionService
 
         $lead = $event->lead()->firstOrFail();
 
-        $call = new Call(['started_at' => now()]);
+        // `provider` names the transport this attempt uses and `to_number` snapshots what was handed
+        // to a carrier. Under the manual provider the CRM does not dial, so `to_number` stays null
+        // rather than copying the lead's number and implying knowledge the CRM does not have.
+        $call = new Call([
+            'started_at' => now(),
+            'provider' => $provider,
+            'to_number' => $toNumber,
+            // Every call starts as CRM-timed, including a browser one: until a carrier reports a
+            // duration there is nothing but the CRM's own clock, and a Twilio call whose completion
+            // webhook never arrives must not end up claiming verified talk time it never received.
+            'duration_source' => CallDurationSource::MANUAL,
+        ]);
         $call->plannerEvent()->associate($event);
         $call->lead()->associate($lead);
         $call->agent()->associate($agent);

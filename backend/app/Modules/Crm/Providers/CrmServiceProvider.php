@@ -5,8 +5,11 @@ namespace App\Modules\Crm\Providers;
 use App\Models\User;
 use App\Modules\Crm\Console\Commands\BackfillNichesCommand;
 use App\Modules\Crm\Console\Commands\BackfillPlannerOwnershipCommand;
+use App\Modules\Crm\Console\Commands\CallingDoctorCommand;
+use App\Modules\Crm\Console\Commands\EnrichDiscoveredWebsitesCommand;
 use App\Modules\Crm\Console\Commands\SyncMailboxesCommand;
 use App\Modules\Crm\Console\Commands\N8nTokenCommand;
+use App\Modules\Crm\Console\Commands\NerbyServiceTokenCommand;
 use App\Modules\Crm\Console\Commands\PruneReadNotifications;
 use App\Modules\Crm\Console\Commands\PruneXlsImportsCommand;
 use App\Modules\Crm\Console\Commands\RecomputeLeadScoresCommand;
@@ -47,8 +50,11 @@ use App\Modules\Crm\Policies\NotePolicy;
 use App\Modules\Crm\Policies\PlannerEventPolicy;
 use App\Modules\Crm\Policies\UserPolicy;
 use App\Modules\Crm\Services\BusinessRules\ScoringConfigProvider;
+use App\Modules\Crm\Services\Discovery\Contracts\DiscoveryStrategist;
 use App\Modules\Crm\Services\Discovery\Contracts\ProposalGenerator;
 use App\Modules\Crm\Services\Discovery\Contracts\TagExpander;
+use App\Modules\Crm\Services\Discovery\Geo\PhilippinesBoundary;
+use App\Modules\Crm\Services\Discovery\OpenAiDiscoveryStrategist;
 use App\Modules\Crm\Services\Discovery\OpenAiProposalGenerator;
 use App\Modules\Crm\Services\Discovery\OpenAiTagExpander;
 use App\Modules\Crm\Services\Kpi\KpiConfig;
@@ -66,6 +72,8 @@ use Illuminate\Notifications\Events\NotificationSent;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Auth\Events\Login;
 use Illuminate\Support\Facades\Event;
+use App\Modules\Crm\Services\Discovery\NerbyServiceIdentity;
+use App\Support\ServiceTokens;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
@@ -109,6 +117,21 @@ class CrmServiceProvider extends ServiceProvider
         // or model change takes effect on the next request rather than after a restart.
         $this->app->bind(ProposalGenerator::class, OpenAiProposalGenerator::class);
         $this->app->bind(TagExpander::class, OpenAiTagExpander::class);
+        // The provider-NEUTRAL form of tag expansion: one strategy answered in every dialect the
+        // discovery providers speak, so an AI-assisted run assists whichever provider is executing
+        // rather than only the OpenStreetMap sweep. Bound the same way and for the same reason.
+        $this->app->bind(DiscoveryStrategist::class, OpenAiDiscoveryStrategist::class);
+
+        // THE NATIONAL BOUNDARY, ONCE. A singleton because the object is an immutable, verified
+        // reading of two vendored files — and because building it is not free: it checksums and
+        // parses a 166KB MultiPolygon of ~97 rings. Every discovered business is tested against it
+        // individually at ingest, so a non-shared binding would re-verify and re-parse that polygon
+        // once PER BUSINESS. The class's own docblock already promised "the container's shared
+        // instance"; this is the line that makes that true.
+        //
+        // Safe to share: nothing mutates it, the dataset cannot change without a deploy, and a
+        // checksum failure throws on first use rather than being cached as a bad shape.
+        $this->app->singleton(PhilippinesBoundary::class);
 
         // Business Niche registry lookup for the Nearby Clients surface. SCOPED (one instance per
         // request) on purpose: the canonicalizer memoizes the registry, so serializing a whole
@@ -160,6 +183,10 @@ class CrmServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
+        // The NERBY scraper's service identity may reach its callback routes and nothing else.
+        // See App\Support\ServiceTokens and NerbyServiceIdentity.
+        ServiceTokens::register(NerbyServiceIdentity::ROLE, NerbyServiceIdentity::callbackRoutes());
+
         // The module route file declares its own `v1/crm` prefix + `auth:sanctum`;
         // here we add the shared `api` prefix/middleware → /api/v1/crm/*.
         Route::prefix('api')
@@ -246,6 +273,7 @@ class CrmServiceProvider extends ServiceProvider
                 SyncMailboxesCommand::class,
                 RecomputeLeadScoresCommand::class,
                 N8nTokenCommand::class,
+                NerbyServiceTokenCommand::class,
                 PruneReadNotifications::class,
                 // One-shot Business Niche registry backfill. Not scheduled — run manually once the
                 // canonical built-in list is approved and NicheSeeder has been run.
@@ -256,6 +284,13 @@ class CrmServiceProvider extends ServiceProvider
                 BackfillPlannerOwnershipCommand::class,
                 // Hourly cleanup of abandoned .xls import files (scheduled below).
                 PruneXlsImportsCommand::class,
+                // The website audit + evidence lifecycle for discovered leads (scheduled below).
+                EnrichDiscoveredWebsitesCommand::class,
+                // Read-only report of what calling is configured to do, and whether per-organization
+                // mode names a real central organization. Deliberately NOT scheduled: it is the check
+                // an operator runs before switching per-organization accounts on, and its failure is a
+                // configuration decision rather than something a cron could act on.
+                CallingDoctorCommand::class,
             ]);
         }
 
@@ -286,6 +321,39 @@ class CrmServiceProvider extends ServiceProvider
             // the job record's own TTL is an hour, and the command is idempotent and silent when
             // there is nothing to remove.
             $schedule->command('crm:prune-xls-imports')->hourly()->withoutOverlapping();
+
+            // WEBSITE INTELLIGENCE LIFECYCLE. Both pipelines existed and worked; neither was ever
+            // scheduled, so every discovered lead sat at "Not audited" waiting for someone to run a
+            // command by hand. This is that trigger — see EnrichDiscoveredWebsitesCommand.
+            //
+            // HALF-HOURLY AND BOUNDED, not continuous: each tick audits a fixed slice, and the
+            // queues are ordered never-checked-first, so ticks drain a backlog steadily without ever
+            // re-treading finished leads. The work is real outbound traffic — one page fetch per
+            // audited lead and DNS probes per searched one — so the rate is a deliberate ceiling
+            // rather than "as fast as possible".
+            //
+            // WHY THE CADENCE CHANGED. Hourly at 25+25 was calibrated before there was a backlog. It
+            // is now 1,600+ discovered leads, which that rate would have taken about two days to
+            // reach the end of — long enough that a board full of "Not audited" was the normal state
+            // rather than a transient one. MEASURED on this pool: an audit costs 2.6–8.2s per lead
+            // and a search 9.2–12.7s, so the limits below sit at roughly 2x headroom inside
+            // `enrichment_timeout` at the WORST observed rate, and a whole tick is ~21 minutes of the
+            // 30-minute window in that same worst case. The ceiling is still a ceiling; it is simply
+            // calibrated against a measurement instead of a guess.
+            //
+            // withoutOverlapping() is the race guard: discovery keeps adding leads, so a tick that
+            // runs long must not stack a second crawler on the same queue. The pipeline is
+            // idempotent underneath it anyway — enrichment is a 1:1 updateOrCreate, candidates carry
+            // a (lead, source, url_hash) unique index, and a search row is unique per lead — so an
+            // overlap could not have duplicated records; it would merely have doubled the traffic.
+            //
+            // The explicit 45-minute expiry is what makes the guard safe at this cadence: the default
+            // lock lives 24 hours, so a tick killed mid-run (a deploy, an OOM) would have silenced
+            // enrichment for a day with nothing to show why. 45 minutes is longer than any tick the
+            // bounds above permit and far shorter than a day.
+            $schedule->command('crm:enrich-websites')
+                ->everyThirtyMinutes()
+                ->withoutOverlapping(45);
         });
     }
 }

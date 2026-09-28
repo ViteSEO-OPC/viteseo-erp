@@ -35,6 +35,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
+from scraper.target_sources import FileTargetSource, TargetSource, TargetSourceError
+
 #: Where the version-controlled target list lives (``scraper/discovery-targets.json``).
 DEFAULT_TARGETS_FILE = Path(__file__).resolve().parent.parent / "discovery-targets.json"
 
@@ -102,6 +104,7 @@ def load_targets(
     path: Path | str | None = None,
     *,
     known_categories: Iterable[str] | None = None,
+    source: "TargetSource | None" = None,
 ) -> list[Target]:
     """Parse the targets file into a flat, ordered list of ``(area, category)`` pairs.
 
@@ -111,18 +114,22 @@ def load_targets(
     :param known_categories: when given, every category is checked against it up front, so a typo
         surfaces at parse time instead of midway through a run that has already committed leads.
     """
-    file = Path(path) if path is not None else DEFAULT_TARGETS_FILE
-
-    if not file.exists():
-        raise TargetsError(f"Targets file not found: {file}")
+    # THE SEAM, MADE EXPLICIT. A source decides only WHERE the document comes from; everything below
+    # this line — validation, defaults, grouping, rotation — is unchanged and unaware of the origin.
+    # That is what lets a CRM-managed registry replace the file without touching scheduling logic.
+    reader = source if source is not None else FileTargetSource(
+        Path(path) if path is not None else DEFAULT_TARGETS_FILE
+    )
 
     try:
-        raw: Any = json.loads(file.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        raise TargetsError(f"Targets file is not valid JSON ({file}): {exc}") from exc
+        raw: Any = reader.load()
+    except TargetSourceError as exc:
+        # Re-raised as this module's error so every existing caller's `except TargetsError` still
+        # catches a source failure. One failure vocabulary, whatever the origin.
+        raise TargetsError(str(exc)) from exc
 
     if not isinstance(raw, dict):
-        raise TargetsError(f"Targets file must be a JSON object, got {type(raw).__name__}.")
+        raise TargetsError(f"Targets document must be a JSON object, got {type(raw).__name__}.")
 
     defaults = raw.get("defaults", {})
     if not isinstance(defaults, dict):
@@ -223,14 +230,23 @@ def targets_per_run(raw_default: Any = None, override: int | None = None) -> int
     return min(value, MAX_TARGETS_PER_RUN)
 
 
-def configured_targets_per_run(path: Path | str | None = None) -> int | None:
-    """`defaults.targets_per_run` from the targets file, if it sets one. None otherwise."""
-    file = Path(path) if path is not None else DEFAULT_TARGETS_FILE
-    if not file.exists():
-        return None
+def configured_targets_per_run(
+    path: Path | str | None = None,
+    *,
+    source: "TargetSource | None" = None,
+) -> int | None:
+    """`defaults.targets_per_run` from the targets document, if it sets one. None otherwise.
+
+    Reads through the same pluggable source as {@see load_targets}, so a managed registry configures
+    the run size exactly as the file does. Any failure answers None — the caller then falls back to
+    its own default, which is the pre-existing behaviour for a missing or corrupt file.
+    """
+    reader = source if source is not None else FileTargetSource(
+        Path(path) if path is not None else DEFAULT_TARGETS_FILE
+    )
     try:
-        raw = json.loads(file.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
+        raw = reader.load()
+    except (TargetSourceError, OSError):
         return None
     if not isinstance(raw, dict) or not isinstance(raw.get("defaults"), dict):
         return None

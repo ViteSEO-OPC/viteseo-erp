@@ -7,6 +7,7 @@ use App\Http\Controllers\Controller;
 use App\Modules\Crm\Models\EmailTemplate;
 use App\Modules\Crm\Models\Lead;
 use App\Models\User;
+use App\Modules\Crm\Services\Outreach\EmailTemplateOptionService;
 use App\Modules\Crm\Services\Outreach\TemplateRenderer;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -30,10 +31,15 @@ class EmailTemplateController extends Controller
      */
     private const COMPOSER_PURPOSES = ['Proposal Check-in', 'Follow-up', 'Introduction'];
 
-    public function index(Lead $lead, Request $request, TemplateRenderer $renderer): JsonResponse
+    public function index(Lead $lead, Request $request, TemplateRenderer $renderer, EmailTemplateOptionService $options): JsonResponse
     {
         /** @var User|null $sender */
         $sender = $request->user();
+
+        // The composer also offers this organization's own custom purposes (Settings → Email Templates). A custom
+        // purpose can never equal an automation key, however spelled — EmailTemplateOptionService refuses it — so
+        // this exact, case-sensitive allowlist still keeps every automation template out of the dropdown.
+        $purposes = [...self::COMPOSER_PURPOSES, ...$options->customValues(EmailTemplateOptionService::TYPE_PURPOSE)];
 
         $data = EmailTemplate::query()
             ->active()
@@ -45,7 +51,7 @@ class EmailTemplateController extends Controller
             // 'Introduction' as equal: a whereIn/whereNotIn on these values would take the three
             // human Introduction templates out of the composer along with the automation key.
             // `in_array(..., true)` compares in PHP, where the case difference is honoured.
-            ->filter(fn (EmailTemplate $template): bool => in_array($template->purpose, self::COMPOSER_PURPOSES, true))
+            ->filter(fn (EmailTemplate $template): bool => in_array($template->purpose, $purposes, true))
             // Re-index before serialising: filter() preserves the original keys, and a gapped array
             // encodes as a JSON object, which would break the frontend's `templates.map()`.
             ->values()

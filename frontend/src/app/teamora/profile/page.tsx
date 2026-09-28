@@ -6,6 +6,7 @@ import { EmployeeRecord } from "@/modules/hr/components/employee-record";
 import { ChangeRequestModal } from "@/modules/hr/components/change-request-modal";
 import { DocumentRequestModal } from "@/modules/hr/components/document-request-modal";
 import { useMyEmployee } from "@/modules/hr/hooks/use-my-employee";
+import { SignedInDevices } from "@/core/components/signed-in-devices";
 
 export default function ProfilePage() {
   const { data: employee, isLoading, isError } = useMyEmployee();
@@ -39,6 +40,10 @@ export default function ProfilePage() {
             <DocumentRequestModal open={docOpen} onOpenChange={setDocOpen} />
           </>
         )}
+      </div>
+
+      <div className="mt-8">
+        <SignedInDevices />
       </div>
     </div>
   );

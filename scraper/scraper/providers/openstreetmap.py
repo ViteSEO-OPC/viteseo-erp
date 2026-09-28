@@ -195,17 +195,30 @@ class OpenStreetMapProvider(DiscoveryProvider):
         user_agent: str,
         timeout: float = 60.0,
         reverse_geocode: bool = True,
+        country_code: str | None = None,
     ) -> None:
         self.overpass_url = overpass_url
         self.nominatim_url = nominatim_url.rstrip("/")
         self.user_agent = user_agent
         self.timeout = timeout
         self.reverse_geocode = reverse_geocode
+        # ISO 3166-1 alpha-2, lowercased for Nominatim. None means "anywhere", which is the
+        # behaviour that predates the country control and is kept for callers that have no country.
+        self.country_code = country_code.strip().lower() if country_code else None
         self._client = httpx.Client(timeout=timeout, headers={"User-Agent": user_agent})
 
-    def discover(self, *, area: str, category: str, limit: int) -> list[RawBusiness]:
+    def discover(
+        self,
+        *,
+        area: str,
+        category: str,
+        limit: int,
+        bbox: tuple[float, float, float, float] | None = None,
+    ) -> list[RawBusiness]:
         selectors = category_selectors(category)
-        bbox = self._geocode_area(area)
+        # A caller-supplied box wins: that is what makes a partitioned run sweep its own cell instead
+        # of re-resolving the whole scope and returning the same records in every one.
+        bbox = bbox or self._geocode_area(area)
         elements = self._overpass(selectors, bbox, limit)
 
         businesses: list[RawBusiness] = []
@@ -347,16 +360,51 @@ class OpenStreetMapProvider(DiscoveryProvider):
         resp = self._post_with_retry(query)
         return resp.json().get("elements", [])
 
+    def geocode_area(self, area: str) -> tuple[float, float, float, float]:
+        """Resolve a place name to a bounding box — the PUBLIC geocoding seam.
+
+        Exposed because geocoding is the one genuinely provider-neutral thing this class does: the
+        partitioner needs a scope's box before any provider runs, and the Google provider needs the
+        same box an OSM sweep would use. Both previously reached for the private method, which made
+        a shared utility look like an implementation detail being violated.
+        """
+        return self._geocode_area(area)
+
     def _geocode_area(self, area: str) -> tuple[float, float, float, float]:
-        """Forward-geocode a place name to a bounding box (south, west, north, east)."""
-        resp = self._client.get(
-            f"{self.nominatim_url}/search",
-            params={"q": area, "format": "jsonv2", "limit": 1},
-        )
+        """Forward-geocode a place name to a bounding box (south, west, north, east).
+
+        THE COUNTRY IS ENFORCED HERE, AND THIS IS THE RIGHT PLACE FOR IT.
+
+        Every provider reaches its search area through this method — the Overpass sweep bounds its
+        query with it, and the Google adapter turns it into `locationRestriction`. So a place that
+        cannot be geocoded is a place that cannot be searched: constraining the geocoder to one
+        country makes a foreign location structurally unable to become a provider request, rather
+        than a request whose results are thrown away afterwards. That distinction is the difference
+        between "we do not keep foreign businesses" and "we do not go looking for them", and only the
+        second one is free.
+
+        THE BUG THIS CLOSES IS NOT HYPOTHETICAL. Unconstrained, "San Jose" resolves to San Jose,
+        California — not to any of the several San Joses in the Philippines — because Nominatim ranks
+        by prominence, not by the caller's intent. A discovery run for "San Jose" therefore searched
+        California, paid for the Google call, and ingested twenty Californian businesses into a
+        Philippine prospect pool. A country filter is what makes an ambiguous place name resolve to
+        the one the user actually meant.
+
+        AMBIGUITY BECOMES A REFUSAL, NEVER A GUESS. With `countrycodes` set, Nominatim returns
+        nothing for a place that does not exist in that country, and this raises — the caller reports
+        an unresolved area and performs no search. An empty result is a far better outcome than a
+        confident search of the wrong continent.
+        """
+        params: dict[str, object] = {"q": area, "format": "jsonv2", "limit": 1}
+        if self.country_code:
+            params["countrycodes"] = self.country_code
+
+        resp = self._client.get(f"{self.nominatim_url}/search", params=params)
         resp.raise_for_status()
         results = resp.json()
         if not results:
-            raise ValueError(f"Nominatim could not resolve area '{area}'.")
+            where = f" in country '{self.country_code.upper()}'" if self.country_code else ""
+            raise ValueError(f"Nominatim could not resolve area '{area}'{where}.")
         south, north, west, east = (float(x) for x in results[0]["boundingbox"])
         time.sleep(1.1)  # Nominatim usage policy: <=1 req/sec
         return south, west, north, east

@@ -309,17 +309,20 @@ class DiscoveryTagExpansionTest extends TestCase
         }
     }
 
-    public function test_selectors_leave_unvalidated_because_the_scraper_owns_that_vocabulary(): void
+    public function test_selectors_are_held_to_the_engines_key_vocabulary_before_they_leave(): void
     {
-        // Deliberate: the code that will EXECUTE a selector validates it, next to the OSM key list it
-        // already owns. A second copy here would eventually disagree with the one that matters — so
-        // this asserts the endpoint passes nonsense through rather than silently filtering it.
+        // CHANGED CONTRACT (AI hardening): selectors used to leave unvalidated, on the reasoning that
+        // the engine that executes them owns the vocabulary. They are now held to the same allowed
+        // keys and value shape HERE too, so an out-of-vocabulary answer is never cached or returned.
+        // The engine's non-business list (parking, benches...) stays the engine's: `amenity=parking`
+        // is a well-formed business-key selector and passes; the engine refuses it. The key list is
+        // pinned against the engine's own by scraper/tests/test_tag_expansion_key_parity.py.
         $this->actingAsScraper();
         $this->openAiLive();
-        Http::fake(['*' => Http::response($this->openAiChat(['amenity=parking', 'building=yes']))]);
+        Http::fake(['*' => Http::response($this->openAiChat(['amenity=parking', 'building=yes', 'Shop=Chemist']))]);
 
         $this->postJson(self::EXPANSIONS, ['category' => 'restaurant'])
             ->assertOk()
-            ->assertJsonPath('data.selectors', ['amenity=parking', 'building=yes']);
+            ->assertJsonPath('data.selectors', ['amenity=parking', 'shop=chemist']);
     }
 }
