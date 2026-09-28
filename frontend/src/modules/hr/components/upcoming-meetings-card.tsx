@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { notify as toast } from "@/core/lib/notify";
 import { Button } from "@/components/ui/button";
 import { useMyMeetings, useRespondMeeting } from "@/modules/hr/hooks/use-concerns";
@@ -39,12 +40,20 @@ export function UpcomingMeetingsCard() {
   const { data: meetings, isLoading } = useMyMeetings();
   const respond = useRespondMeeting();
 
+  // "Now" is state (reading the clock during render is impure), ticking once a minute so a
+  // meeting drops off the card once it starts.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(t);
+  }, []);
+
   // "Upcoming" = still in the future and not already declined; soonest first.
   const upcoming = (meetings ?? [])
     .filter(
       (m) =>
         m.status !== "declined" &&
-        new Date(m.scheduled_at).getTime() >= Date.now(),
+        new Date(m.scheduled_at).getTime() >= now,
     )
     .sort((a, b) => +new Date(a.scheduled_at) - +new Date(b.scheduled_at));
 

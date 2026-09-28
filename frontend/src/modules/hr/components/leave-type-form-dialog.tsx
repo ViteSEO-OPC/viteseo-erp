@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { AxiosError } from "axios";
@@ -99,7 +99,7 @@ export function LeaveTypeFormDialog({
     handleSubmit,
     reset,
     setError,
-    watch,
+    control,
     setValue,
     formState: { errors, isSubmitting },
   } = useForm<FormValues>({
@@ -121,11 +121,11 @@ export function LeaveTypeFormDialog({
   });
 
   // Show the day-cap input only when backdated filing is allowed.
-  const allowBackdated = watch("allow_backdated");
-  const accrualMode = watch("accrual_mode");
-  const isPaid = watch("is_paid");
-  const color = watch("color") || DEFAULT_COLOR;
-  const isUnlimited = watch("is_unlimited");
+  const [allowBackdated, accrualMode, isPaid, colorValue, isUnlimited] = useWatch({
+    control,
+    name: ["allow_backdated", "accrual_mode", "is_paid", "color", "is_unlimited"],
+  });
+  const color = colorValue || DEFAULT_COLOR;
 
   // Fold any stored hex that isn't a preset into the list so it stays selectable
   // and displays with its own swatch (no data loss on edit).

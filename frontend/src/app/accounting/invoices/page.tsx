@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import { LoadFailed } from "@/modules/accounting/components/load-failed";
 import { PageHeader } from "@/core/components/page-header";
@@ -54,10 +54,13 @@ export default function InvoicesPage() {
   // Invoice currently being paid (drives the payment modal).
   const [paying, setPaying] = useState<{ id: number; balance: number } | null>(null);
 
-  // Prefill the VAT rate from Business settings once they load.
-  useEffect(() => {
+  // Prefill the VAT rate from Business settings once they load — adjusted during render
+  // (React's recommended pattern) rather than in an effect. Null so the first render syncs too.
+  const [syncedVatRate, setSyncedVatRate] = useState<string | null>(null);
+  if (defaultVatRate !== syncedVatRate) {
+    setSyncedVatRate(defaultVatRate);
     setTaxRate((prev) => (prev === "12" ? defaultVatRate : prev));
-  }, [defaultVatRate]);
+  }
 
   const validLines = lines.filter((l) => l.account_id && lineAmount(l) > 0);
   const canCreate = Boolean(contactId) && validLines.length > 0 && Boolean(date) && !create.isPending;

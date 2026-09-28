@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { useForm, Controller } from "react-hook-form";
+import { useForm, useWatch, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Briefcase } from "lucide-react";
@@ -96,14 +96,13 @@ export function RequisitionFormDialog({
   const {
     register,
     control,
-    watch,
     handleSubmit,
     reset,
     formState: { errors, isSubmitting },
   } = useForm<FormValues>({ resolver: zodResolver(schema), defaultValues: EMPTY });
 
   // An OJT pays an allowance, not a salary — the compensation field swaps with the type.
-  const isOjtRole = isOjt(watch("employment_type"));
+  const isOjtRole = isOjt(useWatch({ control, name: "employment_type" }));
 
   useEffect(() => {
     if (!open) return;

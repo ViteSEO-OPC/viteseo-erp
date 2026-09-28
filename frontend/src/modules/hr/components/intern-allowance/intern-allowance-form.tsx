@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Controller, useForm, type Control, type Path, type UseFormRegister } from "react-hook-form";
+import { Controller, useForm, useWatch, type Control, type Path, type UseFormRegister } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { AxiosError } from "axios";
@@ -307,7 +307,6 @@ export function InternAllowanceForm({ overview }: { overview: InternAllowanceOve
   const {
     control,
     register,
-    watch,
     reset,
     setError,
     handleSubmit,
@@ -318,12 +317,12 @@ export function InternAllowanceForm({ overview }: { overview: InternAllowanceOve
   });
 
   const opts = (key: string) => optionsFor(key, overview.options);
-  const values = watch();
+  const values = useWatch({ control }) as FormValues;
   const hoursBased = isHoursBased(values);
   const method = values.method as InternAllowanceMethod;
 
   // The preview asks the server, so it is sent only what the server would accept, and only once
-  // typing has paused. Serialised first: `watch()` is a new object on every render.
+  // typing has paused. Serialised first: the watched values are a new object on every render.
   const parsed = schema.safeParse(values);
   const settingsJson = useDebouncedValue(parsed.success ? JSON.stringify(toSettings(parsed.data)) : "", 400);
 

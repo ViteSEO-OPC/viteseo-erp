@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { useForm, Controller } from "react-hook-form";
+import { useForm, useWatch, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { notify as toast } from "@/core/lib/notify";
@@ -91,14 +91,17 @@ export function WorkScheduleFormDialog({
     handleSubmit,
     reset,
     control,
-    watch,
     formState: { errors, isSubmitting },
   } = useForm<FormValues>({ resolver: zodResolver(schema), defaultValues: DEFAULTS });
 
   // Live "paid day" = (end − start) − unpaid meal. Null when the window is incomplete.
-  const startMin = toMinutes(watch("start_time") ?? "");
-  const endMin = toMinutes(watch("end_time") ?? "");
-  const unpaidBreak = Number(watch("unpaid_break_minutes")) || 0;
+  const [startTime, endTime, unpaidBreakValue] = useWatch({
+    control,
+    name: ["start_time", "end_time", "unpaid_break_minutes"],
+  });
+  const startMin = toMinutes(startTime ?? "");
+  const endMin = toMinutes(endTime ?? "");
+  const unpaidBreak = Number(unpaidBreakValue) || 0;
   const paidMinutes =
     startMin !== null && endMin !== null && endMin > startMin
       ? Math.max(0, endMin - startMin - unpaidBreak)

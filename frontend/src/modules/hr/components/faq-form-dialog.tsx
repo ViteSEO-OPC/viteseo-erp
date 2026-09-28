@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { AxiosError } from "axios";
@@ -102,7 +102,7 @@ export function FaqFormDialog({
     handleSubmit,
     reset,
     setValue,
-    watch,
+    control,
     setError,
     formState: { errors, isSubmitting },
   } = useForm<FormValues>({
@@ -110,8 +110,7 @@ export function FaqFormDialog({
     defaultValues: emptyForm,
   });
 
-  const category = watch("category");
-  const status = watch("status");
+  const [category, status] = useWatch({ control, name: ["category", "status"] });
 
   // Refill the form whenever the dialog opens (with the row's values on edit,
   // or blank defaults on create).

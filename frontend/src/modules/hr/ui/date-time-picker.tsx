@@ -46,10 +46,13 @@ export function DateTimePicker({
 }) {
   const [parts, setParts] = React.useState(() => split(value));
 
-  // Keep local parts in sync when the external value changes.
-  React.useEffect(() => {
+  // Keep local parts in sync when the external value changes — during render rather than
+  // in an effect.
+  const [syncedValue, setSyncedValue] = React.useState(value);
+  if (value !== syncedValue) {
+    setSyncedValue(value);
     setParts(split(value));
-  }, [value]);
+  }
 
   function update(next: { date?: string; time?: string }) {
     const merged = { date: next.date ?? parts.date, time: next.time ?? parts.time };

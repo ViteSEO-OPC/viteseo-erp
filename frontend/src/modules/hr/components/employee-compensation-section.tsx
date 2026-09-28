@@ -446,7 +446,3 @@ export function EmployeeCompensationSection({
   );
 }
 
-// Format a raw decimal string as peso, or a dash when empty.
-function money(v: string | null): string | null {
-  return v ? formatPeso(v) : null;
-}

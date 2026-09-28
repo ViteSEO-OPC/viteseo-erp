@@ -5,7 +5,6 @@ import {
   Bold,
   Highlighter,
   Italic,
-  Link2,
   List,
   ListOrdered,
   ListTodo,
@@ -30,20 +29,6 @@ export function NoteToolbar({
   className?: string;
 }): React.ReactElement | null {
   if (!editor) return null;
-
-  const promptForLink = (): void => {
-    const previous = (editor.getAttributes("link").href as string) ?? "";
-    // A native prompt keeps the link flow one keystroke deep; a modal here
-    // would fight the editor for focus and lose the selection.
-    const href = window.prompt("Link URL", previous);
-    if (href === null) return;
-    if (href === "") {
-      editor.chain().focus().extendMarkRange("link").unsetLink().run();
-      return;
-    }
-    const safe = /^https?:\/\//i.test(href) ? href : `https://${href}`;
-    editor.chain().focus().extendMarkRange("link").setLink({ href: safe }).run();
-  };
 
   return (
     <div
@@ -126,13 +111,6 @@ export function NoteToolbar({
       >
         <Highlighter className="h-3.5 w-3.5" />
       </ToolbarButton>
-      {/* <ToolbarButton
-        label="Link"
-        active={editor.isActive("link")}
-        onClick={promptForLink}
-      >
-        <Link2 className="h-3.5 w-3.5" />
-      </ToolbarButton> */}
 
       <Divider />
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import { useAuth } from "@/core/auth-context";
 import { PageHeader } from "@/core/components/page-header";
@@ -29,15 +29,16 @@ export default function OrgSettingsPage() {
   const [isVat, setIsVat] = useState(false);
   const [defaultRate, setDefaultRate] = useState("");
 
-  // Hydrate the form once the current values arrive.
-  useEffect(() => {
-    if (!settings) return;
+  // Hydrate the form once the current values arrive — during render rather than in an effect.
+  const [hydratedFrom, setHydratedFrom] = useState<typeof settings>(undefined);
+  if (settings && settings !== hydratedFrom) {
+    setHydratedFrom(settings);
     setName(settings.name ?? "");
     setTin(settings.tin ?? "");
     setAddress(settings.address ?? "");
     setIsVat(settings.is_vat_registered);
     setDefaultRate(settings.default_tax_rate != null ? String(settings.default_tax_rate) : "");
-  }, [settings]);
+  }
 
   if (!isAdmin) {
     return (

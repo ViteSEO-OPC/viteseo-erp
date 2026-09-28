@@ -162,7 +162,9 @@ export function getAccessibleModules(
  * Params kept for a stable call signature with the login page.
  */
 export function resolveLandingHref(
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   _roles: string[],
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   _permissions: string[],
 ): string {
   return "/";

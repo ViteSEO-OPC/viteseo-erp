@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useAuth } from "@/core/auth-context";
 import { PageHeader } from "@/modules/hr/components/page-header";
 import { StatCard } from "@/core/components/stat-card";

@@ -42,6 +42,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const token = localStorage.getItem("token");
     if (!token) {
+      // localStorage only exists after mount, so this can't be decided during render.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setLoading(false);
       return;
     }

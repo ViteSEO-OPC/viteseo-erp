@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { Plus, Trash2, LogOut } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -39,13 +39,16 @@ export function TimeOutDialog({
   const [showErrors, setShowErrors] = useState(false);
   const inputs = useRef<(HTMLInputElement | null)[]>([]);
 
-  // Reset the list each time the modal opens (Radix keeps it mounted while closed).
-  useEffect(() => {
+  // Reset whenever the dialog opens — during render (React's recommended pattern) rather
+  // than in an effect. Starts false so a dialog mounted already-open resets too.
+  const [wasOpen, setWasOpen] = useState(false);
+  if (open !== wasOpen) {
+    setWasOpen(open);
     if (open) {
       setTasks([emptyTask()]);
       setShowErrors(false);
     }
-  }, [open]);
+  }
 
   const isBlank = (t: DayTask) => t.text.trim() === "";
   const firstBlank = tasks.findIndex(isBlank);

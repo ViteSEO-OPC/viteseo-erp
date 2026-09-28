@@ -23,7 +23,6 @@ import {
 } from "@/components/ui/dialog";
 import { SimpleSelect } from "@/modules/hr/ui/select";
 import { MultiCombobox } from "@/modules/hr/ui/multi-combobox";
-import { cn } from "@/lib/utils";
 import {
   useCreateDepartment,
   useUpdateDepartment,
@@ -96,18 +95,27 @@ export function DepartmentFormDialog({
           }
         : { name: "", code: "", description: "", head_id: "none", is_active: true },
     );
-    const posNames = department?.positions?.map((p) => p.name) ?? [];
-    setPositions(posNames);
-    setPositionDraft("");
-
-    // Bucket existing assignments by role (only for roles in the catalog).
-    const byRole: Record<string, string[]> = {};
-    for (const a of department?.assignments ?? []) {
-      if (!posNames.includes(a.role)) continue;
-      (byRole[a.role] ??= []).push(String(a.employee_id));
-    }
-    setAssignments(byRole);
   }, [open, department, reset]);
+
+  // The positions/assignments lists refill on the same trigger, but they are React state, so
+  // during render rather than in the effect. Starts closed so an already-open mount fills too.
+  const [synced, setSynced] = useState<{ open: boolean; department?: Department | null }>({ open: false });
+  if (open !== synced.open || department !== synced.department) {
+    setSynced({ open, department });
+    if (open) {
+      const posNames = department?.positions?.map((p) => p.name) ?? [];
+      setPositions(posNames);
+      setPositionDraft("");
+
+      // Bucket existing assignments by role (only for roles in the catalog).
+      const byRole: Record<string, string[]> = {};
+      for (const a of department?.assignments ?? []) {
+        if (!posNames.includes(a.role)) continue;
+        (byRole[a.role] ??= []).push(String(a.employee_id));
+      }
+      setAssignments(byRole);
+    }
+  }
 
   function addPosition() {
     const name = positionDraft.trim();
