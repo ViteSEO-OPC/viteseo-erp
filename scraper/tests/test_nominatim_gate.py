@@ -210,8 +210,10 @@ def test_reverse_geocoding_is_gated_and_still_fills_the_admin_area(tmp_path, mon
 
 
 def test_without_a_state_dir_there_is_no_gate_and_no_cache(monkeypatch):
+    """Ungated: every lookup is a real request (no cache), paced start-to-start in-process."""
     slept = []
     monkeypatch.setattr("scraper.providers.openstreetmap.time.sleep", slept.append)
+    monkeypatch.setattr("scraper.providers.openstreetmap._nominatim_last_start", None)
     provider = _osm(PH_RESULT, None)
     assert provider._nominatim_gate is None
 
@@ -219,7 +221,21 @@ def test_without_a_state_dir_there_is_no_gate_and_no_cache(monkeypatch):
     provider._geocode_area("General Santos")
 
     assert len(provider._client.calls) == 2
-    assert slept == [1.1, 1.1]
+    # One wait, before the second request; none after either. The stub answers instantly, so the
+    # wait is (almost) the whole interval.
+    assert slept == [pytest.approx(1.1, abs=0.05)]
+
+
+def test_the_gate_spaces_request_starts_so_a_slow_request_needs_no_extra_wait(tmp_path):
+    clock = FakeClock()
+    gate = NominatimGate(str(tmp_path), clock=clock.time, sleep=clock.sleep)
+
+    with gate.request_slot():
+        clock.now += 2.0  # a request slower than the interval
+    with gate.request_slot():
+        pass
+
+    assert clock.slept == []
 
 
 def test_an_unusable_state_dir_falls_back_to_the_ungated_path(tmp_path, capsys):

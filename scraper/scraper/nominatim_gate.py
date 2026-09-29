@@ -7,9 +7,10 @@ at the same time would each keep their own rhythm and could together send two re
 same second. The rate has to live somewhere every process can see — a file — or it is not a rate.
 
 HOW. An exclusive ``flock`` on ``nominatim.lock`` serialises requests across processes, and the file
-holds the time the last request FINISHED. A request waits until that time plus the interval, runs,
-then records its own finish. Spacing is therefore measured end-to-start: at least as strict as the
-old per-process sleep, and now shared.
+holds the time the last request STARTED. A request waits until that time plus the interval, records
+its own start, and runs while still holding the lock. Spacing is therefore start-to-start — what the
+policy actually limits — and, because the lock is held for the whole request, never more than one
+request is in flight at once.
 
 THE CACHE. Every task geocodes its area LABEL (the nationwide anchor, e.g. "General Santos"), and a
 nationwide run shares a handful of labels across dozens of cells — Run 106 geocoded ~8 distinct
@@ -85,12 +86,13 @@ class NominatimGate:
                 wait = last + self._min_interval - self._now()
                 if wait > 0:
                     (self._sleep or time.sleep)(wait)
+                started = self._now()
                 try:
                     yield
                 finally:
                     fh.seek(0)
                     fh.truncate()
-                    fh.write(repr(self._now()))
+                    fh.write(repr(started))
                     fh.flush()
             finally:
                 fcntl.flock(fh, fcntl.LOCK_UN)

@@ -10,6 +10,7 @@ request/second per the usage policy.
 
 from __future__ import annotations
 
+import atexit
 import re
 import time
 from dataclasses import dataclass, field
@@ -83,6 +84,48 @@ def is_business_element(element: dict) -> bool:
         if str(tags.get(key) or "").strip().lower() in excluded:
             return False
     return True
+
+
+#: Nominatim usage policy: an absolute maximum of one request per second. Spacing is measured
+#: START-TO-START — the only thing the policy limits is how often requests begin — so a request that
+#: takes 0.5s is followed by a 0.6s wait, not a fresh 1.1s one. The 0.1s margin is kept from the
+#: sleep this replaces.
+NOMINATIM_INTERVAL_SECONDS = 1.1
+
+#: When this process last STARTED a Nominatim request (monotonic). Process-wide, not per provider:
+#: one engine process builds several OSM providers (the geocoder, the baseline, the AI composite's
+#: resolver), and per-instance spacing would let two of them fire inside the same second.
+_nominatim_last_start: float | None = None
+
+
+def _pace_nominatim() -> None:
+    """Wait until a new Nominatim request may start, then record that it has."""
+    global _nominatim_last_start
+    now = time.monotonic()
+    if _nominatim_last_start is not None:
+        wait = _nominatim_last_start + NOMINATIM_INTERVAL_SECONDS - now
+        if wait > 0:
+            time.sleep(wait)
+            now = time.monotonic()
+    _nominatim_last_start = now
+
+
+def _drain_nominatim_interval() -> None:
+    """At exit, finish the interval of this process's last request.
+
+    The next discovery task is a NEW process with its own spacing state, so without this a task that
+    ended right after a request could let its successor start one inside the same second. The old
+    trailing sleep gave the same guarantee by always ending on a pause; this keeps the guarantee and
+    pays only what is left of the interval.
+    """
+    if _nominatim_last_start is None:
+        return
+    wait = _nominatim_last_start + NOMINATIM_INTERVAL_SECONDS - time.monotonic()
+    if wait > 0:
+        time.sleep(wait)
+
+
+atexit.register(_drain_nominatim_interval)
 
 
 def category_selectors(category: str) -> list[tuple[str, str]]:
@@ -407,6 +450,7 @@ class OpenStreetMapProvider(DiscoveryProvider):
         if self._nominatim_gate is not None:
             return self._geocode_area_gated(area, params)
 
+        _pace_nominatim()  # Nominatim usage policy: <=1 req/sec, start-to-start
         resp = self._client.get(f"{self.nominatim_url}/search", params=params)
         resp.raise_for_status()
         results = resp.json()
@@ -414,7 +458,6 @@ class OpenStreetMapProvider(DiscoveryProvider):
             where = f" in country '{self.country_code.upper()}'" if self.country_code else ""
             raise ValueError(f"Nominatim could not resolve area '{area}'{where}.")
         south, north, west, east = (float(x) for x in results[0]["boundingbox"])
-        time.sleep(1.1)  # Nominatim usage policy: <=1 req/sec
         return south, west, north, east
 
     def _geocode_area_gated(self, area: str, params: dict[str, object]) -> tuple[float, float, float, float]:
@@ -498,6 +541,7 @@ class OpenStreetMapProvider(DiscoveryProvider):
             business.city = business.city or city
             return
 
+        _pace_nominatim()  # Nominatim usage policy: <=1 req/sec, start-to-start
         try:
             resp = self._client.get(
                 f"{self.nominatim_url}/reverse",
@@ -511,8 +555,6 @@ class OpenStreetMapProvider(DiscoveryProvider):
             address = resp.json().get("address") or {}
         except (httpx.HTTPError, ValueError):
             return
-        finally:
-            time.sleep(1.1)  # Nominatim usage policy: <=1 req/sec
 
         region, province, city = extract_admin_area(address)
         business.region = business.region or region
