@@ -56,6 +56,13 @@ type Props = {
   onDirections: () => void;
   onQualify: () => void;
   qualifying?: boolean;
+  /**
+   * Optional CONTROLLED state for the Website Intel disclosure. The virtualized list unmounts cards
+   * that scroll out of view, which would silently collapse an open panel; it owns this state so the
+   * panel is still open when the card scrolls back. Omitted, the card keeps its own state as before.
+   */
+  intelOpen?: boolean;
+  onIntelOpenChange?: (open: boolean) => void;
 };
 
 /**
@@ -88,10 +95,16 @@ function websiteHeadline(website: NonNullable<NearbyClient["website"]>): string 
   }
 }
 
-export function ClientRangeCard({ client, selected, onSelect, onPlanVisit, onDirections, onQualify, qualifying }: Props) {
+export function ClientRangeCard({ client, selected, onSelect, onPlanVisit, onDirections, onQualify, qualifying, intelOpen: controlledIntelOpen, onIntelOpenChange }: Props) {
   const p = PRIORITY[client.priority];
   // Collapsed by default: see the disclosure below.
-  const [intelOpen, setIntelOpen] = useState(false);
+  const [localIntelOpen, setLocalIntelOpen] = useState(false);
+  const intelOpen = controlledIntelOpen ?? localIntelOpen;
+  const setIntelOpen = (update: (open: boolean) => boolean) => {
+    const next = update(intelOpen);
+    if (onIntelOpenChange) onIntelOpenChange(next);
+    else setLocalIntelOpen(next);
+  };
   return (
     <div
       onClick={onSelect}
