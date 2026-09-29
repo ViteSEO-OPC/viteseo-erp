@@ -9,6 +9,7 @@ use App\Modules\Crm\Controllers\AutomationEmailController;
 use App\Modules\Crm\Controllers\BusinessRuleController;
 use App\Modules\Crm\Controllers\CallController;
 use App\Modules\Crm\Controllers\CallSettingsController;
+use App\Modules\Crm\Controllers\CopilotController;
 use App\Modules\Crm\Controllers\TwilioVoiceWebhookController;
 use App\Modules\Crm\Http\Middleware\ValidateTwilioSignature;
 use App\Modules\Crm\Controllers\DashboardController;
@@ -100,6 +101,11 @@ Route::middleware(['auth:sanctum', 'set-current-org', 'subscription-active', 'fe
         // longer want should never be rate-limited.
         Route::post('/me/photo', [ProfilePhotoController::class, 'store'])->middleware('throttle:10,1');
         Route::delete('/me/photo', [ProfilePhotoController::class, 'destroy']);
+
+        // The Copilot's OPTIONAL AI fallback (config `copilot.ai.enabled`, off by default). Read-only:
+        // it answers from the caller's own aggregate lead figures or declines, and never acts.
+        Route::post('/copilot/ask', [CopilotController::class, 'ask'])
+            ->middleware(['role:super_admin|crm_admin|crm_bd', 'throttle:20,1']);
 
         // Generic, reusable activity feed (append-only Activity log). Powers Dashboard Recent
         // Activity now; reusable for the Activity Logs page, notifications, and future consumers.

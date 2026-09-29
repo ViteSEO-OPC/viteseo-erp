@@ -16,6 +16,7 @@ export function AiMessageBubble({ message }: Props) {
         <p className="mt-1 text-xs text-muted-foreground">
           {formatActivityTimestamp(message.timestamp)}
         </p>
+        {message.aiAssisted && <p className="mt-0.5 text-xs text-muted-foreground">AI-assisted</p>}
       </div>
     </div>
   );
