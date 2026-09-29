@@ -10,6 +10,7 @@ use App\Modules\Crm\Controllers\BusinessRuleController;
 use App\Modules\Crm\Controllers\CallController;
 use App\Modules\Crm\Controllers\CallSettingsController;
 use App\Modules\Crm\Controllers\CopilotController;
+use App\Modules\Crm\Controllers\CopilotSettingController;
 use App\Modules\Crm\Controllers\TwilioVoiceWebhookController;
 use App\Modules\Crm\Http\Middleware\ValidateTwilioSignature;
 use App\Modules\Crm\Controllers\DashboardController;
@@ -106,6 +107,10 @@ Route::middleware(['auth:sanctum', 'set-current-org', 'subscription-active', 'fe
         // it answers from the caller's own aggregate lead figures or declines, and never acts.
         Route::post('/copilot/ask', [CopilotController::class, 'ask'])
             ->middleware(['role:super_admin|crm_admin|crm_bd', 'throttle:20,1']);
+        // Whether the Copilot may offer a question to AI at all: one boolean, read by every CRM role.
+        // Changing it is the Super Admin's `settings/integrations/copilot` below.
+        Route::get('/copilot/config', [CopilotController::class, 'config'])
+            ->middleware('role:super_admin|crm_admin|crm_bd');
 
         // Generic, reusable activity feed (append-only Activity log). Powers Dashboard Recent
         // Activity now; reusable for the Activity Logs page, notifications, and future consumers.
@@ -815,6 +820,14 @@ Route::middleware(['auth:sanctum', 'set-current-org', 'subscription-active', 'fe
                 Route::delete('/settings/integrations/nerby/providers/{provider}/credential', [NerbyProviderSettingController::class, 'destroyCredential']);
                 Route::post('/settings/integrations/nerby/providers/{provider}/test', [NerbyProviderSettingController::class, 'test'])
                     ->middleware('throttle:10,1');
+
+                // Settings → Integrations → Copilot AI: whether the Copilot may use AI. Here, not with
+                // Gmail/Calling, for the same reason as Nearby: the AI it switches on spends Vite SEO's
+                // own credit (the NERBY OpenAI credential, read and never written), so it is one global
+                // row in `crm_copilot_settings` and a platform decision. CRM users read only the
+                // boolean at GET /copilot/config.
+                Route::get('/settings/integrations/copilot', [CopilotSettingController::class, 'show']);
+                Route::put('/settings/integrations/copilot', [CopilotSettingController::class, 'update']);
             });
         });
     });

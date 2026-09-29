@@ -1,21 +1,37 @@
 "use client";
 
 import { useCallback } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "@/modules/crm/lib/axios";
+import { queryKeys } from "@/modules/crm/lib/query-keys";
 
 /**
- * The Copilot's OPTIONAL AI fallback — off unless NEXT_PUBLIC_COPILOT_AI is "true" at build time.
+ * May the Copilot offer questions to its OPTIONAL AI right now?
  *
- * Inlined by Next at build, so with the flag off the Copilot never reaches this code and never
- * makes a request. The backend has its own switch (`copilot.ai.enabled`, also off by default); if
- * either is off, or anything fails, the Copilot keeps the help reply it has always given.
+ * Decided on the server, never here: the ops kill switch, the Super Admin toggle (Settings →
+ * Integrations → Copilot AI) and the shared credential must all allow it, and the Copilot only reads
+ * the resulting boolean. Anything short of an explicit `true` — still loading, refused, failed —
+ * reads as OFF, so the Copilot keeps the deterministic replies it has always given and sends no AI
+ * request.
  */
-export const COPILOT_AI_ENABLED = process.env.NEXT_PUBLIC_COPILOT_AI === "true";
+export function useCopilotAiAvailable(): boolean {
+  const query = useQuery({
+    queryKey: queryKeys.copilot.aiConfig(),
+    queryFn: async (): Promise<boolean> => {
+      const response = await apiClient.get("/copilot/config");
+      return response.data?.data?.aiAvailable === true;
+    },
+    staleTime: 60_000,
+    retry: false,
+  });
+
+  return query.data === true;
+}
 
 type CopilotAnswer = { answered: boolean; text: string | null };
 
 /**
- * Ask the AI fallback about a question the rule-based Copilot could not answer. Resolves to the
+ * Ask the AI about a question the rule-based Copilot could not answer. Resolves to the
  * answer text, or null for "not answered" — declined, out of scope, switched off, or failed.
  * Only the question is sent; the server builds the CRM context for the signed-in user.
  */

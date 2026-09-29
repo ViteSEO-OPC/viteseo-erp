@@ -7,7 +7,6 @@ use App\Modules\Crm\Enums\NerbyProvider;
 use App\Modules\Crm\Models\Lead;
 use App\Modules\Crm\Services\Copilot\Prompts\CopilotInstruction;
 use App\Modules\Crm\Services\Discovery\AiChatEndpoint;
-use App\Modules\Crm\Services\Discovery\AiStrategyCapability;
 use App\Modules\Crm\Services\Discovery\NerbyProviderSettingService;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
@@ -39,17 +38,15 @@ class CopilotAiService
 
     public function __construct(
         private readonly NerbyProviderSettingService $settings,
-        private readonly AiStrategyCapability $capability,
+        private readonly CopilotSettingService $copilotSettings,
     ) {}
 
     /** The grounded answer, or null when the Copilot should keep its own help reply. */
     public function answer(User $user, string $question): ?string
     {
-        // THE SWITCH FIRST: free, and off means no credential read and no network.
-        if (! config('copilot.ai.enabled')) {
-            return null;
-        }
-        if ($this->capability->credential() !== AiStrategyCapability::AVAILABLE) {
+        // Ops kill switch, then the Super Admin toggle, then the credential — cheapest first, so an
+        // off switch means no database read, no credential read and no network.
+        if (! $this->copilotSettings->aiAvailable()) {
             return null;
         }
 

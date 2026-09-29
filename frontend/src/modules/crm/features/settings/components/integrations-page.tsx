@@ -1,5 +1,6 @@
 "use client";
 
+import { CopilotAiCard } from "@/modules/crm/features/settings/components/copilot-ai-card";
 import { GmailIntegrationPage } from "@/modules/crm/features/settings/components/gmail-integration-page";
 import { NerbyIntegrationCard } from "@/modules/crm/features/settings/components/nerby-integration-card";
 import { TwilioCallingCard } from "@/modules/crm/features/settings/components/twilio-calling-card";
@@ -39,6 +40,8 @@ export function IntegrationsPage({
       />
 
       <NerbyIntegrationCard />
+
+      <CopilotAiCard />
 
       <TwilioCallingCard />
     </div>

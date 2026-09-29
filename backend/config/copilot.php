@@ -7,10 +7,13 @@ return [
     | Copilot AI fallback
     |--------------------------------------------------------------------------
     |
-    | An OPTIONAL, additive layer under the rule-based CRM Copilot. The Copilot answers every question
-    | it can on its own; only a question that reaches its `help` fallback may be offered to AI, and
-    | only when this switch is on. OFF by default: with it off the endpoint answers "not answered"
-    | without reading any credential or contacting any provider.
+    | An OPTIONAL, additive layer under the rule-based CRM Copilot. Real intents keep their own
+    | deterministic answers; only a genuine fallback or a knowledge-article match may be offered to AI.
+    |
+    | `enabled` is the OPS KILL SWITCH, OFF by default. AI runs only when this switch AND the Super
+    | Admin toggle (Settings → Integrations → Copilot AI, table `crm_copilot_settings`) are both on and
+    | the credential is available. With this off the endpoint answers "not answered" without reading
+    | the toggle or any credential, and without contacting any provider.
     |
     | The credential is the existing NERBY OpenAI/OpenRouter row, read and never written.
     |

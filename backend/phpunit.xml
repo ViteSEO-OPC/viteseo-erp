@@ -34,6 +34,10 @@
         <env name="QUEUE_CONNECTION" value="sync"/>
         <env name="SESSION_DRIVER" value="array"/>
         <env name="PULSE_ENABLED" value="false"/>
+        <!-- The Copilot AI ops kill switch at its shipped default. A developer's local .env may turn it
+             on for manual testing; without this pin the suite would inherit that and stop proving the
+             default. Tests that need AI turn it on themselves. -->
+        <env name="COPILOT_AI_ENABLED" value="false"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
         <env name="NIGHTWATCH_ENABLED" value="false"/>
 
