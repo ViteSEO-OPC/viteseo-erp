@@ -26,7 +26,28 @@ return [
         'timeout' => (int) env('COPILOT_AI_TIMEOUT', 15),
 
         // Bounds a cooperative provider's answer. The body is also size-checked before decoding.
-        'max_tokens' => (int) env('COPILOT_AI_MAX_TOKENS', 300),
+        'max_tokens' => (int) env('COPILOT_AI_MAX_TOKENS', 500),
+
+        // A little variety in wording; the facts and the validator keep it grounded.
+        'temperature' => (float) env('COPILOT_AI_TEMPERATURE', 0.2),
+
+        // Ceiling on the JSON sent to the model. Curated article text is trimmed first; CRM figures
+        // are never cut.
+        'max_context_bytes' => (int) env('COPILOT_AI_MAX_CONTEXT_BYTES', 8192),
+
+        // Longest answer shown; anything longer is rejected, never truncated.
+        'max_answer_chars' => (int) env('COPILOT_AI_MAX_ANSWER_CHARS', 1200),
+
+        // AI requests per user per Asia/Manila day, on top of the route's 20 per minute. A missing
+        // or non-positive value FAILS CLOSED: no AI at all.
+        'daily_limit' => env('COPILOT_AI_DAILY_LIMIT', 100),
+
+        // Circuit breaker: this many consecutive provider failures pause AI for everyone.
+        'breaker_failures' => (int) env('COPILOT_AI_BREAKER_FAILURES', 5),
+        'breaker_minutes' => (int) env('COPILOT_AI_BREAKER_MINUTES', 5),
+
+        // Metadata audit rows (crm_copilot_ai_logs) older than this are pruned.
+        'log_retention_days' => (int) env('COPILOT_AI_LOG_RETENTION_DAYS', 90),
     ],
 
 ];

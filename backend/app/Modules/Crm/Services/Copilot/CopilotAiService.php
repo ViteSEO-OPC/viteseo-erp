@@ -4,8 +4,9 @@ namespace App\Modules\Crm\Services\Copilot;
 
 use App\Models\User;
 use App\Modules\Crm\Enums\NerbyProvider;
-use App\Modules\Crm\Models\Lead;
 use App\Modules\Crm\Services\Copilot\Prompts\CopilotInstruction;
+use App\Modules\Crm\Services\Copilot\Retrieval\CapabilityRegistry;
+use App\Modules\Crm\Services\Copilot\Retrieval\RetrievedFacts;
 use App\Modules\Crm\Services\Discovery\AiChatEndpoint;
 use App\Modules\Crm\Services\Discovery\NerbyProviderSettingService;
 use Illuminate\Http\Client\ConnectionException;
@@ -14,174 +15,200 @@ use Illuminate\Support\Facades\Log;
 use Throwable;
 
 /**
- * The Copilot's OPTIONAL AI fallback: answer a CRM question the rule-based Copilot could not, from
- * the caller's own aggregate lead figures, or decline.
+ * The Copilot's AI: a real model answers a CRM question in its own words, from facts the server
+ * selected and authorised for this user.
  *
- * ADDITIVE ONLY. Every failure — switched off, no usable credential, provider error, timeout, an
- * out-of-scope or unanswerable question, a malformed or ungrounded answer — returns null, and the
- * Copilot shows the help reply it has always shown. Nothing here writes: not the CRM, and not the
- * NERBY provider row whose credential it borrows. In particular a 402 is NOT recorded as
- * insufficient credit (unlike the NERBY lanes), so a Copilot call can never change NERBY's state.
+ * TWO HALVES, NEVER MIXED:
+ *   - CODE (this class and its collaborators) controls ACCESS: the three gates, cost limits, which
+ *     read-only capabilities run ({@see CopilotRetrievalPlanner}), what each may read (their own
+ *     permission checks and ownership scopes), what leaves the server ({@see CopilotContextBuilder}),
+ *     and whether the model's reply is safe and grounded ({@see CopilotAnswerValidator}).
+ *   - THE MODEL controls the ANSWER: understanding the question, reasoning over the facts, and every
+ *     word of the reply. No code here writes, completes or rephrases an answer.
  *
- * AGGREGATES ONLY. The model sees counts by status, priority and website status over the leads the
- * caller may see (`Lead::visibleTo`, the CRM's one ownership rule) — never a name, contact, email,
- * phone or any other per-lead field. Context is built here, on the server, and never accepted from
- * the client.
+ * ONE RETRY, FOR WORDING ONLY. When the validator rejects an answer for a FIXABLE reason — a wording
+ * fault such as "your" on a whole-CRM figure, and only when nothing harder is wrong with it — the
+ * model is asked once more with the SAME facts (no new retrieval), its own reply, and a fixed
+ * correction note ({@see CopilotInstruction::CORRECTIONS}). The retry passes the full validator or the
+ * deterministic reply stands. It is a second model call in every respect: gated by the circuit
+ * breaker, counted against the daily cap, and audited as its own row (outcome `retry_…`).
+ *
+ * READ-ONLY AND FAIL-SAFE. Nothing here writes CRM data or the NERBY provider row whose credential it
+ * borrows (a 402 is not recorded as insufficient credit). Every failure returns null, and the Copilot
+ * shows the deterministic reply it has always shown. The only write is one metadata audit row.
  */
 class CopilotAiService
 {
     /** Hard ceiling on the provider body before anything decodes it. */
-    private const MAX_RESPONSE_BYTES = 16384;
-
-    /** Longest answer shown in the Copilot; anything longer is discarded, not truncated. */
-    private const MAX_ANSWER_CHARS = 600;
+    private const MAX_RESPONSE_BYTES = 32768;
 
     public function __construct(
         private readonly NerbyProviderSettingService $settings,
         private readonly CopilotSettingService $copilotSettings,
+        private readonly CopilotRetrievalPlanner $planner,
+        private readonly CapabilityRegistry $registry,
+        private readonly CopilotContextBuilder $contextBuilder,
+        private readonly CopilotAnswerValidator $validator,
+        private readonly CopilotUsageGuard $guard,
+        private readonly CopilotAuditLogger $audit,
     ) {}
 
-    /** The grounded answer, or null when the Copilot should keep its own help reply. */
+    /** The model's accepted answer, or null when the Copilot should keep its deterministic reply. */
     public function answer(User $user, string $question): ?string
     {
-        // Ops kill switch, then the Super Admin toggle, then the credential — cheapest first, so an
-        // off switch means no database read, no credential read and no network.
+        // Ops kill switch, then the Super Admin toggle, then the credential — cheapest first. Off
+        // means no retrieval, no provider call and no audit row: the Copilot is exactly as before.
         if (! $this->copilotSettings->aiAvailable()) {
             return null;
         }
 
-        $context = $this->context($user);
-        $content = $this->ask($question, $context);
-        if ($content === null) {
+        $started = hrtime(true);
+        $finish = function (string $outcome, ?string $reason = null, ?CopilotContext $context = null, ?string $model = null, array $usage = []) use ($user, $question, &$started): void {
+            $this->audit->record($user, $question, $outcome, $reason, $context?->recordCounts, $model, intdiv(hrtime(true) - $started, 1_000_000), $usage);
+        };
+
+        if ($this->guard->breakerOpen()) {
+            $finish('circuit_open');
+
+            return null;
+        }
+        if (! $this->guard->consumeDaily($user)) {
+            $finish('daily_limit');
+
             return null;
         }
 
-        return $this->grounded($content, $context);
+        $context = $this->contextBuilder->build($question, $this->retrieve($user, $question));
+
+        [$content, $failure, $model, $usage] = $this->ask($context);
+        if ($content === null) {
+            $this->guard->recordProviderFailure();
+            $finish($failure, null, $context, $model);
+
+            return null;
+        }
+        $this->guard->recordProviderSuccess();
+
+        [$reason, $answer] = $this->validator->validate($content, $context, $question);
+        if ($answer !== null) {
+            $finish('answered', null, $context, $model, $usage);
+
+            return $answer;
+        }
+        $finish($this->outcomeFor($reason), $reason, $context, $model, $usage);
+
+        if (! in_array($reason, CopilotAnswerValidator::FIXABLE, true)) {
+            return null;
+        }
+
+        // ── The one retry. ────────────────────────────────────────────────────────────────────────
+        if ($this->guard->breakerOpen() || ! $this->guard->consumeDaily($user)) {
+            return null;
+        }
+        $started = hrtime(true);
+        [$content, $failure, $model, $usage] = $this->ask($context, [
+            ['role' => 'assistant', 'content' => $content],
+            ['role' => 'user', 'content' => CopilotInstruction::CORRECTION_PREFIX.CopilotInstruction::CORRECTIONS[$reason].CopilotInstruction::CORRECTION_SUFFIX],
+        ]);
+        if ($content === null) {
+            $this->guard->recordProviderFailure();
+            $finish('retry_'.$failure, null, $context, $model);
+
+            return null;
+        }
+        $this->guard->recordProviderSuccess();
+
+        [$retryReason, $answer] = $this->validator->validate($content, $context, $question);
+        $finish($answer === null ? 'retry_'.$this->outcomeFor($retryReason) : 'retry_answered', $answer === null ? $retryReason : null, $context, $model, $usage);
+
+        return $answer;
     }
 
     /**
-     * The caller's aggregate lead figures. Same population the dashboard counts (`active()` +
-     * `visibleTo()`); raw column groupings only, so no business definition is re-derived here.
+     * Run the planned capabilities that this user is permitted, as this user. A capability that is
+     * refused is skipped silently — the model is never told data exists that the user cannot see —
+     * and one that fails is skipped too, so a broken source degrades the answer, not the Copilot.
      *
-     * @return array{role: string, total_leads: int, by_status: array<string, int>, by_priority: array<string, int>, by_website_status: array<string, int>}
+     * @return list<RetrievedFacts>
      */
-    public function context(User $user): array
+    private function retrieve(User $user, string $question): array
     {
-        return [
-            'role' => $user->hasAnyRole(['crm_admin', 'super_admin']) ? 'manager (whole CRM)' : 'business developer (own leads)',
-            'total_leads' => Lead::query()->active()->visibleTo($user)->count(),
-            'by_status' => $this->countBy($user, 'status'),
-            'by_priority' => $this->countBy($user, 'priority'),
-            'by_website_status' => $this->countBy($user, 'website_status'),
-        ];
+        $retrieved = [];
+        foreach ($this->planner->plan($question) as $key) {
+            $capability = $this->registry->get($key);
+            if (! $capability->permits($user)) {
+                continue;
+            }
+            try {
+                $retrieved[] = $capability->retrieve($user, $question);
+            } catch (Throwable $e) {
+                Log::warning('Copilot capability failed', ['capability' => $key, 'class' => $e::class]);
+            }
+        }
+
+        return $retrieved;
     }
 
-    /** @return array<string, int> */
-    private function countBy(User $user, string $column): array
-    {
-        return Lead::query()
-            ->active()
-            ->visibleTo($user)
-            ->selectRaw("{$column} as bucket, COUNT(*) as aggregate")
-            ->groupBy($column)
-            ->pluck('aggregate', 'bucket')
-            ->mapWithKeys(static fn ($count, $bucket): array => [
-                ($bucket === null || $bucket === '') ? 'unset' : (string) $bucket => (int) $count,
-            ])
-            ->all();
-    }
-
-    /** @param  array<string, mixed>  $context */
-    private function ask(string $question, array $context): ?string
+    /**
+     * One call to the model. Returns [content, failure outcome, model, usage]. `$followUp` carries the
+     * retry's two extra turns (the rejected reply and the fixed correction) after the same facts.
+     *
+     * @param  list<array{role: string, content: string}>  $followUp
+     * @return array{0: string|null, 1: string, 2: string|null, 3: array{prompt_tokens?: int|null, completion_tokens?: int|null}}
+     */
+    private function ask(CopilotContext $context, array $followUp = []): array
     {
         $row = $this->settings->for(NerbyProvider::OPENAI);
         $model = (string) ($row->option('model') ?: config('openai.model', 'gpt-4o-mini'));
         $endpoint = AiChatEndpoint::for((string) $row->api_key, $model);
-
-        $packet = json_encode([
-            'untrusted_target_data' => [
-                'question' => $question,
-                'crm_context' => $context,
-            ],
-        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 
         try {
             $response = Http::withToken((string) $row->api_key)
                 ->timeout((float) config('copilot.ai.timeout', 15))
                 ->post($endpoint->chatCompletionsUrl(), [
                     'model' => $endpoint->model,
-                    'temperature' => 0,
-                    'max_tokens' => (int) config('copilot.ai.max_tokens', 300),
+                    'temperature' => (float) config('copilot.ai.temperature', 0.2),
+                    'max_tokens' => (int) config('copilot.ai.max_tokens', 500),
                     'response_format' => ['type' => 'json_object'],
                     'messages' => [
                         ['role' => 'system', 'content' => CopilotInstruction::TEXT],
-                        ['role' => 'user', 'content' => (string) $packet],
+                        ['role' => 'user', 'content' => (string) json_encode($context->payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)],
+                        ...$followUp,
                     ],
                 ]);
         } catch (ConnectionException) {
-            return null;
+            return [null, 'timeout', $endpoint->model, []];
         } catch (Throwable $e) {
             // The class only: the request carried the credential, and a message could quote it.
-            Log::warning('Copilot AI fallback failed', ['class' => $e::class]);
+            Log::warning('Copilot AI request failed', ['class' => $e::class]);
 
-            return null;
+            return [null, 'provider_error', $endpoint->model, []];
         }
 
         // Any refusal — credit included — is simply "no answer". Deliberately NOT recorded on the
         // shared NERBY row: the Copilot must never change NERBY's provider state.
-        if ($response->failed()) {
-            return null;
-        }
-
-        $body = (string) $response->body();
-        if (strlen($body) > self::MAX_RESPONSE_BYTES) {
-            return null;
+        if ($response->failed() || strlen((string) $response->body()) > self::MAX_RESPONSE_BYTES) {
+            return [null, 'provider_error', $endpoint->model, []];
         }
 
         $content = $response->json('choices.0.message.content');
+        $usage = [
+            'prompt_tokens' => is_int($response->json('usage.prompt_tokens')) ? $response->json('usage.prompt_tokens') : null,
+            'completion_tokens' => is_int($response->json('usage.completion_tokens')) ? $response->json('usage.completion_tokens') : null,
+        ];
 
-        return is_string($content) ? $content : null;
+        return is_string($content) ? [$content, 'answered', $endpoint->model, $usage] : [null, 'provider_error', $endpoint->model, $usage];
     }
 
-    /**
-     * The model's answer if it is well-formed, in scope and grounded; otherwise null.
-     *
-     * GROUNDED means every number in the answer is one of the figures it was given. The instruction
-     * forbids computing new figures; this is what enforces it, so a made-up or derived count is
-     * discarded rather than shown.
-     *
-     * @param  array<string, mixed>  $context
-     */
-    private function grounded(string $content, array $context): ?string
+    private function outcomeFor(string $reason): string
     {
-        $data = json_decode($content, true);
-        if (! is_array($data) || ($data['answerable'] ?? null) !== true) {
-            return null;
-        }
-
-        $answer = $data['answer'] ?? null;
-        if (! is_string($answer)) {
-            return null;
-        }
-        $answer = trim($answer);
-        if ($answer === '' || mb_strlen($answer) > self::MAX_ANSWER_CHARS) {
-            return null;
-        }
-
-        $allowed = [];
-        array_walk_recursive($context, static function ($value) use (&$allowed): void {
-            if (is_int($value)) {
-                $allowed[(string) $value] = true;
-            }
-        });
-
-        preg_match_all('/\d[\d,]*(?:\.\d+)?/', $answer, $matches);
-        foreach ($matches[0] as $number) {
-            if (! isset($allowed[str_replace(',', '', $number)])) {
-                return null;
-            }
-        }
-
-        return $answer;
+        return match (true) {
+            $reason === 'declined' => 'declined',
+            str_starts_with($reason, 'leak_'), $reason === 'action_claim' => 'unsafe',
+            str_starts_with($reason, 'ungrounded_'), str_starts_with($reason, 'unsupported_'), $reason === 'unknown_term',
+            in_array($reason, ['misbound_number', 'unbound_number', 'misplaced_reference_number'], true),
+            in_array($reason, CopilotAnswerValidator::FIXABLE, true) => 'ungrounded',
+            default => 'invalid',
+        };
     }
 }

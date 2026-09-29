@@ -94,8 +94,12 @@ class CopilotAskTest extends TestCase
         ]);
     }
 
+    /** A model reply. An answerable reply cites the portfolio unless the test says otherwise. */
     private function modelSays(array $json, int $status = 200): void
     {
+        if (($json['answerable'] ?? null) === true && ! array_key_exists('sources', $json)) {
+            $json['sources'] = ['lead_portfolio'];
+        }
         Http::fake([self::ENDPOINT => Http::response(
             ['choices' => [['message' => ['content' => json_encode($json)]]]],
             $status,
@@ -111,6 +115,17 @@ class CopilotAskTest extends TestCase
         $request = $sent[0];
 
         return json_decode($request['messages'][1]['content'], true);
+    }
+
+    /** One supplied source's facts, as name => value. */
+    private function facts(array $packet, string $source): array
+    {
+        foreach ($packet['data']['facts'] as $s) {
+            if ($s['source'] === $source) {
+                return array_column($s['facts'], 'value', 'name');
+            }
+        }
+        $this->fail("source {$source} was not supplied");
     }
 
     // ── off by default, and silent when off ─────────────────────────────────────────────────
@@ -196,11 +211,12 @@ class CopilotAskTest extends TestCase
         $this->postJson(self::URL, ['question' => 'overview please'])->assertOk();
 
         $packet = $this->sentPacket();
-        $context = $packet['untrusted_target_data']['crm_context'];
-        $this->assertSame(1, $context['total_leads']);
-        $this->assertSame(['interested' => 1], $context['by_status']);
-        $this->assertSame(['high' => 1], $context['by_priority']);
-        $this->assertSame('overview please', $packet['untrusted_target_data']['question']);
+        $portfolio = $this->facts($packet, 'lead_portfolio');
+        $this->assertSame(1, $portfolio['total_leads']);
+        $this->assertSame(['interested' => 1], $portfolio['leads_by_status']);
+        $this->assertSame(['high' => 1], $portfolio['leads_by_priority']);
+        $this->assertSame(1, $this->facts($packet, 'dashboard_kpis')['total_leads']);
+        $this->assertSame('overview please', $packet['data']['question']);
 
         $raw = json_encode($packet);
         foreach (['Kopi Roasters', 'Someone Elses Lead', 'Maria Santos', 'maria@kopi.example', '+63 917'] as $pii) {
@@ -220,7 +236,7 @@ class CopilotAskTest extends TestCase
 
         $this->postJson(self::URL, ['question' => 'overview'])->assertOk();
 
-        $this->assertSame(2, $this->sentPacket()['untrusted_target_data']['crm_context']['total_leads']);
+        $this->assertSame(2, $this->facts($this->sentPacket(), 'lead_portfolio')['total_leads']);
     }
 
     // ── every failure is "not answered" ─────────────────────────────────────────────────────
@@ -277,7 +293,7 @@ class CopilotAskTest extends TestCase
         // The model was given the comparison rules, as static instructions.
         $sent = Http::recorded()->first()[0];
         $this->assertSame(CopilotInstruction::TEXT, $sent['messages'][0]['content']);
-        $this->assertStringContainsString('COMPARISONS', CopilotInstruction::TEXT);
+        $this->assertStringContainsString('EVIDENCE RULES', CopilotInstruction::TEXT);
     }
 
     public function test_a_comparison_with_an_invented_figure_is_rejected(): void
@@ -324,13 +340,15 @@ class CopilotAskTest extends TestCase
 
         return [
             'content is not json' => [$completion('not json at all')],
-            'answer is empty' => [$completion(['answerable' => true, 'answer' => ''])],
-            'answerable is not boolean true' => [$completion(['answerable' => 'yes', 'answer' => 'Sure.'])],
-            'answer is not a string' => [$completion(['answerable' => true, 'answer' => ['Sure.']])],
-            'answer is too long' => [$completion(['answerable' => true, 'answer' => str_repeat('x', 601)])],
+            'answer is empty' => [$completion(['answerable' => true, 'answer' => '', 'sources' => ['lead_portfolio']])],
+            'answerable is not boolean true' => [$completion(['answerable' => 'yes', 'answer' => 'Sure.', 'sources' => ['lead_portfolio']])],
+            'answer is not a string' => [$completion(['answerable' => true, 'answer' => ['Sure.'], 'sources' => ['lead_portfolio']])],
+            'answer is too long' => [$completion(['answerable' => true, 'answer' => str_repeat('x', 1201), 'sources' => ['lead_portfolio']])],
+            'no sources cited' => [$completion(['answerable' => true, 'answer' => 'Most of your leads are new.'])],
+            'a source that was never supplied' => [$completion(['answerable' => true, 'answer' => 'Most of your leads are new.', 'sources' => ['lead_notes']])],
             'no message content' => [['choices' => []]],
             // Valid completion and a short, acceptable answer — rejected ONLY by the body-size cap.
-            'body over the size cap' => [$completion(['answerable' => true, 'answer' => 'Most of your leads are new.'], ['padding' => str_repeat('x', 20000)])],
+            'body over the size cap' => [$completion(['answerable' => true, 'answer' => 'Most of your leads are new.', 'sources' => ['lead_portfolio']], ['padding' => str_repeat('x', 40000)])],
             'body is not json' => [str_repeat('x', 100)],
         ];
     }
@@ -413,7 +431,8 @@ class CopilotAskTest extends TestCase
         $this->modelSays(['answerable' => true, 'answer' => 'Done — I assigned it to you.']);
         Sanctum::actingAs($bd);
 
-        $this->postJson(self::URL, ['question' => 'assign my lead to me'])->assertOk();
+        // The model claims an action it cannot take: rejected, and nothing changed.
+        $this->postJson(self::URL, ['question' => 'assign my lead to me'])->assertOk()->assertJsonPath('data.answered', false);
 
         $this->assertSame($before, $lead->fresh()->getAttributes());
     }

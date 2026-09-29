@@ -12,7 +12,15 @@ export function AiMessageBubble({ message }: Props) {
     <div className="flex items-start gap-3">
       <AiAvatarTile />
       <div className="max-w-[75%] rounded-xl border border-border bg-card p-3 shadow-sm">
-        <MessageRichText segments={message.segments} />
+        {/* An AI reply is model-written plain text and may span lines; keep them. Deterministic replies
+            render exactly as before, with no wrapper. */}
+        {message.aiAssisted ? (
+          <div className="whitespace-pre-line">
+            <MessageRichText segments={message.segments} />
+          </div>
+        ) : (
+          <MessageRichText segments={message.segments} />
+        )}
         <p className="mt-1 text-xs text-muted-foreground">
           {formatActivityTimestamp(message.timestamp)}
         </p>

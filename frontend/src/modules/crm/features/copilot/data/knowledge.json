@@ -328,7 +328,7 @@
       "id": "copilot",
       "question": "What can the Vite AI Copilot do?",
       "keywords": "copilot assistant help what can you do commands capabilities ai vite rule based explain",
-      "answer": "I'm the **Vite AI Copilot** — a rule-based assistant with no external AI, so my answers come from the CRM's own documented rules rather than a language model. I can **explain how any figure is computed** — the formula, its numerator and denominator, and why it's defined that way — explain the **business rules** behind statuses, scoring, assignment, calling, outreach and permissions, walk you through **workflows**, and jump you to any workspace. If the CRM doesn't define something, I'll tell you that instead of guessing. What I can't yet do is quote *your* live numbers — ask me on the relevant page for those."
+      "answer": "I'm the **Vite AI Copilot**. My **built-in CRM answers** come from the CRM's own documented rules, so they are always available. I can **explain how any figure is computed** — the formula, its numerator and denominator, and why it's defined that way — explain the **business rules** behind statuses, scoring, assignment, calling, outreach and permissions, walk you through **workflows**, and jump you to any workspace. When an administrator has enabled **optional AI assistance**, some questions are also answered in plain language from the CRM figures you're allowed to see; those replies are marked *AI-assisted*. Either way I only read — I never change anything in the CRM — and if the CRM doesn't define something, I'll tell you that instead of guessing. Built-in answers don't quote *your* live numbers — ask me on the relevant page for those."
     }
   ]
 }

@@ -18,6 +18,9 @@
  * H6  QUICK ACTIONS NEVER REACH AI — every chip binds to a real intent, so none falls back to `send`.
  * H7  WIRING — AI only behind server availability and the rule; on failure the SAME intent's
  *     deterministic turn; availability reads OFF unless the server says exactly `true`.
+ * H8  KNOWLEDGE PARITY — the backend's copy of the Copilot knowledge (what the model may be given)
+ *     is byte-identical to the articles the rule-based Copilot ships.
+ * H9  STATUS VOCABULARY PARITY — the backend's LeadVocabulary labels match lead-status.ts.
  *
  * Exits non-zero if any gate fails.
  */
@@ -29,6 +32,7 @@ import knowledgeData from "@/modules/crm/features/copilot/data/knowledge.json";
 import intentData from "@/modules/crm/features/copilot/data/intents.json";
 import quickActionData from "@/modules/crm/features/copilot/data/quick-actions.json";
 import type { IntentConfig } from "@/modules/crm/features/copilot/engine/types";
+import { LEAD_STATUS_CONFIG } from "@/modules/crm/lib/lead-status";
 
 const CONFIG = intentData as unknown as IntentConfig;
 const eligible = (q: string) => isAiEligible(matchIntentWithEntity(q, CONFIG), CONFIG);
@@ -153,6 +157,32 @@ function report(gate: string, ok: number, total: number, detail: string[] = []) 
     checks.length,
     checks.filter(([, ok]) => !ok).map(([name]) => name),
   );
+}
+
+// ── H8 ──
+{
+  const pairs = ["knowledge.json", "computations.json"].map((file) => [
+    file,
+    readFileSync(new URL(`../../src/modules/crm/features/copilot/data/${file}`, import.meta.url)),
+    readFileSync(new URL(`../../../backend/resources/copilot/knowledge/${file}`, import.meta.url)),
+  ] as const);
+  const bad = pairs.filter(([, front, back]) => !front.equals(back)).map(([file]) => `${file} differs`);
+  report("H8 backend knowledge = frontend knowledge", pairs.length - bad.length, pairs.length, bad);
+}
+
+// ── H9 ──
+{
+  const php = readFileSync(
+    new URL("../../../backend/app/Modules/Crm/Services/Copilot/Knowledge/LeadVocabulary.php", import.meta.url),
+    "utf8",
+  );
+  const block = php.slice(php.indexOf("public const STATUSES"), php.indexOf("];", php.indexOf("public const STATUSES")));
+  const backend = [...block.matchAll(/'([^']+)'\s*=>\s*'([^']+)'/g)].map(([, value, label]) => `${value}=${label}`);
+  const frontend = LEAD_STATUS_CONFIG.map(({ value, label }) => `${value}=${label}`);
+  const bad = frontend.length === backend.length && frontend.every((f, i) => f === backend[i])
+    ? []
+    : [`frontend ${frontend.join(", ")}`, `backend  ${backend.join(", ")}`];
+  report("H9 status vocabulary = lead-status.ts", bad.length === 0 ? 1 : 0, 1, bad);
 }
 
 console.log(failed === 0 ? "\nAll AI gates passed." : `\n${failed} gate(s) FAILED.`);
