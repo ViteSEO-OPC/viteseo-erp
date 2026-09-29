@@ -1,8 +1,8 @@
 "use client";
 
-import { useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { CircleHelp, Clock, Loader2, Lock, Send, TriangleAlert } from "lucide-react";
+import { CircleHelp, Clock, Loader2, Lock, Send, Sparkles, TriangleAlert } from "lucide-react";
 
 import { Button } from "@/modules/crm/components/ui/button";
 import { Textarea } from "@/modules/crm/components/ui/textarea";
@@ -12,6 +12,7 @@ import {
     type ResolveTarget,
 } from "@/modules/crm/features/inbox/components/resolve-outbound-dialog";
 import { classifyReplyError, useSendReply } from "@/modules/crm/features/inbox/hooks/use-send-reply";
+import { draftErrorMessage, draftTextFrom, useDraftReply } from "@/modules/crm/features/inbox/hooks/use-draft-reply";
 import {
     composerLock,
     draftAfterResolution,
@@ -21,6 +22,7 @@ import {
 import { queryKeys } from "@/modules/crm/lib/query-keys";
 import type {
     InboxConversationDetail,
+    InboxDraftCapability,
     InboxMessage,
     InboxReplyCapability,
     InboxUnresolvedOutbound,
@@ -105,6 +107,7 @@ export function ReplyComposer({
     messages,
     unresolvedOutbound,
     serverReadAt,
+    draftCapability,
 }: {
     conversationId: string;
     capability: InboxReplyCapability;
@@ -112,6 +115,8 @@ export function ReplyComposer({
     unresolvedOutbound: InboxUnresolvedOutbound[] | undefined;
     /** `dataUpdatedAt` of the conversation detail these props came from. */
     serverReadAt: number;
+    /** Phase 4A-lite server hint. Absent reads as "not offered". */
+    draftCapability?: InboxDraftCapability;
 }) {
     const [draft, setDraft] = useState("");
     const [failure, setFailure] = useState<string | null>(null);
@@ -149,6 +154,31 @@ export function ReplyComposer({
     const inFlight = useRef(false);
 
     const mutation = useSendReply(conversationId);
+
+    /*
+     * ============ "DRAFT WITH AI" (Phase 4A-lite) — TEXT ONLY, NEVER A SEND ============
+     *
+     * The draft flow owns none of the send machinery: it never calls `mutation`, never mints a
+     * client request id, never touches the ambiguous lock or the resolve panel. Its only effect is
+     * `setDraft(text)`, after which the operator reviews and presses the normal Send (or doesn't).
+     */
+    const draftMutation = useDraftReply(conversationId);
+    const [confirmReplace, setConfirmReplace] = useState(false);
+    const [draftNotice, setDraftNotice] = useState<{ tone: "error" | "info"; text: string } | null>(null);
+
+    /* Same synchronous double-click guard as `inFlight`, for the (paid) draft request. */
+    const draftInFlight = useRef(false);
+
+    /*
+     * The composer text as last rendered, and a count of send attempts. Read only in the draft's
+     * response handler, to refuse to overwrite anything the operator typed — or sent — meanwhile.
+     */
+    const latestDraft = useRef(draft);
+    const sendAttempts = useRef(0);
+
+    useEffect(() => {
+        latestDraft.current = draft;
+    }, [draft]);
 
     const trimmed = draft.trim();
     const tooLong = draft.length > MAX_BODY;
@@ -230,6 +260,7 @@ export function ReplyComposer({
         }
 
         inFlight.current = true;
+        sendAttempts.current += 1;
         setFailure(null);
 
         /*
@@ -312,6 +343,70 @@ export function ReplyComposer({
         setFailure(null);
         setCheckFailed(false);
         setDraft("");
+    }
+
+    /* Offered only when the server says so; unusable while anything could be sending or unsettled. */
+    const draftOffered = draftCapability?.enabled === true;
+    const canDraft = draftOffered && canType && lock.reason === null && ! draftMutation.isPending;
+
+    /**
+     * The button. If the operator already wrote something, ask FIRST — before spending a model call
+     * whose answer would then be thrown away.
+     */
+    function requestDraft(): void {
+        if (! canDraft || draftInFlight.current || inFlight.current) {
+            return;
+        }
+
+        if (draft.trim() !== "") {
+            setDraftNotice(null);
+            setConfirmReplace(true);
+            return;
+        }
+
+        startDraft();
+    }
+
+    function startDraft(): void {
+        setConfirmReplace(false);
+
+        if (! canDraft || draftInFlight.current || inFlight.current) {
+            return;
+        }
+
+        draftInFlight.current = true;
+        setDraftNotice(null);
+
+        // The state the answer is allowed to replace. Anything else by then is the operator's.
+        const startedWith = draft;
+        const startedAfterSends = sendAttempts.current;
+
+        draftMutation.mutate(undefined, {
+            onSuccess: (data) => {
+                const text = draftTextFrom(data);
+
+                if (text === null) {
+                    setDraftNotice({ tone: "error", text: "The AI draft could not be generated. Try again." });
+                    return;
+                }
+
+                if (latestDraft.current !== startedWith || sendAttempts.current !== startedAfterSends) {
+                    setDraftNotice({ tone: "info", text: "Draft not applied because you edited the reply." });
+                    return;
+                }
+
+                // Plain text into the textarea — nothing else. The operator reviews it and sends it.
+                setDraft(text);
+                setFailure(null);
+                setDraftNotice({ tone: "info", text: "AI draft added. Review and edit it before sending." });
+            },
+            onError: (error) => {
+                setDraftNotice({ tone: "error", text: draftErrorMessage(error) });
+            },
+            onSettled: () => {
+                draftInFlight.current = false;
+            },
+        });
     }
 
     const disabledReason = capability.enabled ? null : disabledCopy(capability.reason);
@@ -446,6 +541,30 @@ export function ReplyComposer({
                     {draft.length} / {MAX_BODY}
                 </span>
 
+                {draftOffered ? (
+                    <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={requestDraft}
+                        disabled={! canDraft || confirmReplace}
+                        aria-busy={draftMutation.isPending}
+                        className="ml-auto"
+                    >
+                        {draftMutation.isPending ? (
+                            <>
+                                <Loader2 aria-hidden className="animate-spin" />
+                                Drafting…
+                            </>
+                        ) : (
+                            <>
+                                <Sparkles aria-hidden />
+                                Draft with AI
+                            </>
+                        )}
+                    </Button>
+                ) : null}
+
                 {/*
                   * The variant drops to `secondary` when the button cannot be pressed.
                   *
@@ -461,7 +580,7 @@ export function ReplyComposer({
                     variant={canSend ? "default" : "secondary"}
                     onClick={submit}
                     disabled={! canSend}
-                    className="ml-auto"
+                    className={draftOffered ? undefined : "ml-auto"}
                     aria-label={mutation.isPending ? "Sending reply" : "Send reply"}
                 >
                     {mutation.isPending ? (
@@ -477,6 +596,30 @@ export function ReplyComposer({
                     )}
                 </Button>
             </div>
+
+            {draftOffered && confirmReplace ? (
+                <div role="group" aria-label="Replace your text with an AI draft?" className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                    <span className="font-medium text-card-foreground">Replace your text with an AI draft?</span>
+                    <span className="ml-auto flex gap-1.5">
+                        <Button type="button" variant="outline" size="xs" onClick={startDraft} disabled={! canDraft}>
+                            Replace
+                        </Button>
+                        <Button type="button" variant="ghost" size="xs" onClick={() => setConfirmReplace(false)}>
+                            Keep mine
+                        </Button>
+                    </span>
+                </div>
+            ) : null}
+
+            {draftOffered && draftNotice !== null ? (
+                <p
+                    role={draftNotice.tone === "error" ? "alert" : "status"}
+                    className={`mt-2 flex items-start gap-1.5 text-xs ${draftNotice.tone === "error" ? "font-medium text-destructive" : "text-muted-foreground"}`}
+                >
+                    {draftNotice.tone === "error" ? <TriangleAlert aria-hidden className="mt-0.5 size-3.5 shrink-0" /> : <Sparkles aria-hidden className="mt-0.5 size-3.5 shrink-0" />}
+                    {draftNotice.text}
+                </p>
+            ) : null}
 
             {/*
               * One live region for both states, so a screen reader hears whichever applies without

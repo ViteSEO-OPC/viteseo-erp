@@ -160,6 +160,53 @@ export type InboxConversationDetail = {
     link: InboxLinkCapability;
     /** Optional so a server without Phase 3H.5A still parses; always read as `?? []`. */
     unresolvedOutbound?: InboxUnresolvedOutbound[];
+    /** Phase 4A-lite. Optional so an older server still parses; absent reads as "not offered". */
+    draft?: InboxDraftCapability;
+};
+
+/**
+ * Whether to offer "Draft with AI" — a PRESENTATION HINT computed by the server. The draft endpoint
+ * re-checks permission, the feature flag and the key, so a stale `enabled: true` ends in a refusal.
+ */
+export type DraftDisabledReason = "permission_denied" | "ai_disabled" | "not_configured" | (string & {});
+
+export type InboxDraftCapability = {
+    enabled: boolean;
+    /** Null exactly when `enabled` is true. */
+    reason: DraftDisabledReason | null;
+};
+
+/**
+ * POST /conversations/{id}/draft on a 200. Text for the composer ONLY — the endpoint never sends,
+ * never writes a message row, and this client never forwards it to the reply endpoint by itself.
+ */
+export type DraftReplyResponse = {
+    draft: string;
+    failureCode: null;
+    model: string;
+    generatedAt: string;
+};
+
+/** The endpoint's closed failure vocabulary, widened to `string` because the server owns it. */
+export type DraftReplyFailureCode =
+    | "disabled"
+    | "not_configured"
+    | "empty_conversation"
+    | "timeout"
+    | "rate_limited"
+    | "auth_failed"
+    | "upstream_error"
+    | "invalid_response"
+    | (string & {});
+
+/**
+ * A contract refusal from the draft endpoint (409 / 429 / 502), arriving inside the axios error.
+ * `message` is the server's provider-neutral copy; branch logic on `failureCode`, never on `message`.
+ */
+export type DraftReplyFailure = {
+    draft: null;
+    failureCode: DraftReplyFailureCode;
+    message: string;
 };
 
 /**

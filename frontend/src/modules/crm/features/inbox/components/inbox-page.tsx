@@ -274,6 +274,7 @@ export function InboxPage() {
                                 capability={detail.data.reply}
                                 messages={detail.data.messages}
                                 unresolvedOutbound={detail.data.unresolvedOutbound}
+                                draftCapability={detail.data.draft}
                                 serverReadAt={detail.dataUpdatedAt}
                             />
                         </div>
