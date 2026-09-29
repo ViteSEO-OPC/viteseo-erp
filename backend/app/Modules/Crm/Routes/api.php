@@ -10,6 +10,7 @@ use App\Modules\Crm\Controllers\AutomationEmailController;
 use App\Modules\Crm\Controllers\BusinessRuleController;
 use App\Modules\Crm\Controllers\CallController;
 use App\Modules\Crm\Controllers\ConversationController;
+use App\Modules\Crm\Controllers\ConversationDraftController;
 use App\Modules\Crm\Controllers\ConversationLeadController;
 use App\Modules\Crm\Controllers\ConversationMessageResolutionController;
 use App\Modules\Crm\Controllers\ConversationReplyController;
@@ -395,6 +396,24 @@ Route::middleware(['auth:sanctum', 'set-current-org', 'subscription-active', 'fe
         Route::post('/conversations/{conversation}/messages/{message}/resolution', [ConversationMessageResolutionController::class, 'store'])
             ->middleware(['permission:crm.conversations.view', 'permission:crm.conversations.reply', 'throttle:10,1'])
             ->scopeBindings();
+
+        /*
+         * Phase 4A-lite — an AI-written DRAFT reply for the agent to review, edit and send through
+         * the reply route above. It NEVER sends: no provider call, no message row, no credential.
+         *
+         * View + reply, the same pair as the resolution route: the model reads the thread, and the
+         * draft is text meant to be spoken for the business.
+         *
+         * `throttle:5,1` with its OWN key prefix. A bare numeric throttle keys on the user alone, so
+         * without a prefix drafting and replying would share one counter and five drafts would lock
+         * the agent out of sending.
+         */
+        Route::post('/conversations/{conversation}/draft', [ConversationDraftController::class, 'store'])
+            ->middleware([
+                'permission:crm.conversations.view',
+                'permission:crm.conversations.reply',
+                'throttle:5,1,crm-conversation-draft:',
+            ]);
 
         /*
          * Phase 3H.3A — attaching a thread to a CRM lead by hand. LINK ONLY: NULL → lead. Relinking

@@ -6,6 +6,7 @@ namespace App\Modules\Crm\Resources;
 
 use App\Modules\Crm\Models\Conversation;
 use App\Modules\Crm\Models\ConversationMessage;
+use App\Modules\Crm\Services\AiDraft\ReplyDraftCapability;
 use App\Modules\Crm\Services\ConversationLinkCapability;
 use App\Modules\Crm\Services\Outbound\OutboundMessagePersister;
 use App\Modules\Crm\Services\Outbound\ReplyCapability;
@@ -74,6 +75,13 @@ class ConversationDetailResource extends JsonResource
              * `lead`.
              */
             'link' => app(ConversationLinkCapability::class)->for($this->resource, $viewer),
+
+            /*
+             * Phase 4A-lite — whether to offer "Draft with AI". Same kind of hint as `reply` and
+             * `link`, and also query-free — see {@see ReplyDraftCapability}. It does not promise a
+             * draft will come back; the model may time out or refuse.
+             */
+            'draft' => app(ReplyDraftCapability::class)->for($viewer),
 
             /*
              * Phase 3H.5A — every outbound message in this thread whose delivery nobody could
