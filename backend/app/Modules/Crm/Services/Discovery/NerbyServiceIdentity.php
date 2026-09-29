@@ -99,6 +99,7 @@ class NerbyServiceIdentity
             'POST api/v1/crm/discovery/places',
             'POST api/v1/crm/discovery/proposals',
             'POST api/v1/crm/discovery/tag-expansions',
+            'POST api/v1/crm/discovery/known-places',
             'POST api/v1/crm/leads/discovered',
             'GET api/v1/crm/website-enrichment/queue',
             'PUT api/v1/crm/leads/{lead}/website-enrichment',

@@ -137,17 +137,86 @@ class NationwidePlanner
     }
 
     /**
+     * Densest first inside one island group; nothing added, nothing removed.
+     *
+     * A STABLE SORT on the known-business count, so cells with the same count — including every
+     * cell with none — keep exactly the order they were emitted in. An empty cell therefore lands at
+     * the end of its group, still in the plan: it is searched later, never skipped, because "OSM
+     * knows of no such business here" is not "nothing is here" (the AI lanes may still find one).
+     *
+     * @param  list<array{group: string, area: string, bbox: array{0: float, 1: float, 2: float, 3: float}}>  $cells
+     * @param  array<string, int>  $density
+     * @return list<array{group: string, area: string, bbox: array{0: float, 1: float, 2: float, 3: float}}>
+     */
+    private function orderByDensity(array $cells, array $density, float $cellDegrees): array
+    {
+        $counts = [];
+        foreach ($cells as $index => $cell) {
+            $counts[$index] = (int) ($density[$this->densityKey($cell['bbox'], $cellDegrees)] ?? 0);
+        }
+
+        $order = array_keys($cells);
+        usort($order, static fn (int $a, int $b): int => [$counts[$b], $a] <=> [$counts[$a], $b]);
+
+        return array_map(static fn (int $i): array => $cells[$i], $order);
+    }
+
+    /**
+     * Count positions into this planner's own cells: the shape {@see plan()} takes as `$density`.
+     *
+     * Keyed by GRID INDEX, not by the corner's float value: the tiling steps from the national
+     * extent's south-west corner by `$cellDegrees`, so a cell's index is exact where its corner,
+     * accumulated in floating point, is not. A position outside every planned cell (open sea, a
+     * neighbouring country) is simply not counted.
+     *
+     * @param  iterable<array{0: float, 1: float}>  $points  latitude, longitude
+     * @return array<string, int>
+     */
+    public function densityByCell(iterable $points, float $cellDegrees): array
+    {
+        $cellDegrees = max(0.05, min(5.0, $cellDegrees));
+        $cells = [];
+        foreach ($this->cells($cellDegrees) as $cell) {
+            $cells[$this->densityKey($cell['bbox'], $cellDegrees)] = $cell['bbox'];
+        }
+
+        [$south, $west] = $this->boundary->bbox();
+        $counts = [];
+        foreach ($points as [$lat, $lon]) {
+            $key = (int) floor(($lat - $south) / $cellDegrees).'|'.(int) floor(($lon - $west) / $cellDegrees);
+            $bbox = $cells[$key] ?? null;
+            if ($bbox === null || $lat < $bbox[0] || $lat >= $bbox[2] || $lon < $bbox[1] || $lon >= $bbox[3]) {
+                continue;
+            }
+            $counts[$key] = ($counts[$key] ?? 0) + 1;
+        }
+
+        return $counts;
+    }
+
+    /** @param  array{0: float, 1: float, 2: float, 3: float}  $bbox */
+    private function densityKey(array $bbox, float $cellDegrees): string
+    {
+        $cellDegrees = max(0.05, min(5.0, $cellDegrees));
+        [$south, $west] = $this->boundary->bbox();
+
+        return (int) round(($bbox[0] - $south) / $cellDegrees).'|'.(int) round(($bbox[1] - $west) / $cellDegrees);
+    }
+
+    /**
      * Build the ordered cell plan for one nationwide run.
      *
      * @param  list<string>  $niches  free text, never validated against a list
      * @param  float  $cellDegrees  tile size; smaller means finer coverage and more provider calls
      * @param  int  $maxTasks  the BUDGET — how many (cell × niche) tasks this run may schedule
+     * @param  array<string, int>|null  $density  known businesses per cell ({@see densityByCell()}), or
+     *                                            null for the order that predates it — byte-identical
      * @return list<array{
      *   area: string, category: string, group: string,
      *   bbox: array{0: float, 1: float, 2: float, 3: float}
      * }>
      */
-    public function plan(array $niches, float $cellDegrees, int $maxTasks): array
+    public function plan(array $niches, float $cellDegrees, int $maxTasks, ?array $density = null): array
     {
         $cells = $this->cells($cellDegrees);
 
@@ -161,7 +230,9 @@ class NationwidePlanner
         // keeps a truncated plan national in character, so it is left alone; what changes is which
         // of a group's cells that round-robin reaches first.
         foreach ($byGroup as $group => $groupCells) {
-            $byGroup[$group] = $this->orderByCoverage($groupCells, $niches, $cellDegrees);
+            $byGroup[$group] = $density !== null
+                ? $this->orderByDensity($groupCells, $density, $cellDegrees)
+                : $this->orderByCoverage($groupCells, $niches, $cellDegrees);
         }
 
         $interleaved = [];

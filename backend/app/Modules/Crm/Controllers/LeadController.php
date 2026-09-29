@@ -7,6 +7,7 @@ use App\Models\User;
 use App\Modules\Crm\Events\LeadAssigned;
 use App\Modules\Crm\Jobs\ConvertXlsImportJob;
 use App\Modules\Crm\Models\Activity;
+use App\Modules\Crm\Models\DiscoveryRun;
 use App\Modules\Crm\Models\Lead;
 use App\Modules\Crm\Notifications\LeadAssignedNotification;
 use App\Modules\Crm\Requests\AssignLeadRequest;
@@ -842,6 +843,18 @@ class LeadController extends Controller
             $token === null
                 ? static fn (array $row): bool => false
                 : static fn (array $row): bool => $attestation->check((int) $token->getKey(), $row),
+            // The run this ingest belongs to, read from the run's own token name (`nerby:run:<uuid>`,
+            // see DiscoveryRunOrchestrator). Used only as `first_run_id` on provenance rows; null for
+            // any other caller (enrichment ticks, tests).
+            $token !== null && str_starts_with((string) $token->name, 'nerby:run:')
+                ? DiscoveryRun::query()->where('uuid', substr((string) $token->name, strlen('nerby:run:')))->value('id')
+                : null,
+            // Provenance-only AI findings are accepted from a discovery RUN's own token only — the
+            // process that actually ran the AI lane. Any other NERBY caller's (an enrichment tick's)
+            // claim is ignored, so nothing else can make a lead appear AI-discovered.
+            $token !== null && str_starts_with((string) $token->name, 'nerby:run:')
+                ? (array) $request->validated('provenance_only', [])
+                : [],
         );
 
         return response()->json(['data' => $result]);

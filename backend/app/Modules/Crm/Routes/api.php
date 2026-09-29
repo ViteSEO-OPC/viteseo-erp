@@ -21,6 +21,7 @@ use App\Modules\Crm\Controllers\EmailTemplateController;
 use App\Modules\Crm\Controllers\EmailTemplateManagementController;
 use App\Modules\Crm\Controllers\EmailTemplateOptionController;
 use App\Modules\Crm\Controllers\DiscoveryConfigController;
+use App\Modules\Crm\Controllers\DiscoveryKnownPlacesController;
 use App\Modules\Crm\Controllers\DiscoveryRunController;
 use App\Modules\Crm\Controllers\GmailOAuthController;
 use App\Modules\Crm\Controllers\NerbyProviderSettingController;
@@ -230,6 +231,12 @@ Route::middleware(['auth:sanctum', 'set-current-org', 'subscription-active', 'fe
         Route::post('/discovery/strategy', [DiscoveryConfigController::class, 'strategy'])
             ->can('import', Lead::class)
             ->middleware(['role:super_admin|crm_admin|nerby_service', ThrottleDiscoveryCallbacks::class.':30,1']);
+        // VOLUME MODE's pre-filter: which of a cell's OSM keys this org already holds. Machine-only, like
+        // the ingest it sits in front of; spends nothing, so it gets the looser read bound. The ingest
+        // still deduplicates on its own — this only saves the engine geocoding what the CRM has.
+        Route::post('/discovery/known-places', DiscoveryKnownPlacesController::class)
+            ->can('import', Lead::class)
+            ->middleware([EnsureNerbyServiceCaller::class, ThrottleDiscoveryCallbacks::class.':60,1']);
 
         // ── On-demand discovery runs ────────────────────────────────────────────────────────────
         // ADDITIVE. The prospect pool (`GET /nearby-clients` below) and the curated rotation

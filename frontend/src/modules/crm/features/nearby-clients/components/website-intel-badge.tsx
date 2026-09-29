@@ -34,7 +34,7 @@ export function WebsiteIntelBadge({ website, compact = false }: { website?: Webs
           <Globe className="h-3 w-3" aria-hidden />
           {status?.label ?? "Website unknown"}
         </span>
-        {!website.audited && (
+        {awaitingWebsiteCheck(website) && (
           <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Not audited</span>
         )}
       </div>
@@ -57,6 +57,16 @@ export function WebsiteIntelBadge({ website, compact = false }: { website?: Webs
       )}
     </div>
   );
+}
+
+/**
+ * Whether the website intelligence for this lead is still OUTSTANDING. A URL waits for its audit; a lead
+ * with no URL waits only until the website search has concluded — after that it has been checked, and
+ * calling it "not audited" would say nobody looked.
+ */
+export function awaitingWebsiteCheck(website: WebsiteSummary): boolean {
+  if (website.audited) return false;
+  return website.url !== null || !website.checked;
 }
 
 function Chip({ icon, label }: { icon?: React.ReactNode; label: string }) {

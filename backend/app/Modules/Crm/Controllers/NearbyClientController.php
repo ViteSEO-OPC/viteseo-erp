@@ -37,7 +37,9 @@ class NearbyClientController extends Controller
             ->discovered()
             ->with([
                 'websiteEnrichment',   // Website Intelligence signals (1:1; null until audited).
+                'websiteSearch',       // Website search trail (1:1; null until searched) — `checked` below.
                 'qualifiedBy:id,name', // Column-limited: the "Added by" line needs a name, nothing else.
+                'discoveryLanes:id,lead_id,lane', // Additional provenance for `foundByAll` (one query).
             ])
             ->orderBy('business_name')
             ->get();

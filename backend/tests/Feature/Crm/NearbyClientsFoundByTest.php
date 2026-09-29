@@ -212,9 +212,11 @@ class NearbyClientsFoundByTest extends TestCase
         // `inPhilippines` joined it so a Philippines-only VIEW could default sensibly over rows
         // created before discovery was fenced (see NearbyClientsCountryViewTest). All are additive
         // and read-only, exactly like `foundBy` before them — this assertion still exists to catch a
-        // field LEAVING, or one arriving without anyone deciding to add it.
+        // field LEAVING, or one arriving without anyone deciding to add it. `foundByAll` joined it
+        // for multi-provenance (change set D, PO-approved 2026-09-25): every lane that found a lead,
+        // read-only, beside the unchanged `foundBy` (see LeadDiscoveryLanesTest).
         $this->assertSame([
-            'id', 'business', 'initials', 'niche', 'area', 'contact', 'status', 'foundBy',
+            'id', 'business', 'initials', 'niche', 'area', 'contact', 'status', 'foundBy', 'foundByAll',
             'priority', 'active', 'qualified', 'qualifiedAt', 'qualifiedBy',
             'latitude', 'longitude', 'inPhilippines', 'website',
         ], array_keys($row));

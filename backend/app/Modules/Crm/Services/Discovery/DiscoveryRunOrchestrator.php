@@ -3,6 +3,7 @@
 namespace App\Modules\Crm\Services\Discovery;
 
 use App\Modules\Crm\Enums\NerbyProvider;
+use App\Modules\Crm\Jobs\EnrichRunLeadsJob;
 use App\Modules\Crm\Jobs\RunDiscoveryJob;
 use App\Modules\Crm\Models\DiscoveryRun;
 use App\Modules\Crm\Models\DiscoveryRunTarget;
@@ -11,6 +12,7 @@ use Carbon\CarbonInterface;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Sleep;
+use Throwable;
 
 /**
  * Executes one discovery run: task by task, provider-honestly, without touching anything frozen.
@@ -44,6 +46,7 @@ class DiscoveryRunOrchestrator
         private readonly ScraperProcessRunner $runner,
         private readonly NationwidePlanner $planner,
         private readonly NerbyServiceIdentity $service,
+        private readonly DensityEvidence $density,
     ) {}
 
     /**
@@ -539,10 +542,14 @@ class DiscoveryRunOrchestrator
      * nothing more there), or it came back FULL and could not be split any finer (capped — there IS
      * more and this run did not reach it).
      *
-     * GOOGLE IS REQUIRED, NOT PREFERRED. A nationwide sweep on the OpenStreetMap baseline would mean
-     * thousands of Overpass queries against a free, shared, community-funded endpoint — abuse of
-     * someone else's infrastructure, not a graceful fallback. The scoped path's degrade-and-carry-on
-     * is right for a handful of user-named searches and wrong at this scale.
+     * GOOGLE IS REQUIRED AT FULL SIZE, NOT AT EVERY SIZE. A nationwide sweep on the OpenStreetMap
+     * baseline would mean thousands of Overpass queries against a free, shared, community-funded
+     * endpoint — abuse of someone else's infrastructure, not a graceful fallback. But that is a
+     * statement about HOW MANY, not about which provider is configured, and reading it as the latter
+     * left the AI-assisted path with no way to use the only planner that covers the country. So the
+     * fence is the budget: without Google, a run may spend up to
+     * `discovery.nationwide.max_tasks_without_google` searches and no more. The scoped path's
+     * degrade-and-carry-on is right for a handful of user-named searches and still wrong at scale.
      */
     private function executeNationwide(DiscoveryRun $run, NerbyProvider $provider, string $metricsPath): bool
     {
@@ -554,13 +561,16 @@ class DiscoveryRunOrchestrator
             return $this->continueNationwide($run, (array) $run->work_queue, $provider, $metricsPath, $deadline);
         }
 
-        if ($provider !== NerbyProvider::GOOGLE_PLACES) {
+        $capability = NationwideCapability::for($provider);
+
+        if ($provider !== NerbyProvider::GOOGLE_PLACES && (int) $run->budget_total > $capability->maxTasks) {
             $this->fail(
                 $run,
-                'Nationwide discovery needs Google Places as the active provider. '
-                .'It is currently running on '.$provider->value.', which is not configured for a '
-                .'search of this size. Add and enable a Google Places key in Settings, then start '
-                .'the run again.',
+                'Nationwide discovery on '.$provider->value.' is limited to '.$capability->maxTasks
+                .' searches per run, because it answers from the free, community-funded Overpass '
+                .'endpoint. This run asked for '.(int) $run->budget_total.'. Lower the budget to '
+                .$capability->maxTasks.' or fewer, or add and enable a Google Places key in Settings '
+                .'to sweep the country at full size.',
             );
 
             return false;
@@ -574,12 +584,19 @@ class DiscoveryRunOrchestrator
         // because it falls out of the geometry rather than being typed in.
         $scope = (array) $run->scope;
         $cellDegrees = (float) ($scope['cellDegrees'] ?? config('discovery.nationwide.cell_degrees', 0.25));
+        // Null unless density ordering is switched on, the lane is OpenStreetMap-based and the probe
+        // answered for every niche — and null is exactly the order this run would have had anyway.
+        // VOLUME MODE orders by what the org does NOT hold yet, and falls back to plain density (or
+        // today's order) whenever that cannot be answered.
+        $density = ($this->volumeFor($provider) ? $this->unknownDensityFor($run, $cellDegrees) : null)
+            ?? $this->densityFor($run, $provider, $cellDegrees);
         $cells = $this->planner->plan(
             $this->nichesOf($run),
             $cellDegrees,
             // The plan is the CELL list; niches multiply within each cell at execution time, so the
             // ceiling passed here bounds cells, not calls. The budget bounds calls.
             PHP_INT_MAX,
+            $density,
         );
 
         // `plan()` returns (cell x niche) tasks interleaved by island group; the distinct cells in
@@ -606,6 +623,10 @@ class DiscoveryRunOrchestrator
             $this->fail($run, 'The national boundary produced no searchable cells. Nationwide discovery cannot run.');
 
             return false;
+        }
+
+        if ($density !== null) {
+            $queue = $this->markQuickPass($queue, count($this->nichesOf($run)));
         }
 
         $run->forceFill([
@@ -644,6 +665,7 @@ class DiscoveryRunOrchestrator
         }
         $this->finishNationwide($run);
         $this->clearCheckpoint($run);
+        $this->queueWebsiteIntelligence($run, $provider);
 
         return false;
     }
@@ -749,7 +771,7 @@ class DiscoveryRunOrchestrator
                         'truncated' => $truncated,
                         'searchFailed' => $searchFailed,
                         'parentForChildren' => $parentForChildren,
-                    ]);
+                    ] + array_intersect_key($cell, ['quickPass' => true, 'held' => true]));
 
                     return array_values($queue);
                 }
@@ -788,7 +810,18 @@ class DiscoveryRunOrchestrator
                 }
 
                 // The provider filled the page: there is more in this box than it was willing to say.
-                if ($result['discovered'] >= $limit) {
+                // A cell is truncated when the search filled its per-cell limit. In AI-assisted
+                // capacity mode a search may return more than that from the AI lanes, so it is the
+                // OpenStreetMap sweep's own count that decides — the descent is the sweep's.
+                //
+                // VOLUME MODE decides on the RAW read instead: the cap cut the cell off, or it held more
+                // new businesses than one search may return. Never on the named count, which unnamed
+                // elements shrink below the page and so used to end dense cells as "exhausted".
+                if (($result['volume'] ?? null) !== null) {
+                    if ($result['volume']['rawTruncated'] || $result['volume']['newCapped']) {
+                        $truncated = true;
+                    }
+                } elseif (($result['baselineDiscovered'] ?? $result['discovered']) >= $limit) {
                     $truncated = true;
                 }
                 $parentForChildren ??= (int) $target->id;
@@ -825,6 +858,11 @@ class DiscoveryRunOrchestrator
             }
 
             $run->increment('cells_subdivided');
+            if ($cell['quickPass'] ?? false) {
+                $queue = $this->holdChildren($queue, $children, $cell, $parentForChildren);
+
+                continue;
+            }
             foreach ($children as $child) {
                 // Children go to the FRONT, so a dense area is finished before the sweep moves on.
                 // Appending instead would push every subdivision behind the entire rest of the
@@ -844,6 +882,96 @@ class DiscoveryRunOrchestrator
     }
 
     /**
+     * The density map for this run's plan, or null for today's order.
+     *
+     * Only when `nationwide.density_ordering` is on, and never for Google Places: the probe describes
+     * what OpenStreetMap holds, which is what the OpenStreetMap and AI-assisted lanes search and not
+     * what Google does. Anything the evidence cannot answer — including an unexpected exception —
+     * costs the run its ordering, never the run.
+     *
+     * @return array<string, int>|null
+     */
+    private function densityFor(DiscoveryRun $run, NerbyProvider $provider, float $cellDegrees): ?array
+    {
+        if (! config('discovery.nationwide.density_ordering', false) || $provider === NerbyProvider::GOOGLE_PLACES) {
+            return null;
+        }
+
+        try {
+            return $this->density->forRun($this->nichesOf($run), $this->countryOf($run), $cellDegrees);
+        } catch (Throwable $e) {
+            Log::warning('Nationwide density ordering skipped; the probe raised', ['exception' => $e::class]);
+
+            return null;
+        }
+    }
+
+    /**
+     * Mark the FIRST PASS: the head of a density-ordered queue, which the island-group round-robin has
+     * already made the densest cells of Luzon, Visayas and Mindanao in turn.
+     *
+     * Sized in searches (`nationwide.quick_pass_tasks`), so a multi-niche run marks fewer cells — but
+     * never fewer than three, one per island group, or the pass would stop being national.
+     *
+     * @param  list<array<string, mixed>>  $queue
+     * @return list<array<string, mixed>>
+     */
+    private function markQuickPass(array $queue, int $nicheCount): array
+    {
+        $tasks = (int) config('discovery.nationwide.quick_pass_tasks', 6);
+        if ($tasks <= 0) {
+            return $queue;
+        }
+
+        $cells = max(3, (int) ceil($tasks / max(1, $nicheCount)));
+        foreach (array_slice(array_keys($queue), 0, $cells) as $index) {
+            $queue[$index]['quickPass'] = true;
+        }
+
+        return $queue;
+    }
+
+    /**
+     * A first-pass cell came back full: queue its children AFTER the rest of the first pass instead
+     * of in front of it.
+     *
+     * Without this the densest cell (Metro Manila) is subdivided to the depth limit before Visayas
+     * or Mindanao is searched once. The children are not skipped or demoted: they go immediately
+     * after the remaining first-pass cells and any children already held — so held blocks keep the
+     * order their parents were searched in — and each block is in the same order the existing
+     * front-insertion would have produced. Once the first pass is over the queue's head is these
+     * children, which is exactly where the existing rule would have put them.
+     *
+     * @param  list<array<string, mixed>>  $queue
+     * @param  list<array{0: float, 1: float, 2: float, 3: float}>  $children
+     * @param  array<string, mixed>  $cell
+     * @return list<array<string, mixed>>
+     */
+    private function holdChildren(array $queue, array $children, array $cell, ?int $parent): array
+    {
+        $block = [];
+        foreach ($children as $child) {
+            array_unshift($block, [
+                'bbox' => $child,
+                'group' => $cell['group'],
+                'label' => $cell['label'],
+                'depth' => $cell['depth'] + 1,
+                'parent' => $parent,
+                'held' => true,
+            ]);
+        }
+
+        $queue = array_values($queue);
+        $at = 0;
+        while (isset($queue[$at]) && (($queue[$at]['quickPass'] ?? false) || ($queue[$at]['held'] ?? false))) {
+            $at++;
+        }
+        array_splice($queue, $at, 0, $block);
+
+        return $queue;
+    }
+
+    /**
      * One bounded task, run and recorded.
      *
      * Separate from {@see runTarget()} because the degradation rule is genuinely different: the
@@ -855,6 +983,99 @@ class DiscoveryRunOrchestrator
      * @param  array{0: float, 1: float, 2: float, 3: float}  $bbox
      * @return array{ok: bool, discovered: int, inserted: int, duplicates: int, rejected: int}
      */
+    /**
+     * VOLUME MODE is on for this search: the combined `openai` provider, with the setting enabled.
+     * Only nationwide searches reach {@see runBoundedTarget()}, so a scoped run never sees it.
+     */
+    private function volumeFor(NerbyProvider $provider): bool
+    {
+        return $provider === NerbyProvider::OPENAI && (bool) config('discovery.nationwide.volume.enabled', false);
+    }
+
+    /**
+     * VOLUME MODE's engine flags, or none — in which case the search runs exactly as before.
+     *
+     * @return list<string>
+     */
+    private function volumeArgs(NerbyProvider $provider): array
+    {
+        if (! $this->volumeFor($provider)) {
+            return [];
+        }
+
+        return [
+            '--volume',
+            '--raw-cap', (string) max(1, (int) config('discovery.nationwide.volume.raw_cap', 400)),
+            '--task-new-cap', (string) max(1, (int) config('discovery.nationwide.volume.task_cap', 100)),
+        ];
+    }
+
+    /**
+     * Per cell, the probed businesses this org does not hold yet — or null for the fallback order.
+     *
+     * @return array<string, int>|null
+     */
+    private function unknownDensityFor(DiscoveryRun $run, float $cellDegrees): ?array
+    {
+        try {
+            return $this->density->unknownForRun($this->nichesOf($run), $this->countryOf($run), $cellDegrees);
+        } catch (Throwable $e) {
+            Log::warning('Nationwide volume ordering skipped; the probe raised', ['exception' => $e::class]);
+
+            return null;
+        }
+    }
+
+    /**
+     * WEBSITE INTELLIGENCE FOR A VOLUME RUN'S NEW LEADS — queued once the run is over, whatever ended it.
+     *
+     * An additive verification step, never part of discovery: a separate job on the same worker, scoped
+     * to the leads this run created, so they do not wait on the (deliberately stopped) scheduler and
+     * stay "Not audited". Nothing here can change what the run found.
+     */
+    private function queueWebsiteIntelligence(DiscoveryRun $run, NerbyProvider $provider): void
+    {
+        if (! $this->volumeFor($provider) || ! config('discovery.nationwide.volume.enrich_after_run', true)) {
+            return;
+        }
+
+        $run->refresh();
+        if ((int) $run->inserted <= 0) {
+            return;
+        }
+
+        EnrichRunLeadsJob::dispatch($run->uuid, (int) $run->org_id)->onQueue('discovery');
+    }
+
+    /**
+     * AI-ASSISTED CAPACITY MODE: the extra engine flags for one nationwide search, or none.
+     *
+     * Only for the combined `openai` provider, and only when `discovery.nationwide.ai_total_limit`
+     * is configured; every other search — OpenStreetMap, Google Places, Google + AI, or `openai`
+     * with the setting unset — gets none, and so runs with exactly the command it always had.
+     *
+     * The AI lanes search the AREA named on the task, not the cell, so every cell sharing that name
+     * would ask the model the same question and resolve the same answer. They run once per (area,
+     * niche) per run: a later cell with the same pair runs the sweep alone, unless every earlier AI
+     * attempt for it failed, in which case it tries again.
+     *
+     * @return list<string>
+     */
+    private function aiCapacityArgs(DiscoveryRunTarget $target, NerbyProvider $provider, string $metricsPath): array
+    {
+        $total = config('discovery.nationwide.ai_total_limit');
+        if ($provider !== NerbyProvider::OPENAI || $total === null || (int) $total <= (int) $target->limit_per_task) {
+            return [];
+        }
+
+        $args = ['--ai-total-limit', (string) (int) $total];
+        if ($this->runner->aiLanesRanFor($metricsPath, (string) $target->area, (string) $target->category)) {
+            $args[] = '--skip-ai-lanes';
+        }
+
+        return $args;
+    }
+
     private function runBoundedTarget(
         DiscoveryRun $run,
         DiscoveryRunTarget $target,
@@ -867,21 +1088,42 @@ class DiscoveryRunOrchestrator
             'started_at' => now(),
         ])->save();
 
-        $result = $this->withRateLimitRetry($run, fn (): array => $this->runner->run(
-            $target->area,
-            $target->category,
-            (int) $target->limit_per_task,
-            $provider->value,
-            $metricsPath,
-            $bbox,
-            $this->countryOf($run),
-            $this->aiFor($run, $provider),
-            $this->crmToken,
-        ));
+        $volume = $this->volumeArgs($provider);
+        $capacity = $volume !== [] ? $volume : $this->aiCapacityArgs($target, $provider, $metricsPath);
+
+        $result = $this->withRateLimitRetry($run, fn (): array => $capacity === []
+            ? $this->runner->run(
+                $target->area,
+                $target->category,
+                (int) $target->limit_per_task,
+                $provider->value,
+                $metricsPath,
+                $bbox,
+                $this->countryOf($run),
+                $this->aiFor($run, $provider),
+                $this->crmToken,
+            )
+            : $this->runner->runWithEngineFlags(
+                $capacity,
+                $target->area,
+                $target->category,
+                (int) $target->limit_per_task,
+                $provider->value,
+                $metricsPath,
+                $bbox,
+                $this->countryOf($run),
+                $this->aiFor($run, $provider),
+                $this->crmToken,
+            ));
 
         $this->recordTarget($run, $target, $provider, $result);
 
         return [
+            // AI-assisted capacity mode: the sweep's own count, which the descent subdivides on.
+            // Null outside the mode, where the descent reads `discovered` exactly as before.
+            'baselineDiscovered' => $capacity !== [] ? ($result['baselineDiscovered'] ?? null) : null,
+            // VOLUME MODE's read of the cell (null outside it, or when the engine did not report one).
+            'volume' => $volume !== [] ? ($result['volume'] ?? null) : null,
             // Did this search actually run? A failed one (rate-limited after its retries, provider
             // error, engine refusal) returned zero businesses without looking — see workQueue().
             'ok' => $result['exitCode'] === 0,

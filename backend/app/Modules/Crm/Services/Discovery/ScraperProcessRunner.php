@@ -57,12 +57,52 @@ class ScraperProcessRunner
         bool $aiStrategy = false,
         ?string $crmToken = null,
     ): array {
+        return $this->execute($area, $category, $limit, $provider, $metricsPath, $bbox, $country, $aiStrategy, $crmToken, []);
+    }
+
+    /**
+     * {@see run()}, plus engine flags appended to the command line. Used only by AI-assisted
+     * capacity mode ({@see DiscoveryRunOrchestrator}); every other search goes through `run()` and
+     * keeps exactly the command it always had.
+     *
+     * @param  list<string>  $engineFlags
+     */
+    public function runWithEngineFlags(
+        array $engineFlags,
+        string $area,
+        string $category,
+        int $limit,
+        string $provider,
+        string $metricsPath,
+        ?array $bbox = null,
+        ?string $country = null,
+        bool $aiStrategy = false,
+        ?string $crmToken = null,
+    ): array {
+        return $this->execute($area, $category, $limit, $provider, $metricsPath, $bbox, $country, $aiStrategy, $crmToken, $engineFlags);
+    }
+
+    /**
+     * @param  list<string>  $extraArgs
+     */
+    private function execute(
+        string $area,
+        string $category,
+        int $limit,
+        string $provider,
+        string $metricsPath,
+        ?array $bbox,
+        ?string $country,
+        bool $aiStrategy,
+        ?string $crmToken,
+        array $extraArgs,
+    ): array {
         $before = $this->countLines($metricsPath);
 
         try {
             $result = Process::path((string) config('discovery.path', '/scraper'))
                 ->env($this->environment($metricsPath, $aiStrategy, $crmToken))
-                ->timeout((int) config('discovery.task_timeout', 180))
+                ->timeout($this->timeoutFor($provider))
                 ->run([
                     (string) config('discovery.python', '/opt/scraper-venv/bin/python'),
                     '-m', 'scraper', 'discover',
@@ -87,6 +127,9 @@ class ScraperProcessRunner
                     // The engine itself refuses `--commit` against a non-loopback CRM unless an
                     // operator has explicitly opted in — that guard is left switched on.
                     '--commit',
+                    // AI-assisted capacity flags ({@see DiscoveryRunOrchestrator}); empty for every
+                    // other search, so its command line is exactly the one it always was.
+                    ...$extraArgs,
                 ]);
 
             $exitCode = $result->exitCode() ?? 1;
@@ -131,7 +174,45 @@ class ScraperProcessRunner
             'retryAfter' => isset($record['retry_after']) && is_numeric($record['retry_after'])
                 ? max(0, (int) $record['retry_after'])
                 : null,
+            // What the OpenStreetMap sweep alone returned, when the engine ran more than one lane.
+            // AI-assisted capacity mode subdivides on this, so the sweep's own coverage decides
+            // the descent exactly as it would without the extra AI capacity.
+            'baselineDiscovered' => isset($record['baseline_discovered']) ? (int) $record['baseline_discovered'] : null,
+            // VOLUME MODE's read of the cell, when the engine ran in it; null otherwise. The descent
+            // subdivides on `rawTruncated` / `newCapped` there, never on the named-row count.
+            'volume' => ($record['volume'] ?? false) === true ? [
+                'rawElements' => (int) ($record['volume_raw_elements'] ?? 0),
+                'rawTruncated' => (bool) ($record['volume_raw_truncated'] ?? false),
+                'newCandidates' => (int) ($record['volume_new_candidates'] ?? 0),
+                'newReturned' => (int) ($record['volume_new_returned'] ?? 0),
+                'newCapped' => (bool) ($record['volume_new_capped'] ?? false),
+                'known' => (int) ($record['volume_known'] ?? 0),
+            ] : null,
         ];
+    }
+
+    /**
+     * Whether an earlier search in this run already ran the AI lanes to completion for this area and
+     * niche — read from the run's own metrics file, which every search appends to and which survives
+     * continuation slices. Only a COMPLETED AI attempt counts: a failed, timed-out or skipped one is
+     * retried by the next search that shares the area and niche.
+     */
+    public function aiLanesRanFor(string $metricsPath, string $area, string $category): bool
+    {
+        if (! is_file($metricsPath)) {
+            return false;
+        }
+        foreach (@file($metricsPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $line) {
+            $record = json_decode((string) $line, true);
+            if (is_array($record)
+                && ($record['area'] ?? null) === $area
+                && ($record['category'] ?? null) === $category
+                && ($record['ai_execution_status'] ?? null) === 'ok') {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -168,6 +249,61 @@ class ScraperProcessRunner
     }
 
     /**
+     * {@see audit()} over THESE leads only — a volume-mode run's new ones ({@see EnrichRunLeadsJob}).
+     * Same engine, same queue endpoint and ordering, narrowed by `lead_ids`; `$timeout` bounds the step
+     * so the job stays inside its worker's own timeout.
+     *
+     * @param  list<int>  $leadIds
+     * @return array{exitCode: int, stderrTail: string}
+     */
+    public function auditLeads(array $leadIds, ?string $crmToken, int $timeout): array
+    {
+        return $this->runCommand(
+            ['audit', '--limit', (string) count($leadIds), '--commit', '--lead-ids', $this->leadIdList($leadIds)],
+            $crmToken,
+            $timeout,
+        );
+    }
+
+    /**
+     * {@see findWebsites()} over THESE leads only. See {@see auditLeads()}.
+     *
+     * @param  list<int>  $leadIds
+     * @return array{exitCode: int, stderrTail: string}
+     */
+    public function findWebsitesForLeads(array $leadIds, ?string $crmToken, int $timeout): array
+    {
+        return $this->runCommand(
+            ['find-websites', '--limit', (string) count($leadIds), '--commit', '--lead-ids', $this->leadIdList($leadIds)],
+            $crmToken,
+            $timeout,
+        );
+    }
+
+    /** @param list<int> $leadIds */
+    private function leadIdList(array $leadIds): string
+    {
+        return implode(',', array_map(fn ($id): string => (string) (int) $id, $leadIds));
+    }
+
+    /**
+     * How long ONE task of this provider may run before it is killed.
+     *
+     * The provider is already a parameter of the only call site, so this needs no new plumbing and
+     * creates no second execution path: the same process, started the same way, with the ceiling the
+     * measurements justify. An unlisted provider — Google Places, the OpenStreetMap baseline, and
+     * anything added later — keeps the global default untouched, so this can only ever lengthen the
+     * lanes it names.
+     */
+    private function timeoutFor(string $provider): int
+    {
+        $default = (int) config('discovery.task_timeout', 180);
+        $byProvider = (array) config('discovery.task_timeout_by_provider', []);
+
+        return max(1, (int) ($byProvider[$provider] ?? $default));
+    }
+
+    /**
      * Start the engine with a sub-command, and report only how it ended.
      *
      * Shares {@see environment()} with the discovery path so there is ONE definition of where the
@@ -179,12 +315,12 @@ class ScraperProcessRunner
      * @param  list<string>  $arguments
      * @return array{exitCode: int, stderrTail: string}
      */
-    private function runCommand(array $arguments, ?string $crmToken = null): array
+    private function runCommand(array $arguments, ?string $crmToken = null, ?int $timeout = null): array
     {
         try {
             $result = Process::path((string) config('discovery.path', '/scraper'))
                 ->env($this->environment($this->metricsPath(), false, $crmToken))
-                ->timeout((int) config('discovery.enrichment_timeout', 900))
+                ->timeout(max(1, $timeout ?? (int) config('discovery.enrichment_timeout', 900)))
                 ->run([
                     (string) config('discovery.python', '/opt/scraper-venv/bin/python'),
                     '-m', 'scraper',
@@ -217,6 +353,66 @@ class ScraperProcessRunner
         }
 
         return $dir.'/enrichment.jsonl';
+    }
+
+    /**
+     * Where a niche's named OpenStreetMap businesses are across a country — the density probe.
+     *
+     * Read-only on both sides: the engine queries Overpass once and prints positions, and asks the CRM
+     * nothing (so it is handed no token). Unlike every other sub-command this one's stdout IS the
+     * result, because a density map is an input to planning rather than a finding the CRM records.
+     *
+     * `unsupported` (exit 3) and `failed` (anything else, including a malformed body) both mean the
+     * caller keeps today's ordering; only `ok` carries points.
+     *
+     * `ids` is the OSM key of each point, in the same order, when the engine reported them (volume
+     * mode counts, per cell, the businesses the CRM does not hold yet); an empty list otherwise.
+     *
+     * @return array{status: 'ok'|'unsupported'|'failed', points: list<array{0: float, 1: float}>, ids?: list<string>}
+     */
+    public function density(string $niche, string $country): array
+    {
+        try {
+            $result = Process::path((string) config('discovery.path', '/scraper'))
+                ->env($this->environment($this->metricsPath(), false, null))
+                ->timeout(max(1, (int) config('discovery.nationwide.density_timeout', 240)))
+                ->run([
+                    (string) config('discovery.python', '/opt/scraper-venv/bin/python'),
+                    '-m', 'scraper', 'density',
+                    '--category', $niche,
+                    '--country', $country,
+                ]);
+        } catch (Throwable) {
+            return ['status' => 'failed', 'points' => []];
+        }
+
+        if ($result->exitCode() === 3) {
+            return ['status' => 'unsupported', 'points' => []];
+        }
+        if ($result->exitCode() !== 0) {
+            return ['status' => 'failed', 'points' => []];
+        }
+
+        $decoded = json_decode(trim((string) $result->output()), true);
+        if (! is_array($decoded) || ! is_array($decoded['points'] ?? null)) {
+            return ['status' => 'failed', 'points' => []];
+        }
+
+        $points = [];
+        $ids = [];
+        $rawIds = is_array($decoded['ids'] ?? null) && count($decoded['ids']) === count($decoded['points'])
+            ? array_values($decoded['ids'])
+            : null;
+        foreach (array_values($decoded['points']) as $i => $point) {
+            if (is_array($point) && count($point) === 2 && is_numeric($point[0]) && is_numeric($point[1])) {
+                $points[] = [(float) $point[0], (float) $point[1]];
+                if ($rawIds !== null) {
+                    $ids[] = is_string($rawIds[$i]) ? $rawIds[$i] : '';
+                }
+            }
+        }
+
+        return ['status' => 'ok', 'points' => $points, 'ids' => $ids];
     }
 
     /**
@@ -341,6 +537,7 @@ class ScraperProcessRunner
             'strategyApplied' => null,
             'strategyStatus' => null,
             'retryAfter' => null,
+            'baselineDiscovered' => null,
         ];
     }
 

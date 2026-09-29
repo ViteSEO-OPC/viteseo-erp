@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { MapPin } from "lucide-react";
 import { notify as toast } from "@/core/lib/notify";
 import { Button } from "@/modules/crm/components/ui/button";
@@ -50,6 +50,8 @@ export function NearbyClientsPage() {
   } = useNearbyClients();
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // The results panel below — the list virtualizes against its scroll position.
+  const listScrollRef = useRef<HTMLDivElement>(null);
   const [planClient, setPlanClient] = useState<NearbyClient | null>(null);
   const [areasOpen, setAreasOpen] = useState(false);
   // Advanced Lead Discovery is an ADDITIVE surface: it fills the pool this board reads, and opening
@@ -148,7 +150,7 @@ export function NearbyClientsPage() {
               short as the target allows. Lead six onward is reached by scrolling here.
               Below `lg` the viewport-proportional rules are unchanged: in a stacked layout the list
               should stay relative to the screen, not 1000px tall. */}
-          <div className="max-h-[60vh] min-h-[20rem] overflow-y-auto border-t border-border-subtle px-5 py-4 lg:h-[66rem] lg:max-h-none lg:min-h-0">
+          <div ref={listScrollRef} className="max-h-[60vh] min-h-[20rem] overflow-y-auto border-t border-border-subtle px-5 py-4 lg:h-[66rem] lg:max-h-none lg:min-h-0">
             {isLoading ? (
               <div className="flex flex-col gap-3" aria-busy>
                 {[0, 1, 2, 3].map((i) => (
@@ -172,6 +174,7 @@ export function NearbyClientsPage() {
                 poolIsEmpty={totalCount === 0}
                 priorityFilter={filters.priority}
                 matchesIgnoringPriority={matchesIgnoringPriority}
+                scrollElementRef={listScrollRef}
               />
             )}
           </div>

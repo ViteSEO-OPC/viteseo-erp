@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 from scraper import run_metrics
 from scraper.config import Config
 from scraper.ingest import CrmIngestClient
-from scraper.normalizer import normalize
+from scraper.normalizer import normalize, normalize_provenance
 from scraper.partition import (
     BBox,
     DiscoveryTask,
@@ -32,6 +32,7 @@ from scraper.partition import (
     plan_tasks,
 )
 from scraper.providers import build_openstreetmap, config_for, get_provider, resolve_provider_choice
+from scraper.providers.ai_assisted import LANE_AI
 from scraper.target_sources import resolve_source
 from scraper.targets import (
     DEFAULT_TARGETS_FILE,
@@ -46,6 +47,7 @@ from scraper.targets import (
     select,
     targets_per_run,
 )
+from scraper.density import run_density
 from scraper.safety import describe_target, refuse_remote_commit
 from scraper.website_discovery.runner import run_website_discovery
 from scraper.website_intelligence.runner import run_audit
@@ -137,7 +139,7 @@ def _plan_discovery_tasks(
         geocoder.close()
 
 
-def _run_tasks(provider, tasks: list[DiscoveryTask], limit: int):
+def _run_tasks(provider, tasks: list[DiscoveryTask], limit: int, provenance: list | None = None):
     """Execute the planned tasks and merge their results on the provider's own identity key.
 
     ONE TASK IS THE UNTOUCHED PATH. It calls the provider exactly as this function's caller always
@@ -157,9 +159,15 @@ def _run_tasks(provider, tasks: list[DiscoveryTask], limit: int):
 
     def run(task: DiscoveryTask):
         bounded = {"bbox": task.bbox} if task.bbox is not None else {}
-        return provider.discover(
+        found = provider.discover(
             area=task.area, category=task.category, limit=task.limit, **bounded
         )
+        # AI findings this task's own limit dropped (a composite provider only). Read per task,
+        # because the provider resets them on every search. Collected aside; `found` is untouched.
+        dropped = getattr(provider, "provenance_only", None)
+        if provenance is not None and callable(dropped):
+            provenance.extend(dropped())
+        return found
 
     if len(tasks) == 1:
         return run(tasks[0])
@@ -194,6 +202,11 @@ def run_discovery(
     partition: int | None = None,
     bbox: BBox | None = None,
     country: str | None = None,
+    ai_total_limit: int | None = None,
+    skip_ai_lanes: bool = False,
+    volume: bool = False,
+    volume_raw_cap: int | None = None,
+    volume_task_cap: int | None = None,
 ) -> int:
     """Discover one (area, category) pair and ingest it. The single discovery path.
 
@@ -209,6 +222,20 @@ def run_discovery(
     # location outside the country cannot become a request rather than merely failing to be stored.
     if country:
         config = Config(**{**config.__dict__, "discovery_country": country})
+
+    # AI-ASSISTED CAPACITY MODE, also carried on the run. Read only by the combined `openai` provider;
+    # absent — the default — the config is exactly the one every run has always been given.
+    if ai_total_limit is not None or skip_ai_lanes:
+        config = Config(**{**config.__dict__, "ai_total_limit": ai_total_limit, "skip_ai_lanes": skip_ai_lanes})
+
+    # VOLUME MODE, carried on the run like capacity mode. Read only by the combined `openai` provider.
+    if volume:
+        config = Config(**{
+            **config.__dict__,
+            "volume": True,
+            **({"volume_raw_cap": volume_raw_cap} if volume_raw_cap else {}),
+            **({"volume_task_cap": volume_task_cap} if volume_task_cap else {}),
+        })
 
     # THE PROVIDER BOUNDARY. This is the single point where the Settings switch enters the runtime;
     # everything downstream (normalize -> ingest -> prospect -> qualification -> scoring) is identical
@@ -236,7 +263,8 @@ def run_discovery(
             f"({'sub-areas' if tasks[0].label == 'sub-area' else 'grid cells'}).",
             file=sys.stderr,
         )
-    raw = _run_tasks(provider, tasks, limit)
+    provenance_raw: list = []
+    raw = _run_tasks(provider, tasks, limit, provenance_raw)
 
     # Optional per-provider numbers (proposals, resolution rate, token usage). Read the same way
     # `close` is — a provider that has nothing to add simply does not implement it.
@@ -249,6 +277,19 @@ def run_discovery(
 
     businesses = [normalize(r, provider.name) for r in raw]
     print(f"Discovered {len(businesses)} business(es).", file=sys.stderr)
+
+    # PROVENANCE-ONLY: AI-lane findings the per-task limit dropped. Not results — `businesses` above
+    # is exactly what it was — and never able to create a lead: the CRM only records them against a
+    # lead it already holds. Deduplicated on the OSM key; one that is also a kept business is still
+    # sent, and the CRM records the lane once. Absent for any provider without the capability.
+    provenance_capable = callable(getattr(provider, "provenance_only", None))
+    provenance: list = []
+    seen_provenance: set[str] = set()
+    for r in provenance_raw:
+        record = normalize_provenance(r, LANE_AI)
+        if record is not None and record.place_id not in seen_provenance:
+            seen_provenance.add(record.place_id)
+            provenance.append(record)
 
     def record_run(ingest_summary: dict | None = None, imported: int = 0) -> None:
         """Log this run's funnel. Called on EVERY path that finished discovery, including the ones
@@ -269,6 +310,7 @@ def run_discovery(
                 provider_stats=provider_stats,
                 started_at=started_at.isoformat(),
                 choice=choice,
+                provenance_sent=len(provenance) if provenance_capable else None,
             )
         )
 
@@ -313,7 +355,9 @@ def run_discovery(
         base_url=config.crm_base_url, token=config.crm_token, user_agent=config.user_agent
     )
     try:
-        result = client.ingest(businesses, dry_run=not commit)
+        # Passed only when there is some, so an ordinary run makes exactly the call it always made.
+        extra = {"provenance_only": provenance} if provenance else {}
+        result = client.ingest(businesses, dry_run=not commit, **extra)
     finally:
         client.close()
 
@@ -435,6 +479,11 @@ def _discover(args: argparse.Namespace) -> int:
         partition=args.partition,
         bbox=parse_bbox(args.bbox),
         country=args.country,
+        ai_total_limit=args.ai_total_limit,
+        skip_ai_lanes=args.skip_ai_lanes,
+        volume=args.volume,
+        volume_raw_cap=args.raw_cap,
+        volume_task_cap=args.task_new_cap,
     )
 
 
@@ -584,6 +633,32 @@ def main(argv: list[str] | None = None) -> int:
             "tasks, never multiplied."
         ),
     )
+    d.add_argument(
+        "--ai-total-limit",
+        type=int,
+        default=None,
+        help=(
+            "AI-assisted (--provider openai) only: let the AI lanes add businesses until the search "
+            "returns up to this many. The OpenStreetMap sweep stays capped at --limit. Other providers "
+            "ignore it."
+        ),
+    )
+    d.add_argument(
+        "--skip-ai-lanes",
+        action="store_true",
+        help="AI-assisted only: run the OpenStreetMap sweep alone (the run already covered this area and niche).",
+    )
+    d.add_argument(
+        "--volume",
+        action="store_true",
+        help=(
+            "AI-assisted (--provider openai) only: VOLUME MODE. One sweep reads the whole cell (up to "
+            "--raw-cap raw elements), the CRM says which businesses it already holds, and up to "
+            "--task-new-cap NEW businesses are geocoded and returned. The AI name lane does not run."
+        ),
+    )
+    d.add_argument("--raw-cap", type=int, default=None, help="Volume mode: raw OSM elements read per cell (default 400).")
+    d.add_argument("--task-new-cap", type=int, default=None, help="Volume mode: new businesses returned per search (default 100).")
     d.set_defaults(func=_discover)
 
     da = sub.add_parser(
@@ -637,6 +712,7 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Record the evidence in the CRM (default is a dry run that submits nothing).",
     )
+    fw.add_argument("--lead-ids", default=None, help="Only these lead ids (comma-separated) — e.g. one run's new leads.")
     fw.set_defaults(func=_find_websites)
 
     a = sub.add_parser("audit", help="Audit the websites of leads that have a URL (Website Intelligence).")
@@ -646,7 +722,16 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Submit audit findings to the CRM (default is a dry run).",
     )
+    a.add_argument("--lead-ids", default=None, help="Only these lead ids (comma-separated) — e.g. one run's new leads.")
     a.set_defaults(func=_audit)
+
+    dn = sub.add_parser(
+        "density",
+        help="Print where a niche's named OSM businesses are across a country (JSON on stdout). Read-only.",
+    )
+    dn.add_argument("--category", required=True, help='Category word (e.g. "dentist") or "key=value".')
+    dn.add_argument("--country", required=True, help="ISO 3166-1 alpha-2 country, e.g. PH.")
+    dn.set_defaults(func=_density)
 
     args = parser.parse_args(argv)
 
@@ -668,10 +753,22 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
 
+def _density(args: argparse.Namespace) -> int:
+    """National density probe for nationwide ordering. Reads Overpass only; writes nothing."""
+    return run_density(Config.load(), args.category, args.country)
+
+
+def _lead_ids(raw: str | None) -> list[str] | None:
+    """`--lead-ids 12,15,40` -> ["12", "15", "40"]; absent -> None (the whole queue, as always)."""
+    if raw is None:
+        return None
+    return [part.strip() for part in raw.split(",") if part.strip().isdigit()]
+
+
 def _audit(args: argparse.Namespace) -> int:
-    return run_audit(Config.load(), args.limit, commit=args.commit)
+    return run_audit(Config.load(), args.limit, commit=args.commit, lead_ids=_lead_ids(args.lead_ids))
 
 
 def _find_websites(args: argparse.Namespace) -> int:
     """Tier 0 candidate discovery. Proposes and verifies; never concludes absence."""
-    return run_website_discovery(Config.load(), args.limit, commit=args.commit)
+    return run_website_discovery(Config.load(), args.limit, commit=args.commit, lead_ids=_lead_ids(args.lead_ids))

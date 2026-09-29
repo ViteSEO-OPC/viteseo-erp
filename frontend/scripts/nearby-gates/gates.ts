@@ -420,23 +420,40 @@ const secure = { isSecureContext: true };
 
   // Google Places is a factual provider and backs both surfaces.
   if (!canRunDiscovery("google_places")) bad.push("google_places must allow on-demand discovery");
-  if (!canRunNationwide("google_places")) bad.push("google_places must allow nationwide");
-
-  // The AI capability plans searches; it does not answer them, so it may not offer nationwide —
-  // the orchestrator refuses any nationwide run that is not on Google.
   if (!canRunDiscovery("openai")) bad.push("openai must allow on-demand discovery");
-  if (canRunNationwide("openai")) bad.push("openai must NOT offer nationwide; the server refuses it");
 
   // THE DEFAULT EXPERIENCE IS UNTOUCHED. On the OpenStreetMap baseline none of the Stage 2 UI
   // appears — the board is what it was before on-demand discovery existed.
   if (canRunDiscovery("openstreetmap")) bad.push("the OSM baseline must not expose discovery controls");
-  if (canRunNationwide("openstreetmap")) bad.push("the OSM baseline must not expose nationwide");
+
+  // NATIONWIDE IS THE SERVER'S ANSWER, NOT A PROVIDER COMPARISON DONE HERE. The frontend used to
+  // decide this from the provider id, which is precisely how it went stale: the server replaced its
+  // Google-only refusal with a budget fence and this copy kept refusing. The gate now checks that
+  // the capability is READ rather than re-derived.
+  if (!canRunNationwide({ available: true, maxTasks: 400, reason: "default_budget" })) {
+    bad.push("an available nationwide capability must be offered");
+  }
+  if (!canRunNationwide({ available: true, maxTasks: 60, reason: "overpass_fence" })) {
+    bad.push("a fenced but available nationwide capability must still be offered");
+  }
+  // THE BASELINE'S SHAPE EXACTLY: fenced like the AI lane, but not offered. A budget alone is never
+  // permission — reading `maxTasks` as the flag is how the control would reappear on the baseline.
+  if (canRunNationwide({ available: false, maxTasks: 60, reason: "baseline_fills_on_a_schedule" })) {
+    bad.push("the OSM baseline must not expose nationwide despite having a budget");
+  }
+  // A budget of zero cannot start a run, so it is not permission however `available` reads.
+  if (canRunNationwide({ available: true, maxTasks: 0, reason: "default_budget" })) {
+    bad.push("a zero budget was read as nationwide permission");
+  }
 
   // FAIL CLOSED WHILE UNKNOWN. A lookup that has not answered, or failed, is not permission — and
   // a provider id this build does not know is never assumed to be capable.
   for (const unknown of [null, undefined, "", "some_future_provider"]) {
     if (canRunDiscovery(unknown)) bad.push(`${JSON.stringify(unknown)} was read as permission`);
-    if (canRunNationwide(unknown)) bad.push(`${JSON.stringify(unknown)} was read as nationwide permission`);
+  }
+  // A backend older than the nationwide block sends no block at all: absent is never permission.
+  for (const missing of [null, undefined]) {
+    if (canRunNationwide(missing)) bad.push(`${JSON.stringify(missing)} was read as nationwide permission`);
   }
 
   // Available means no reason to explain; unavailable always explains itself, and never by naming
@@ -446,7 +463,7 @@ const secure = { isSecureContext: true };
   if (osmReason === "") bad.push("an unavailable capability must explain itself");
   if (/key|token|secret|credential/i.test(osmReason)) bad.push(`the reason names a credential: ${osmReason}`);
 
-  report("N  discovery controls follow the real capability", 17 - bad.length, 17, bad);
+  report("N  discovery controls follow the real capability", 16 - bad.length, 16, bad);
 }
 
 // ── O  every rendered list is keyed by what actually identifies a row ─────────────────────────
@@ -588,12 +605,25 @@ const aiRun = (status: DiscoveryRun["status"], ai: DiscoveryRun["ai"], isTermina
   if (scopedKeys !== "scope,country,locations,niches,limit_per_task,idempotency_key") {
     bad.push(`scoped keys changed: ${scopedKeys}`);
   }
+  // NATIONWIDE WITHOUT A SERVER BUDGET IS UNCHANGED. No `maxTasks` means no `max_tasks` key, so the
+  // server keeps applying its own default exactly as it did before the capability block existed.
   const nwKeys = Object.keys(buildStartRunBody(nationwideInput)).join(",");
   if (nwKeys !== "scope,country,niches,idempotency_key") bad.push(`nationwide keys changed: ${nwKeys}`);
+  // WITH one, it is sent verbatim — that is what makes the run one the orchestrator accepts rather
+  // than one its fence refuses on arrival.
+  const nwBudget = buildStartRunBody({ ...nationwideInput, maxTasks: 60 });
+  if (nwBudget.max_tasks !== 60) bad.push("the server's nationwide budget is not sent as max_tasks");
+  if (Object.keys(nwBudget).join(",") !== "scope,country,niches,idempotency_key,max_tasks") {
+    bad.push(`nationwide budget keys changed: ${Object.keys(nwBudget).join(",")}`);
+  }
+  // THE SCOPED ARM NEVER GAINS IT. `limit_per_task` is how many businesses one search returns and
+  // `max_tasks` is how many searches a run makes; the 20-per-search behaviour is untouched by this.
+  if ("max_tasks" in buildStartRunBody(scopedInput)) bad.push("a scoped run sent max_tasks");
+  if (buildStartRunBody(scopedInput).limit_per_task !== 20) bad.push("the scoped 20-per-search default changed");
   if ("ai_strategy" in buildStartRunBody({ ...scopedInput, aiStrategy: false })) {
     bad.push("aiStrategy: false sends an ai_strategy key");
   }
-  report("R  an ordinary run's request is unchanged", 3 - bad.length, 3, bad);
+  report("R  an ordinary run's request is unchanged", 7 - bad.length, 7, bad);
 }
 
 // ── S  validation: the AI action is offered only when it can work ────────────────────────────
@@ -777,7 +807,10 @@ const aiRun = (status: DiscoveryRun["status"], ai: DiscoveryRun["ai"], isTermina
 
   // The factual row reads the PROVIDER, never the engine name.
   if (!dialog.includes("{providerLabel(provider.effective)}")) bad.push("the run's factual row no longer reads provider.effective");
-  if (!/openai: "AI-assisted · OpenStreetMap"/.test(types)) bad.push("the openai lane label no longer names its factual source");
+  // The lane label is "AI-assisted" (PO decision 2026-09-25): it covers both AI routes — expanded tag
+  // sweeps and proposed names — and a names-only label mislabelled the tag-expansion leads.
+  if (!/openai: "AI-assisted"/.test(types)) bad.push("the openai lane label is not 'AI-assisted'");
+  if (/openai: "[^"]*OpenStreetMap"/.test(types)) bad.push("the openai lane label names OSM again, colliding with the OSM lane");
 
   // The engine name is one constant, not a word retyped per surface.
   if (!dialog.includes("AI_ENGINE_NAME")) bad.push("the dialog hard-codes the engine name instead of using AI_ENGINE_NAME");
@@ -785,7 +818,7 @@ const aiRun = (status: DiscoveryRun["status"], ai: DiscoveryRun["ai"], isTermina
   // Naming the engine must not have moved provenance: no surface may map a lead source to OpenAI.
   if (/google_places:\s*"[^"]*(OpenAI|AI-assisted)/.test(types)) bad.push("Google Places is labelled as an AI source");
 
-  report("AA the AI engine and the factual source are named separately", 7 - bad.length, 7, bad);
+  report("AA the AI engine and the factual source are named separately", 8 - bad.length, 8, bad);
 }
 
 // ── AB  the board names provenance, and never invents it ─────────────────────────────────────
@@ -807,8 +840,23 @@ const aiRun = (status: DiscoveryRun["status"], ai: DiscoveryRun["ai"], isTermina
   );
 
   // ONE VOCABULARY. The board and the run panel must not name the same lane two ways.
-  if (!/"ai-assisted": "AI-assisted · OpenStreetMap"/.test(hook)) bad.push("the board no longer names the AI lane's factual source");
-  if (/"ai-assisted": "AI-assisted",/.test(hook)) bad.push("the bare 'AI-assisted' label is back on the board");
+  if (!/"ai-assisted": "AI-assisted",/.test(hook)) bad.push("the board does not label the AI lane 'AI-assisted'");
+  if (!/"ai-assisted": "AI-assisted",/.test(card)) bad.push("the card and the board name the AI lane differently");
+  if (/AI-proposed names/.test(hook + card)) bad.push("the narrower names-only label is back on the board");
+  // NEVER CROSS-POPULATE: the lane filter matches labels exactly, so every lane needs its own label.
+  const order = hook.match(/const FOUND_BY_ORDER = \[([\s\S]*?)\] as const/)?.[1] ?? "";
+  const labels = [...order.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+  if (labels.length !== new Set(labels).size) bad.push("two Found By lanes share a label, so one filter would select both");
+  const want = ["OpenStreetMap", "AI-assisted", "Google Places", "AI-assisted · Google Places"];
+  if (JSON.stringify(labels) !== JSON.stringify(want)) bad.push(`the Found By options are not exactly ${want.join(" / ")}`);
+  // MULTI-PROVENANCE (change set D): the filter reads EVERY lane that found a lead, so one lead found
+  // by OpenStreetMap and the AI lane appears under both — as one row each time, never two leads.
+  if (!/\(c\.foundByAll \?\? \[c\.foundBy\]\)\.some\(/.test(hook)) bad.push("the Found By filter does not read foundByAll");
+  if ((hook.match(/matchesFoundBy\(c, filters\.foundBy\)/g) ?? []).length !== 2) bad.push("both Found By filter paths must use matchesFoundBy");
+  // The dual chip is earned only by exactly OpenStreetMap + AI-assisted; Google chips never change.
+  if (!/"OpenStreetMap · also AI-assisted"/.test(card)) bad.push("the dual-provenance chip text changed");
+  if (!/client\.foundBy === "openstreetmap" && client\.foundByAll\?\.includes\("ai-assisted"\)/.test(card)) bad.push("the dual chip is not limited to OpenStreetMap + AI-assisted");
+  if (!/"google-places": "Google Places",\s*"ai-assisted-google-places": "AI-assisted · Google Places",/.test(card)) bad.push("a Google chip label changed");
 
   // EARNED, NEVER INVENTED. "AI-assisted · Google Places" may exist ONLY as the label of the
   // `ai-assisted-google-places` lane — the one the server resolves from a per-lead
@@ -859,7 +907,7 @@ const aiRun = (status: DiscoveryRun["status"], ai: DiscoveryRun["ai"], isTermina
   // renamed option would silently match nothing. This guards it staying put.
   if (!/PRIORITY_ORDER = \["High", "Medium", "Low"\]/.test(hook)) bad.push("the priority filter vocabulary changed, which silently breaks filtering");
 
-  report("AB the board names provenance and never invents it", 15 - bad.length, 15, bad);
+  report("AB the board names provenance and never invents it", 21 - bad.length, 21, bad);
 }
 
 

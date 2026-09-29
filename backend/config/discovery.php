@@ -168,6 +168,38 @@ return [
     'task_timeout' => (int) env('DISCOVERY_TASK_TIMEOUT', 180),
 
     /*
+     * Per-task wall clock for the providers that are not Google, BY PROVIDER — because the cost of a
+     * task is a fact about the provider, not about the run that asked for it.
+     *
+     * WHY THIS IS NOT ONE GLOBAL NUMBER. Measured over every task this database has recorded:
+     * Google Places averages 3.2s and has never exceeded 47s, while the AI-assisted lane averages
+     * ~42s and has been seen at 118s. They differ by more than an order of magnitude because the
+     * AI lane does three sweeps where Google does one, and then reverse-geocodes each business at
+     * Nominatim's required one-request-per-second. Raising the GLOBAL timeout to fit the slow lane
+     * would hand a hung Google task 300s of worker time to fit a lane whose worst case is 47s — it
+     * would buy nothing and cost exactly the protection this ceiling exists to provide.
+     *
+     * WHY 300 AND NOT MORE. The slice deadline is checked BETWEEN searches, never inside one (see
+     * DiscoveryRunOrchestrator::workQueue), so a task starting one second before the deadline still
+     * runs to completion. The worst-case job therefore costs `nationwide.slice_seconds` plus one
+     * whole task timeout, and that must stay inside RunDiscoveryJob's 900s:
+     *
+     *     540 + 180 = 720   the old global value, 180s of headroom
+     *     540 + 300 = 840   this value, 60s of headroom
+     *     540 + 360 = 900   no headroom at all — the job dies exactly as the task ends
+     *     540 + 420 = 960   the job is killed mid-task, losing the slice
+     *
+     * 360 and 420 are therefore not "more generous", they are unsafe. {@see DiscoveryTaskTimeoutTest}
+     * enforces this arithmetic so a later env change cannot quietly cross the line.
+     *
+     * A timeout is a CEILING, not a duration: giving the AI lane 300s does not make any task slower,
+     * it only stops killing the ones that were going to finish.
+     */
+    'task_timeout_by_provider' => [
+        'openai' => (int) env('DISCOVERY_TASK_TIMEOUT_OPENAI', 300),
+    ],
+
+    /*
      * Volume fences. These are BILLING and INFRASTRUCTURE limits, not discovery boundaries: they cap
      * how much one click may spend, never which businesses are reachable. `limit_per_task` is capped
      * at 60 because that is the structured provider's own ceiling (PAGE_SIZE 20 × MAX_PAGES 3) —
@@ -347,6 +379,26 @@ return [
         'max_tasks_ceiling' => (int) env('DISCOVERY_NATIONWIDE_MAX_TASKS_CEILING', 25000),
 
         /*
+         * The largest budget a nationwide run may use WITHOUT Google Places — the Overpass fence.
+         *
+         * Nationwide used to demand Google Places outright, for a good reason: the OpenStreetMap
+         * baseline answers from Overpass, a free endpoint funded and run by volunteers, and a full
+         * sweep aimed at it is abuse of someone else's infrastructure rather than a fallback. But
+         * "how many queries" is a question about SIZE, not about which provider is configured, and
+         * refusing every size denied the AI-assisted path the only planner that covers the country.
+         *
+         * A task costs about three Overpass queries — the baseline selector sweep, the expanded-tag
+         * sweep, and the resolver's batched name lookup — because `_overpass` unions selectors into
+         * one request instead of issuing one per tag. So this default is roughly 180 queries for a
+         * whole run, spread across a run that is already rate-limit-aware (exponential backoff) and
+         * already holds itself to Nominatim's one-request-per-second policy.
+         *
+         * Google Places is not subject to this: it is a paid endpoint the spend gate meters in
+         * dollars, so its fence is `GooglePlacesSpendGate`, not this one.
+         */
+        'max_tasks_without_google' => (int) env('DISCOVERY_NATIONWIDE_MAX_TASKS_WITHOUT_GOOGLE', 60),
+
+        /*
          * SLICED EXECUTION (H-5). A nationwide sweep outlives any single queued job, so each job works
          * the queue for `slice_seconds`, checkpoints what is left on the run and queues its successor.
          * Must stay well under RunDiscoveryJob::$timeout (900s) and the worker's --timeout: the margin
@@ -375,6 +427,68 @@ return [
         'limit_per_task' => (int) env('DISCOVERY_NATIONWIDE_LIMIT_PER_TASK', 20),
 
         /*
+         * AI-ASSISTED CAPACITY — the combined `openai` provider only, and OFF unless set.
+         *
+         * How many businesses one nationwide search may return once the AI lanes have added to the
+         * OpenStreetMap sweep. The sweep itself stays capped at `limit_per_task`, and a cell is
+         * still subdivided only when the SWEEP fills it, so OpenStreetMap coverage is exactly what it
+         * is without this. With it set, the AI lanes also run once per (area, niche) per run instead
+         * of in every cell that shares the area's name, and their candidates are geocoded only when
+         * returned. Unset (null) — the default — leaves every run exactly as it was. OpenStreetMap
+         * and Google Places runs never read it.
+         */
+        'ai_total_limit' => env('DISCOVERY_NATIONWIDE_AI_TOTAL_LIMIT') !== null && env('DISCOVERY_NATIONWIDE_AI_TOTAL_LIMIT') !== ''
+            ? (int) env('DISCOVERY_NATIONWIDE_AI_TOTAL_LIMIT')
+            : null,
+
+        /*
+         * VOLUME MODE — the combined `openai` provider only, nationwide only, and OFF unless enabled.
+         *
+         * The default sweep reads the first 20 raw OpenStreetMap elements of a cell, in id order, so
+         * every run of a cell sees the same 20, and a cell whose first 20 include a few unnamed
+         * elements is recorded as EXHAUSTED while it holds hundreds (measured: a 0.25° Quezon City
+         * cell, 174 named dentists, 17 in the CRM, recorded exhausted after 17). Volume mode instead:
+         *
+         *   - reads up to `raw_cap` raw elements per cell in the same single Overpass query;
+         *   - asks the CRM which of them it already holds (the ingest still deduplicates);
+         *   - returns up to `task_cap` NEW businesses per search, likely-no-website first, and
+         *     reverse-geocodes only those (R2) through the shared 1/second Nominatim gate;
+         *   - subdivides on the RAW read (`raw_cap` reached) or on more new businesses than the cap —
+         *     never on the named count — so unnamed elements can no longer end a dense cell;
+         *   - orders cells by how many businesses the CRM does NOT hold yet (density probe ids minus
+         *     the org's place_ids), so the budget goes where new leads are;
+         *   - does not run the AI name lane (the tag-expansion lane still feeds the sweep).
+         *
+         * `new_target` is what counts a task as PRODUCTIVE in reporting; it is not a stop rule. Google
+         * Places, Google + AI, OpenStreetMap and the default AI-assisted path never read this block.
+         *
+         * TIME BUDGET: task_cap × 1.1s of Nominatim + the sweep's 75s client timeout must stay inside
+         * `task_timeout_by_provider.openai` (300s): 100 × 1.1 + 75 = 185. {@see NationwideVolumeModeTest}
+         * enforces it.
+         */
+        'volume' => [
+            'enabled' => (bool) env('DISCOVERY_NATIONWIDE_VOLUME', false),
+            'raw_cap' => (int) env('DISCOVERY_NATIONWIDE_VOLUME_RAW_CAP', 400),
+            'task_cap' => (int) env('DISCOVERY_NATIONWIDE_VOLUME_TASK_CAP', 100),
+            'new_target' => (int) env('DISCOVERY_NATIONWIDE_VOLUME_NEW_TARGET', 50),
+
+            /*
+             * WEBSITE INTELLIGENCE FOR THE RUN'S NEW LEADS, as one queued job after the run finishes —
+             * never the scheduler (it would also fire the stale scheduled-email sender). Scoped to the
+             * leads this run created, capped at `enrich_limit`, each step bounded by
+             * `enrich_step_timeout` so the job fits inside the worker's 900s.
+             *
+             * 500 covers a run's own new leads up to 500 (a 10-search benchmark created 464). The work is
+             * still done 50 leads per job (EnrichRunLeadsJob::CHUNK), each chunk its own bounded job, so
+             * a larger limit means more chunks queued behind the run — measured ~3.5 min per chunk —
+             * never a longer single job.
+             */
+            'enrich_after_run' => (bool) env('DISCOVERY_NATIONWIDE_VOLUME_ENRICH', true),
+            'enrich_limit' => (int) env('DISCOVERY_NATIONWIDE_VOLUME_ENRICH_LIMIT', 500),
+            'enrich_step_timeout' => (int) env('DISCOVERY_NATIONWIDE_VOLUME_ENRICH_STEP_TIMEOUT', 400),
+        ],
+
+        /*
          * ORDER THE TILING BY WHAT HAS ALREADY BEEN SEARCHED, instead of by latitude.
          *
          * The cells are emitted from the southern edge of the national extent upward, and the island
@@ -391,5 +505,49 @@ return [
          * of where a paid sweep goes should be switched on deliberately rather than inherited.
          */
         'coverage_ordering' => (bool) env('DISCOVERY_COVERAGE_ORDERING', false),
+
+        /*
+         * SEARCH WHERE THE BUSINESSES ARE FIRST. Before planning, ask OpenStreetMap — once, for the
+         * whole country — where the requested niche's named businesses sit, and order each island
+         * group's cells densest-first. Measured: dentists occupy 145 of the 736 cells and restaurants
+         * 428, so a raster order spends most of a 60-task budget on empty ground (run 106: 60 tasks,
+         * 3 leads, first after 9m36s). The probe's per-cell counts matched the engine's own per-cell
+         * searches exactly (657/657, 25/25, 3/3).
+         *
+         * ORDER ONLY, EXACTLY LIKE coverage_ordering. Same cells, same count, same groups, same
+         * geometry, same Luzon/Visayas/Mindanao round-robin; a cell with no known business is moved
+         * to the end of its group, never dropped. The probe is positions only — it finds no lead and
+         * ingests nothing. Any failure (Overpass busy after its retries, a niche with no OSM tag
+         * mapping) leaves today's order untouched, and so does a Google Places run: the probe describes
+         * OpenStreetMap, which is not what Google searches.
+         *
+         * DEFAULT OFF: a reordering of where a sweep goes is switched on deliberately, not inherited.
+         */
+        'density_ordering' => (bool) env('DISCOVERY_DENSITY_ORDERING', false),
+
+        /*
+         * THE FIRST PASS: how many searches go to the densest cells of Luzon, Visayas and Mindanao,
+         * round-robin, before any of them is subdivided. Without it the densest cell (Metro Manila:
+         * 471 dentists, 4,680 restaurants) is split to the depth limit first — ~21 searches, ~14
+         * minutes — before the other island groups are touched. Children of those cells are held and
+         * then queued at the FRONT exactly as today, so the descent is delayed, never skipped. Counted
+         * in searches: a multi-niche run gets fewer cells, but never fewer than one per island group.
+         * Only used when density_ordering is on.
+         */
+        'quick_pass_tasks' => (int) env('DISCOVERY_QUICK_PASS_TASKS', 6),
+
+        /*
+         * How long a niche's density map is reused. OpenStreetMap does not move meaningfully in a day,
+         * and the probe is the slowest step of a run's start (restaurants: 49–68s), so only the first
+         * run of a niche each day pays it. Failures are never cached.
+         */
+        'density_cache_ttl' => (int) env('DISCOVERY_DENSITY_CACHE_TTL', 86400),
+
+        /*
+         * Ceiling on the probe process: the engine's own request timeout (200s) plus its retries' waits
+         * would outlast this only on a server refusing every attempt, which should fail over to
+         * today's order promptly rather than hold the run's start.
+         */
+        'density_timeout' => (int) env('DISCOVERY_DENSITY_TIMEOUT', 240),
     ],
 ];

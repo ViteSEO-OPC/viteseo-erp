@@ -46,6 +46,22 @@ class Config:
     # must not become a breaking change to the config contract.
     openai_timeout: float = 30.0
 
+    # AI-ASSISTED CAPACITY MODE (the combined `openai` provider only; every other provider ignores
+    # both). `ai_total_limit` is how many businesses one search may return once the AI lanes have
+    # added to the OpenStreetMap sweep, which itself stays capped at the ordinary per-search limit.
+    # None — the default — is the behaviour that predates the mode, exactly. `skip_ai_lanes` runs the
+    # sweep alone, for a search whose area and niche the AI lanes already covered earlier in the run.
+    ai_total_limit: Optional[int] = None
+    skip_ai_lanes: bool = False
+
+    # VOLUME MODE (the combined `openai` provider, nationwide only; off unless a run asks for it). One
+    # sweep per cell reads up to `volume_raw_cap` raw OSM elements, the CRM says which it already
+    # holds, and up to `volume_task_cap` NEW businesses are geocoded and returned. The AI name lane
+    # does not run; the AI tag-expansion lane feeds the sweep. False — the default — changes nothing.
+    volume: bool = False
+    volume_raw_cap: int = 400
+    volume_task_cap: int = 100
+
     # Where the scheduled command's discovery targets come from. Empty (the default) means the
     # version-controlled targets file, which is the behaviour that predates this setting. A URL points
     # at a managed registry instead — see `scraper.target_sources`. Kept as configuration rather than
@@ -65,6 +81,11 @@ class Config:
     # the country cannot resolve and therefore cannot become a provider request. That is deliberately
     # upstream of every provider: the fence has to stop the search, not just discard its results.
     discovery_country: str = ""
+
+    # Where engine processes on this host share Nominatim's one-request-per-second budget and the
+    # area-geocode cache (see scraper.nominatim_gate). Empty — the default — keeps the per-process
+    # spacing that predates it. Must be writable and shared by every process that may run at once.
+    nominatim_state_dir: str = ""
 
     @classmethod
     def load(cls) -> "Config":
@@ -94,6 +115,7 @@ class Config:
             # starts, so the restriction travels with the request rather than depending on the
             # engine's environment being configured correctly.
             discovery_country=os.environ.get("DISCOVERY_COUNTRY", "").strip(),
+            nominatim_state_dir=os.environ.get("NOMINATIM_STATE_DIR", "").strip(),
         )
 
 

@@ -59,6 +59,11 @@ class IngestDiscoveredLeadsRequest extends FormRequest
             // say "recorded, and AI did not shape this search", which is a different claim from
             // saying nothing at all.
             'businesses.*.discovery_ai_assisted' => ['nullable', 'boolean'],
+            // OTHER LANES THAT FOUND THIS SAME BUSINESS IN THE SAME SEARCH (change set D). Recorded as
+            // additional provenance in `crm_lead_discovery_lanes`, never on the lead. Only the AI lane
+            // may be claimed: Google Places provenance is never written through this field.
+            'businesses.*.discovery_also_found_by' => ['nullable', 'array', 'max:5'],
+            'businesses.*.discovery_also_found_by.*' => ['string', Rule::in(['openai'])],
             // The website URL (fit-data) — the input the Website Intelligence service later audits.
             //
             // LENGTH IS NORMALIZED, NOT REJECTED — the same reasoning as `website_status` above. A
@@ -69,6 +74,12 @@ class IngestDiscoveredLeadsRequest extends FormRequest
             // (`WEBSITE_MAX_LENGTH`) and keeps the business, so an oversized URL costs its own field
             // and nothing else. Body size is bounded by the 500-business cap and PHP's own limits.
             'businesses.*.website' => ['nullable', 'string'],
+            // PROVENANCE-ONLY AI FINDINGS: AI-lane businesses the engine's per-search limit dropped,
+            // which may only annotate a lead the CRM ALREADY holds (see LeadImportService). Only the
+            // container is validated here, for the same reason `website` is lenient: a rule on an
+            // entry would 422 the whole request and lose the ordinary batch with it. Each entry is
+            // checked — OSM identity, lane, coordinates — and a bad one dropped, in the service.
+            'provenance_only' => ['sometimes', 'array'],
         ];
     }
 }

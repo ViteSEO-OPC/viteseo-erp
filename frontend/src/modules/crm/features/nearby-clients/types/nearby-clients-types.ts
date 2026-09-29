@@ -80,6 +80,11 @@ export type WebsiteSummary = {
   status: WebsiteStatus | null;
   audited: boolean;
   auditedAt: string | null;
+  /**
+   * Wider than `audited`: also true once a website SEARCH for a lead with no URL has concluded (or a
+   * BD confirmed there is no site). Such a lead cannot be audited, but it has been checked.
+   */
+  checked: boolean;
   signals: WebsiteSignals | null;
 };
 
@@ -117,6 +122,13 @@ export type NearbyClient = {
    * folded into `openstreetmap`, so a lane is never credited with a lead it did not find.
    */
   foundBy: "openstreetmap" | "ai-assisted" | "google-places" | "unknown";
+  /**
+   * EVERY lane that found this business: `foundBy` first, then any further lane the server recorded
+   * (today only "ai-assisted", when the AI lane also found an OpenStreetMap lead). One lead, one row —
+   * this only lets the Found By filter list it under each lane that genuinely found it. Optional so a
+   * response from a backend without it behaves exactly as before (treated as `[foundBy]`).
+   */
+  foundByAll?: string[];
   /**
    * Is this business inside the Philippines, per the same national boundary discovery enforces?
    *

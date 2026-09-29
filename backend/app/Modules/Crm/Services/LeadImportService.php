@@ -5,6 +5,7 @@ namespace App\Modules\Crm\Services;
 use App\Models\User;
 use App\Modules\Crm\Models\Lead;
 use App\Modules\Crm\Requests\StoreLeadRequest;
+use App\Modules\Crm\Services\Discovery\DiscoveryLaneRecorder;
 use App\Modules\Crm\Services\Discovery\Geo\PhilippinesBoundary;
 use App\Modules\Crm\Models\LeadWebsiteCandidate;
 use App\Modules\Crm\Services\Website\WebsiteEvidenceService;
@@ -472,13 +473,16 @@ class LeadImportService
      * (fit-data only) — every other field is left untouched. Never computes a score, KPI, or engagement.
      *
      * @param  list<array<string, mixed>>  $businesses  validated rows from IngestDiscoveredLeadsRequest
+     * @param  array<int, mixed>  $provenanceOnly  AI-lane findings the engine's per-search limit dropped
+     *                                             (NERBY run callers only). They annotate existing leads'
+     *                                             discovery lanes and never create or change a lead.
      * @return array{
      *   dryRun: bool,
      *   summary: array{total: int, valid: int, duplicates: int, updated: int},
      *   importedCount: int
      * }
      */
-    public function ingestDiscovered(array $businesses, int $userId, bool $dryRun, ?\Closure $identityCheck = null): array
+    public function ingestDiscovered(array $businesses, int $userId, bool $dryRun, ?\Closure $identityCheck = null, ?int $discoveryRunId = null, array $provenanceOnly = []): array
     {
         $total = count($businesses);
 
@@ -501,6 +505,21 @@ class LeadImportService
         /** @var list<array<string, mixed>> $rows */
         $rows = array_map(fn (array $b): array => $this->normalizeDiscovered($b), $businesses);
 
+        // WHICH PLACES THE AI LANE FOUND, read before anything else can drop it: normalisation keeps
+        // only the fit-data allowlist, so the claim is taken from the raw row, which `$rows` still
+        // lines up with here. A row is an AI finding when the AI lane is its source, or when the AI
+        // lane found it in the same search as the baseline. A Google row never counts.
+        $aiPlaceIds = [];
+        foreach ($businesses as $i => $b) {
+            $source = (string) ($b['source'] ?? '');
+            $also = is_array($b['discovery_also_found_by'] ?? null) ? $b['discovery_also_found_by'] : [];
+            $placeId = (string) ($rows[$i]['place_id'] ?? '');
+            if ($placeId !== '' && $source !== 'google_places'
+                && ($source === DiscoveryLaneRecorder::LANE_AI || in_array(DiscoveryLaneRecorder::LANE_AI, $also, true))) {
+                $aiPlaceIds[$placeId] = true;
+            }
+        }
+
         // THE NATIONAL BOUNDARY, ENFORCED AT THE ONLY DOOR. Every discovered business enters the CRM
         // through this method, whichever provider found it and whichever process sent it, so this is
         // where "Philippines only" is decided — not in the planner that drew the search box, and not
@@ -522,6 +541,11 @@ class LeadImportService
 
             return false;
         }));
+
+        // PROVENANCE-ONLY AI FINDINGS, checked entry by entry: never part of the result, never counted
+        // in total / valid / duplicates / rejected, never a lead. Only an OSM identity with a position
+        // inside the national boundary survives — the same boundary every discovered business meets.
+        $provenance = $this->provenanceOnlyPlaceIds($provenanceOnly);
 
         $existingByPlaceId = $this->existingPlaceIdLeads($rows);
         $existingEmails = $this->existingDiscoveredEmailSet($rows);
@@ -579,6 +603,25 @@ class LeadImportService
                 }
             });
 
+            // ADDITIONAL PROVENANCE, recorded beside the leads and never on them (change set D). Only
+            // for rows that survived identity and the national boundary; after the insert above, so a
+            // lead this batch created is found too. Never on a dry run.
+            $kept = [];
+            foreach ($rows as $row) {
+                if (isset($row['place_id']) && isset($aiPlaceIds[(string) $row['place_id']])) {
+                    $kept[] = (string) $row['place_id'];
+                }
+            }
+            // ONE recording for the batch: the rows' own AI findings plus the provenance-only ones, so
+            // a business that arrives both ways is one sighting. After the insert above, so an AI
+            // finding that another row of this batch just created is matched too. The recorder only
+            // ever matches an existing, non-Google lead by place_id — it cannot create one.
+            $recordedAi = app(DiscoveryLaneRecorder::class)->recordAi(
+                array_merge($kept, $provenance['placeIds']),
+                $discoveryRunId,
+            );
+            $provenance['recorded'] = count(array_intersect($provenance['placeIds'], $recordedAi));
+
             $evidence = app(WebsiteEvidenceService::class);
             foreach ($websiteCandidates as $leadId => $proposal) {
                 $lead = Lead::query()->find($leadId);
@@ -608,9 +651,64 @@ class LeadImportService
                 // that a provider returned results the CRM would not accept, rather than showing an
                 // unexplained shortfall between "found" and "added".
                 'rejected' => $rejected + $unverified,
+                // Present only when the engine sent provenance-only findings, so every other response
+                // keeps its exact shape. `recorded` is how many matched an existing eligible lead.
+                ...($provenance['received'] > 0 ? ['provenanceOnly' => [
+                    'received' => $provenance['received'],
+                    'invalid' => $provenance['invalid'],
+                    'outsidePh' => $provenance['outsidePh'],
+                    'recorded' => $provenance['recorded'],
+                ]] : []),
             ],
             'importedCount' => $importedCount,
         ];
+    }
+
+    /** Most provenance-only findings accepted from one request; the rest are counted as invalid. */
+    private const PROVENANCE_ONLY_MAX = 500;
+
+    /** The OpenStreetMap element key — the only identity a provenance-only finding may carry. */
+    private const OSM_PLACE_ID = '#^(node|way|relation)/[1-9][0-9]{0,18}$#';
+
+    /**
+     * Reduce provenance-only findings to the place ids that may be recorded.
+     *
+     * An entry survives only as `{place_id: <OSM element>, lane: "openai", latitude, longitude}` with
+     * a position inside the national polygon. Anything else — a Google place id, another lane, a
+     * missing or impossible coordinate, a non-object — is dropped and counted, never fatal: one bad
+     * entry must not cost the batch it travelled with.
+     *
+     * @param  array<int, mixed>  $entries
+     * @return array{placeIds: list<string>, received: int, invalid: int, outsidePh: int, recorded: int}
+     */
+    private function provenanceOnlyPlaceIds(array $entries): array
+    {
+        $result = ['placeIds' => [], 'received' => count($entries), 'invalid' => 0, 'outsidePh' => 0, 'recorded' => 0];
+
+        foreach (array_values($entries) as $i => $entry) {
+            $placeId = is_array($entry) ? ($entry['place_id'] ?? null) : null;
+            $lat = is_array($entry) ? ($entry['latitude'] ?? null) : null;
+            $lng = is_array($entry) ? ($entry['longitude'] ?? null) : null;
+
+            if ($i >= self::PROVENANCE_ONLY_MAX
+                || ! is_string($placeId) || preg_match(self::OSM_PLACE_ID, $placeId) !== 1
+                || ($entry['lane'] ?? null) !== DiscoveryLaneRecorder::LANE_AI
+                || ! is_numeric($lat) || ! is_numeric($lng)
+                || abs((float) $lat) > 90 || abs((float) $lng) > 180) {
+                $result['invalid']++;
+
+                continue;
+            }
+            if (! $this->philippines()->contains((float) $lat, (float) $lng)) {
+                $result['outsidePh']++;
+
+                continue;
+            }
+            $result['placeIds'][$placeId] = $placeId;
+        }
+        $result['placeIds'] = array_values($result['placeIds']);
+
+        return $result;
     }
 
     /**

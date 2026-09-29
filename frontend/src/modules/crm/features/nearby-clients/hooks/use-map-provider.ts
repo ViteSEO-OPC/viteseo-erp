@@ -38,6 +38,14 @@ export type DiscoveryConfig = {
    * backend older than AI Discovery reads as "not available" rather than failing to parse.
    */
   aiStrategy?: { status: string };
+  /**
+   * Whether the nationwide mode may be offered here, and what one run may spend.
+   *
+   * Optional for the same reason `aiStrategy` is: a backend older than this field must read as "not
+   * available" rather than failing to parse. That is also the fail-closed default — an absent block
+   * withholds the mode, it never grants it.
+   */
+  nationwide?: { available: boolean; maxTasks: number; reason: string };
 };
 
 export type MapProviderState = {
@@ -86,6 +94,14 @@ export type DiscoveryCapability = {
   unavailableReason: string | null;
   /** May "Discover with AI" be offered? Google Places live AND the backend reports AI available. */
   canRunAi: boolean;
+  /**
+   * The budget one nationwide run may ask for here, or null while unknown.
+   *
+   * THE SERVER'S NUMBER, NEVER THE CLIENT'S. The dialog sends this back as `max_tasks` so the run it
+   * starts is one the orchestrator will accept; deriving it here would be a second copy of a fence
+   * that already went stale once.
+   */
+  nationwideMaxTasks: number | null;
   /** The backend's AI status word (`available`, `insufficient_credit`, ...), or null while unknown. */
   aiStatus: string | null;
   /**
@@ -112,7 +128,8 @@ export function useDiscoveryCapability(): DiscoveryCapability {
 
   return {
     canDiscover: canRunDiscovery(effective),
-    canRunNationwide: canRunNationwide(effective),
+    canRunNationwide: canRunNationwide(query.data?.nationwide),
+    nationwideMaxTasks: query.data?.nationwide?.maxTasks ?? null,
     unavailableReason: discoveryUnavailableReason(effective),
     canRunAi: canRunAiDiscovery(effective, query.data?.aiStrategy?.status),
     aiStatus: query.data?.aiStrategy?.status ?? null,

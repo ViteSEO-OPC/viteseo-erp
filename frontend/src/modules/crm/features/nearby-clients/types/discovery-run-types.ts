@@ -208,6 +208,14 @@ export type StartDiscoveryRunInput =
       country: CountryCode;
       idempotencyKey: string;
       aiStrategy?: boolean;
+      /**
+       * The budget the SERVER said this provider may spend, handed straight back.
+       *
+       * Optional, and never a scoped run's field: `limitPerTask` is how many businesses one search
+       * returns, this is how many searches the run may make. Keeping them in different arms of the
+       * union is what stops the dialog's 20 from ever reaching a nationwide request.
+       */
+      maxTasks?: number;
     };
 
 export const DISCOVERY_RUN_TERMINAL: readonly DiscoveryRunStatus[] = [
@@ -284,15 +292,15 @@ export function countryLabel(code: string): string {
 }
 
 /** Human labels for the provider ids the API returns. Unknown ids render as themselves, never guessed. */
-// ONE VOCABULARY FOR THE LANES, matching the integrations card. `openai` is the AI-assisted
-// OpenStreetMap lane — its businesses are OSM nodes reached through AI-proposed searches — so the
-// bare word "AI-assisted" read as though AI were itself the factual source. Spelling out the source
-// keeps this row answering "where did the businesses come from"; which AI planned the search is the
-// AI engine row's question, and {@see AI_ENGINE_NAME} answers it.
+// ONE VOCABULARY FOR THE LANES, matching the Nearby board's Found By. `openai` is the lane that adds,
+// to the OpenStreetMap baseline, businesses reached through an AI-expanded tag sweep or an AI-proposed
+// name — every one confirmed against a real OSM element. "AI-assisted" names that lane; it does not
+// claim AI is where a business's data came from.
+// Which AI planned the search is the AI engine row's question, and {@see AI_ENGINE_NAME} answers it.
 const PROVIDER_LABELS: Record<string, string> = {
   google_places: "Google Places",
   openstreetmap: "OpenStreetMap",
-  openai: "AI-assisted · OpenStreetMap",
+  openai: "AI-assisted",
 };
 
 export function providerLabel(id: string | null): string {

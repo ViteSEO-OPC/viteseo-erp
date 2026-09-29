@@ -55,6 +55,7 @@ def build_record(
     provider_stats: Optional[dict[str, Any]] = None,
     started_at: Optional[str] = None,
     choice: Any = None,
+    provenance_sent: Optional[int] = None,
 ) -> dict[str, Any]:
     """One run's funnel, flat and provider-agnostic.
 
@@ -161,6 +162,30 @@ def build_record(
         record["expansion_duplicates"] = int(stats.get("expansion_duplicates", 0))
         record["expansion_net_new"] = int(stats.get("expansion_net_new", 0))
         record["expansion_by_selector"] = stats.get("expansion_by_selector") or {}
+
+        # AI-ASSISTED CAPACITY MODE: the search's AI capacity, how many returned AI candidates had to
+        # be geocoded, and every outbound request it made by service. Absent outside the mode.
+        for key in ("ai_total_limit", "ai_geocoded", "calls"):
+            if key in stats:
+                record[key] = stats[key]
+
+        # VOLUME MODE: the cell's raw read, what the CRM already held, and what was new. Absent outside
+        # the mode. `volume_raw_truncated` / `volume_new_capped` drive the CRM's subdivision there.
+        for key, value in stats.items():
+            if key.startswith("volume"):
+                record[key] = value
+
+    # PROVENANCE-ONLY AI FINDINGS — the AI-lane businesses the per-task limit dropped, sent beside the
+    # batch so an EXISTING lead can still be recorded as found by AI. Absent unless the provider can
+    # produce them (the composite), so every other record keeps its exact shape. `recorded` and
+    # `outside_ph` come from the CRM's own answer and are None when it did not give one (a dry run,
+    # or a CRM that predates the field) — never guessed. None of these feed discovered / duplicates /
+    # rejected: those still describe the result, and this is not part of it.
+    if provenance_sent is not None:
+        answer = summary.get("provenanceOnly") if isinstance(summary.get("provenanceOnly"), dict) else {}
+        record["provenance_only_sent"] = provenance_sent
+        record["provenance_only_recorded"] = answer.get("recorded")
+        record["provenance_only_outside_ph"] = answer.get("outsidePh")
 
     # AI SEARCH PLANNING, when the provider consulted it. Absent otherwise — an OSM run or a Google
     # run with planning off never asked, and a `false` here would claim a plan was sought and unused.

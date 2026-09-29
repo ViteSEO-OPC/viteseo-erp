@@ -24,9 +24,20 @@ const PRIORITY: Record<NearbyPriority, { dot: string; text: string; cls: string 
 const FOUND_BY_CHIP: Record<string, string> = {
   "google-places": "Google Places",
   "ai-assisted-google-places": "AI-assisted · Google Places",
-  "ai-assisted": "AI-assisted · OpenStreetMap",
+  "ai-assisted": "AI-assisted",
   openstreetmap: "OpenStreetMap",
 };
+
+// ONE LEAD, TWO LANES. OpenStreetMap found it first (its source), and the AI lane found it too. Shown
+// only for that exact combination; every other lead — Google included — keeps its chip unchanged.
+const ALSO_AI_ASSISTED_CHIP = "OpenStreetMap · also AI-assisted";
+
+function foundByChip(client: NearbyClient): string | undefined {
+  if (client.foundBy === "openstreetmap" && client.foundByAll?.includes("ai-assisted")) {
+    return ALSO_AI_ASSISTED_CHIP;
+  }
+  return FOUND_BY_CHIP[client.foundBy];
+}
 
 function Chip({ dot, text, cls }: { dot: string; text: string; cls: string }) {
   return (
@@ -45,6 +56,13 @@ type Props = {
   onDirections: () => void;
   onQualify: () => void;
   qualifying?: boolean;
+  /**
+   * Optional CONTROLLED state for the Website Intel disclosure. The virtualized list unmounts cards
+   * that scroll out of view, which would silently collapse an open panel; it owns this state so the
+   * panel is still open when the card scrolls back. Omitted, the card keeps its own state as before.
+   */
+  intelOpen?: boolean;
+  onIntelOpenChange?: (open: boolean) => void;
 };
 
 /**
@@ -66,7 +84,9 @@ function websiteHeadline(website: NonNullable<NearbyClient["website"]>): string 
     return "No website — directory listing only";
   }
   if (!website.audited) {
-    return website.url ? "Website found — not audited yet" : "Website — not checked yet";
+    if (website.url) return "Website found — not audited yet";
+    // A lead with no URL is only "not checked" until its website search has concluded.
+    if (!website.checked) return "Website — not checked yet";
   }
   switch (website.status) {
     case "has-website": return "Website audited";
@@ -77,10 +97,16 @@ function websiteHeadline(website: NonNullable<NearbyClient["website"]>): string 
   }
 }
 
-export function ClientRangeCard({ client, selected, onSelect, onPlanVisit, onDirections, onQualify, qualifying }: Props) {
+export function ClientRangeCard({ client, selected, onSelect, onPlanVisit, onDirections, onQualify, qualifying, intelOpen: controlledIntelOpen, onIntelOpenChange }: Props) {
   const p = PRIORITY[client.priority];
   // Collapsed by default: see the disclosure below.
-  const [intelOpen, setIntelOpen] = useState(false);
+  const [localIntelOpen, setLocalIntelOpen] = useState(false);
+  const intelOpen = controlledIntelOpen ?? localIntelOpen;
+  const setIntelOpen = (update: (open: boolean) => boolean) => {
+    const next = update(intelOpen);
+    if (onIntelOpenChange) onIntelOpenChange(next);
+    else setLocalIntelOpen(next);
+  };
   return (
     <div
       onClick={onSelect}
@@ -107,12 +133,8 @@ export function ClientRangeCard({ client, selected, onSelect, onPlanVisit, onDir
       <div className="mt-3 flex flex-wrap items-center gap-3">
         {client.active && <Chip dot="bg-green-500" text="Active" cls="text-green-700" />}
         <Chip dot={p.dot} text={p.text} cls={p.cls} />
-        {FOUND_BY_CHIP[client.foundBy] !== undefined && (
-          <Chip
-            dot="bg-slate-400"
-            text={FOUND_BY_CHIP[client.foundBy]}
-            cls="text-muted-foreground"
-          />
+        {foundByChip(client) !== undefined && (
+          <Chip dot="bg-slate-400" text={foundByChip(client) as string} cls="text-muted-foreground" />
         )}
         {client.qualified && (
           <Chip dot="bg-muted-foreground" text="Already added to CRM" cls="text-muted-foreground" />

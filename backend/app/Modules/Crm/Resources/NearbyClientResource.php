@@ -48,6 +48,10 @@ class NearbyClientResource extends JsonResource
             'contact' => $this->contact_name,
             'status' => $this->status,
             'foundBy' => $this->discoveryLane(),
+            // EVERY lane that found this lead: the primary lane above, plus AI-assisted when the AI
+            // lane also found it (crm_lead_discovery_lanes). One lead, one row — this only lets the
+            // board list it under each lane that genuinely found it.
+            'foundByAll' => $this->discoveryLanesAll(),
             // DERIVED prospecting priority — computed from Website Intelligence for the Nearby context
             // ONLY (see prospectingPriority). This is NOT the CRM `leads.priority` business field (which
             // stays a separate concern for qualified CRM leads); it is never read from or written to the
@@ -157,6 +161,28 @@ class NearbyClientResource extends JsonResource
     }
 
     /**
+     * The primary lane plus any additional lane recorded for this lead.
+     *
+     * Only `ai-assisted` can be added, and never to a lead whose primary lane already is AI-assisted
+     * or is either Google Places lane: Google provenance is exactly what the Google flow wrote. When
+     * the relation was not loaded this is just the primary lane, so no caller can observe a change.
+     *
+     * @return list<string>
+     */
+    private function discoveryLanesAll(): array
+    {
+        $primary = $this->discoveryLane();
+        if (! $this->resource->relationLoaded('discoveryLanes')
+            || in_array($primary, ['ai-assisted', 'google-places', 'ai-assisted-google-places'], true)) {
+            return [$primary];
+        }
+
+        $hasAi = $this->resource->discoveryLanes->contains(fn ($lane) => $lane->lane === NerbyProvider::OPENAI->value);
+
+        return $hasAi ? [$primary, 'ai-assisted'] : [$primary];
+    }
+
+    /**
      * Derived PROSPECTING priority for the Nearby bounded context — a weaker digital presence is a
      * stronger prospect for the BD team:
      *
@@ -235,6 +261,10 @@ class NearbyClientResource extends JsonResource
             'status' => $this->website_status, // has-website | needs-redesign | no-website | website-unknown | website-unreachable
             'audited' => $e !== null,
             'auditedAt' => $e?->last_checked_at?->toIso8601String(),
+            // CHECKED is wider than AUDITED: a lead with no URL cannot be audited, but it HAS been
+            // checked once the website search has run to its end (or a BD confirmed there is no site).
+            // Without this such a lead read "not checked yet" forever, however conclusive the search.
+            'checked' => $e !== null || $this->websiteSearchConcluded(),
             // Whether the audited page was confirmed to BELONG to this business, and how strongly.
             // `null` = never evaluated (no audit yet, or a row audited before verification existed) —
             // which `false` would misreport as "checked and rejected".
@@ -259,6 +289,18 @@ class NearbyClientResource extends JsonResource
                 'youtube' => ! empty($e->youtube_url),
             ],
         ];
+    }
+
+    /** The website search reached a conclusion: exhausted, or absence confirmed by a BD. */
+    private function websiteSearchConcluded(): bool
+    {
+        if (! $this->resource->relationLoaded('websiteSearch')) {
+            return $this->website_status === 'no-website';
+        }
+        $search = $this->websiteSearch;
+
+        return $this->website_status === 'no-website'
+            || ($search !== null && ($search->exhausted_at !== null || $search->confirmed_absent_at !== null));
     }
 
     private function initialsFor(string $businessName): string

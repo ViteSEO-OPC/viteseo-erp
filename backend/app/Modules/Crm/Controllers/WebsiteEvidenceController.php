@@ -9,6 +9,7 @@ use App\Modules\Crm\Requests\ConfirmWebsiteAbsenceRequest;
 use App\Modules\Crm\Requests\StoreWebsiteCandidatesRequest;
 use App\Modules\Crm\Requests\StoreWebsiteCandidateVerificationRequest;
 use App\Modules\Crm\Services\Website\WebsiteEvidenceService;
+use App\Modules\Crm\Support\LeadIdScope;
 use Illuminate\Http\JsonResponse;
 use RuntimeException;
 use Symfony\Component\HttpFoundation\Response;
@@ -42,9 +43,13 @@ class WebsiteEvidenceController extends Controller
     {
         $limit = min((int) request()->integer('limit', 50) ?: 50, 200);
 
+        // OPTIONAL SCOPE, exactly as on the audit queue.
+        $scope = LeadIdScope::from(request());
+
         $leads = Lead::query()
             ->whereNull('crm_leads.website')
             ->whereNotNull('crm_leads.source')
+            ->when($scope !== null, fn ($q) => $q->whereIn('crm_leads.id', $scope))
             ->leftJoin('crm_lead_website_searches as s', 's.lead_id', '=', 'crm_leads.id')
             ->whereNull('s.confirmed_absent_at')
             ->whereNull('s.exhausted_at')

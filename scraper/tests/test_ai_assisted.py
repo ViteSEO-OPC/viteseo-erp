@@ -551,3 +551,85 @@ def test_a_category_the_provider_cannot_parse_still_lets_expansion_run():
     assert provider.stats()["expansion_status"] == "ok"
     assert provider.stats()["execution_status"] == "ok"
 
+
+
+# --- same-search overlap keeps the AI provenance (change set D) --------------------------------
+#
+# When the baseline and an AI lane find the SAME business in one search, the record the CRM
+# receives stays the baseline's — same `discovered_by`, so the lead's primary source is untouched —
+# but it now says the AI lane found it too. Without this the AI's finding was dropped inside the
+# engine and the CRM could never know.
+
+def test_a_name_lane_overlap_marks_the_baseline_record_as_also_found_by_ai():
+    osm = FakeOsm(business("Mercury Drug Vigan", "node/1"))
+    ai = FakeAi(business("Mercury Drug Vigan", "node/1"))
+    provider = composite(osm, ai)
+
+    result = provider.discover(area="Vigan", category="pharmacy", limit=30)
+
+    assert [b.provider_id for b in result] == ["node/1"]
+    assert result[0].discovered_by == LANE_BASELINE
+    assert result[0].also_found_by == [LANE_AI]
+    # The counters are exactly what they were: an overlap is still a duplicate, not a new find.
+    assert provider.stats()["ai_duplicates"] == 1
+    assert provider.stats()["net_new"] == 0
+
+
+def test_a_tag_expansion_overlap_marks_the_baseline_record_as_also_found_by_ai():
+    osm = FakeOsm(
+        business("Cafe Leona", "node/1"),
+        sweep=tag_sweep(("amenity=fast_food", business("Cafe Leona", "node/1"))),
+    )
+    ai = FakeAiWithTags(selectors=["amenity=fast_food"])
+    provider = composite(osm, ai)
+
+    result = provider.discover(area="Vigan", category="restaurant", limit=30)
+
+    assert result[0].discovered_by == LANE_BASELINE
+    assert result[0].also_found_by == [LANE_AI]
+    assert provider.stats()["expansion_duplicates"] == 1
+
+
+def test_both_ai_lanes_overlapping_one_baseline_record_mark_it_once():
+    osm = FakeOsm(
+        business("Cafe Leona", "node/1"),
+        sweep=tag_sweep(("amenity=fast_food", business("Cafe Leona", "node/1"))),
+    )
+    ai = FakeAiWithTags(business("Cafe Leona", "node/1"), selectors=["amenity=fast_food"])
+
+    result = composite(osm, ai).discover(area="Vigan", category="restaurant", limit=30)
+
+    assert result[0].also_found_by == [LANE_AI]
+
+
+def test_an_ai_only_record_is_not_marked_also_found_by():
+    osm = FakeOsm(business("Cafe Leona", "node/1"))
+    ai = FakeAi(business("Mang Inasal", "node/2"))
+
+    result = composite(osm, ai).discover(area="Vigan", category="restaurant", limit=30)
+
+    by_id = {b.provider_id: b for b in result}
+    assert by_id["node/2"].discovered_by == LANE_AI
+    assert by_id["node/2"].also_found_by == []
+    assert by_id["node/1"].also_found_by == []
+
+
+def test_the_overlap_reaches_the_crm_payload_without_changing_its_source():
+    osm = FakeOsm(business("Mercury Drug Vigan", "node/1"))
+    ai = FakeAi(business("Mercury Drug Vigan", "node/1"))
+
+    result = composite(osm, ai).discover(area="Vigan", category="pharmacy", limit=30)
+    payload = normalize(result[0], source="openai").to_payload()
+
+    assert payload["source"] == "openstreetmap"
+    assert payload["discovery_also_found_by"] == ["openai"]
+
+
+def test_a_baseline_only_search_sends_no_new_field():
+    """Default OSM stays byte-identical: nothing overlapped, so nothing new is sent."""
+    osm = FakeOsm(business("Cafe Leona", "node/1"))
+    ai = FakeAi()
+
+    result = composite(osm, ai).discover(area="Vigan", category="restaurant", limit=30)
+
+    assert "discovery_also_found_by" not in normalize(result[0], source="openai").to_payload()

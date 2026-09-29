@@ -39,6 +39,13 @@ export function canRunAiDiscovery(
  *
  * The two modes keep their different shapes: a nationwide run sends no locations and no
  * `limit_per_task`, because its coverage and per-cell limit belong to the server.
+ *
+ * `max_tasks` IS THE SERVER'S OWN NUMBER, HANDED BACK. `GET /discovery/config` reports the budget
+ * this provider may spend on one nationwide run — 400 on Google Places, the Overpass fence on the
+ * AI lane — and the dialog returns it unchanged. Sending it is what makes the request one the
+ * orchestrator will accept instead of one it refuses on arrival; deriving a number here would be the
+ * second copy of the fence that caused this bug in the first place. Omitted when unknown, which
+ * leaves the server applying its own default exactly as it always has.
  */
 export function buildStartRunBody(input: StartDiscoveryRunInput): Record<string, unknown> {
   const body: Record<string, unknown> =
@@ -48,6 +55,7 @@ export function buildStartRunBody(input: StartDiscoveryRunInput): Record<string,
           country: input.country,
           niches: input.niches,
           idempotency_key: input.idempotencyKey,
+          ...(typeof input.maxTasks === "number" ? { max_tasks: input.maxTasks } : {}),
         }
       : {
           scope: "scoped",

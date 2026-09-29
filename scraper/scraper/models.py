@@ -101,6 +101,13 @@ class RawBusiness(BaseModel):
     # field); False = recorded, and AI did not shape the search; True = recorded, and it did.
     ai_assisted: Optional[bool] = None
 
+    # OTHER LANES THAT FOUND THIS SAME BUSINESS IN THE SAME SEARCH. When the baseline sweep and an AI
+    # lane return one OSM element, the composite keeps the baseline's record — so `discovered_by`, and
+    # therefore the lead's primary `source`, is unchanged — and names the AI lane here instead of
+    # dropping its finding. It never becomes `source`; the CRM records it as additional provenance.
+    # Empty for every record no second lane found, so such a payload is byte-identical to before.
+    also_found_by: list[str] = Field(default_factory=list)
+
 
 class NormalizedBusiness(BaseModel):
     """Canonical CRM fit-data record. Serialized to the `/leads/discovered` ingest payload.
@@ -131,7 +138,32 @@ class NormalizedBusiness(BaseModel):
     # that does not record the fact sends nothing and the column stays NULL, while a Google search
     # that ran without AI sends an explicit `false`.
     discovery_ai_assisted: Optional[bool] = None
+    # Additional discovery provenance (see `RawBusiness.also_found_by`). None — and therefore absent
+    # from the payload — unless another lane found the same business in the same search.
+    discovery_also_found_by: Optional[list[str]] = None
 
     def to_payload(self) -> dict:
         """Ingest payload — drop ``None`` fields so the CRM applies its column defaults."""
         return self.model_dump(exclude_none=True)
+
+
+class ProvenanceOnlyRecord(BaseModel):
+    """"An AI lane found this business" — and nothing else. Never a lead, never business data.
+
+    The composite provider returns at most ``limit`` businesses per search, baseline first, so an AI
+    finding past the limit is dropped from the result. When that business is ALREADY a CRM lead, the
+    AI lane's discovery of it is still true, and this record is how it reaches the CRM: sent beside
+    the ordinary batch (``provenance_only``), it can only annotate an existing lead's discovery lanes.
+
+    Deliberately four fields. With no name, phone, email, website or category it cannot be mistaken
+    for — or turned into — a business record; the coordinates exist only so the CRM can apply its
+    national boundary to it exactly as it does to every discovered business.
+    """
+
+    place_id: str
+    lane: str
+    latitude: float
+    longitude: float
+
+    def to_payload(self) -> dict:
+        return self.model_dump()

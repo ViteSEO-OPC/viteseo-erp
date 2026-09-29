@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import httpx
 
-from scraper.models import NormalizedBusiness
+from scraper.models import NormalizedBusiness, ProvenanceOnlyRecord
 
 
 class CrmIngestClient:
@@ -29,21 +29,36 @@ class CrmIngestClient:
             },
         )
 
-    def ingest(self, businesses: list[NormalizedBusiness], *, dry_run: bool) -> dict:
-        """Submit a batch to the CRM. ``dry_run=True`` validates + reports without persisting."""
-        payload = {
+    def ingest(
+        self,
+        businesses: list[NormalizedBusiness],
+        *,
+        dry_run: bool,
+        provenance_only: list[ProvenanceOnlyRecord] | None = None,
+    ) -> dict:
+        """Submit a batch to the CRM. ``dry_run=True`` validates + reports without persisting.
+
+        ``provenance_only`` travels only when there is some, so every ordinary request is exactly the
+        request it was before the field existed. A CRM that predates the field ignores it.
+        """
+        payload: dict = {
             "dry_run": dry_run,
             "businesses": [b.to_payload() for b in businesses],
         }
+        if provenance_only:
+            payload["provenance_only"] = [p.to_payload() for p in provenance_only]
         resp = self._client.post(f"{self.base_url}/leads/discovered", json=payload)
         resp.raise_for_status()
         return resp.json().get("data", {})
 
     # -- Website Intelligence --------------------------------------------------------------------
 
-    def fetch_enrichment_queue(self, limit: int) -> list[dict]:
-        """Businesses with a website URL to audit (never-audited first)."""
-        resp = self._client.get(f"{self.base_url}/website-enrichment/queue", params={"limit": limit})
+    def fetch_enrichment_queue(self, limit: int, lead_ids: list[str] | None = None) -> list[dict]:
+        """Businesses with a website URL to audit (never-audited first) — only ``lead_ids`` when given."""
+        params: dict = {"limit": limit}
+        if lead_ids is not None:
+            params["lead_ids"] = ",".join(lead_ids)
+        resp = self._client.get(f"{self.base_url}/website-enrichment/queue", params=params)
         resp.raise_for_status()
         return resp.json().get("data", [])
 

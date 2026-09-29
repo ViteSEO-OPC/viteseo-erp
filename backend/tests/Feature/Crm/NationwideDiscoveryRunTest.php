@@ -293,19 +293,62 @@ class NationwideDiscoveryRunTest extends TestCase
         }
     }
 
-    public function test_a_nationwide_run_refuses_to_sweep_the_country_on_the_openstreetmap_baseline(): void
+    public function test_a_full_size_nationwide_run_refuses_to_sweep_the_country_on_the_openstreetmap_baseline(): void
     {
         Queue::fake();
         Sanctum::actingAs($this->admin());
         // No Google credential: the run resolves to the free, shared, community-funded baseline.
         $this->fakeEngine();
-        $this->startNationwide();
+        // Stated outright rather than inherited: setUp() pins this class's default budget to 12, so
+        // relying on the default would have tested the bounded case under the full-size name.
+        $this->startNationwide(['max_tasks' => 400]);
 
         $run = $this->executeNationwide();
 
         $this->assertSame(DiscoveryRun::STATUS_FAILED, $run->status);
         $this->assertStringContainsString('Google Places', (string) $run->error_message);
         $this->assertSame([], $this->calls, 'nothing may be searched once the provider is refused');
+    }
+
+    /**
+     * The fence is the SIZE, not the provider's name.
+     *
+     * Refusing the baseline at every size is what left the AI-assisted lane with no way to reach the
+     * only planner that covers the country: it could search cities it was handed and nothing else.
+     * A budget at or under the fence is a few hundred Overpass queries from a client that already
+     * backs off on rate limits, so it is allowed to plan and to search.
+     */
+    public function test_a_bounded_nationwide_run_may_sweep_on_the_openstreetmap_baseline(): void
+    {
+        Queue::fake();
+        Sanctum::actingAs($this->admin());
+        $this->fakeEngine();
+        $this->startNationwide(['max_tasks' => config('discovery.nationwide.max_tasks_without_google')]);
+
+        $run = $this->executeNationwide();
+
+        $this->assertNotSame(DiscoveryRun::STATUS_FAILED, $run->status);
+        $this->assertNotSame([], $this->calls, 'a budget inside the fence must actually be searched');
+        $this->assertGreaterThan(0, $run->cells_planned, 'the national polygon must still be tiled');
+        foreach ($this->calls as $call) {
+            $this->assertNotSame('google_places', $call['provider']);
+            $this->assertNotNull($call['bbox'], 'every search still comes from a planned cell');
+        }
+    }
+
+    public function test_the_overpass_fence_names_the_budget_that_would_be_accepted(): void
+    {
+        Queue::fake();
+        Sanctum::actingAs($this->admin());
+        $this->fakeEngine();
+        $ceiling = (int) config('discovery.nationwide.max_tasks_without_google');
+        $this->startNationwide(['max_tasks' => $ceiling + 1]);
+
+        $run = $this->executeNationwide();
+
+        $this->assertSame(DiscoveryRun::STATUS_FAILED, $run->status);
+        // A refusal a person cannot act on is a dead end: it must say the number that would work.
+        $this->assertStringContainsString((string) $ceiling, (string) $run->error_message);
     }
 
     public function test_the_stored_target_records_the_box_that_was_searched(): void

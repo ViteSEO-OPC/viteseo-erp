@@ -221,8 +221,9 @@ export function NearbyFilters({
           <FilterSelect value={filters.status} onChange={(v) => patch({ status: v })} allLabel="All statuses" options={options.statuses} />
         </div>
         {/* Which discovery lane found the business — the deterministic OpenStreetMap sweep, the
-            AI-assisted expansion beside it, or the Google Places search. "All sources" is the default
-            and leaves the board exactly as it was before this control existed. */}
+            AI-assisted lane (an AI-expanded tag sweep or AI-proposed name, confirmed against OSM), or
+            the Google Places search. "All sources" is the default and leaves the board exactly as it
+            was before this control existed. */}
         <div className="flex flex-col gap-1.5">
           <Label>Found by</Label>
           <FilterSelect

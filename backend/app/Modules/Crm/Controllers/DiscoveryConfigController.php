@@ -18,6 +18,7 @@ use App\Modules\Crm\Services\Discovery\Contracts\TagExpander;
 use App\Modules\Crm\Services\Discovery\ExecutedQueryLedger;
 use App\Modules\Crm\Services\Discovery\GooglePlacesAttestation;
 use App\Modules\Crm\Services\Discovery\GooglePlacesTextSearch;
+use App\Modules\Crm\Services\Discovery\NationwideCapability;
 use App\Modules\Crm\Services\Discovery\NerbyProviderSettingService;
 use App\Modules\Crm\Services\Discovery\NerbyServiceIdentity;
 use App\Modules\Crm\Services\Discovery\QueryYieldLog;
@@ -84,6 +85,12 @@ class DiscoveryConfigController extends Controller
                 'aiStrategy' => [
                     'status' => $ai->status(),
                 ],
+                // ADDITIVE, AND THE SAME ANSWER THE ORCHESTRATOR ACTS ON. Whether the nationwide
+                // mode may be offered here and what one run may spend — read from
+                // {@see NationwideCapability} rather than restated, because the frontend's own
+                // Google-only copy of this rule is exactly what went stale when the server's rule
+                // changed. No credential, no key, no balance: a flag, a budget and a reason word.
+                'nationwide' => NationwideCapability::for($effective->provider)->toArray(),
             ],
         ]);
     }
