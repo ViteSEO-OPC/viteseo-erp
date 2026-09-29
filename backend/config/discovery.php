@@ -443,5 +443,49 @@ return [
          * of where a paid sweep goes should be switched on deliberately rather than inherited.
          */
         'coverage_ordering' => (bool) env('DISCOVERY_COVERAGE_ORDERING', false),
+
+        /*
+         * SEARCH WHERE THE BUSINESSES ARE FIRST. Before planning, ask OpenStreetMap — once, for the
+         * whole country — where the requested niche's named businesses sit, and order each island
+         * group's cells densest-first. Measured: dentists occupy 145 of the 736 cells and restaurants
+         * 428, so a raster order spends most of a 60-task budget on empty ground (run 106: 60 tasks,
+         * 3 leads, first after 9m36s). The probe's per-cell counts matched the engine's own per-cell
+         * searches exactly (657/657, 25/25, 3/3).
+         *
+         * ORDER ONLY, EXACTLY LIKE coverage_ordering. Same cells, same count, same groups, same
+         * geometry, same Luzon/Visayas/Mindanao round-robin; a cell with no known business is moved
+         * to the end of its group, never dropped. The probe is positions only — it finds no lead and
+         * ingests nothing. Any failure (Overpass busy after its retries, a niche with no OSM tag
+         * mapping) leaves today's order untouched, and so does a Google Places run: the probe describes
+         * OpenStreetMap, which is not what Google searches.
+         *
+         * DEFAULT OFF: a reordering of where a sweep goes is switched on deliberately, not inherited.
+         */
+        'density_ordering' => (bool) env('DISCOVERY_DENSITY_ORDERING', false),
+
+        /*
+         * THE FIRST PASS: how many searches go to the densest cells of Luzon, Visayas and Mindanao,
+         * round-robin, before any of them is subdivided. Without it the densest cell (Metro Manila:
+         * 471 dentists, 4,680 restaurants) is split to the depth limit first — ~21 searches, ~14
+         * minutes — before the other island groups are touched. Children of those cells are held and
+         * then queued at the FRONT exactly as today, so the descent is delayed, never skipped. Counted
+         * in searches: a multi-niche run gets fewer cells, but never fewer than one per island group.
+         * Only used when density_ordering is on.
+         */
+        'quick_pass_tasks' => (int) env('DISCOVERY_QUICK_PASS_TASKS', 6),
+
+        /*
+         * How long a niche's density map is reused. OpenStreetMap does not move meaningfully in a day,
+         * and the probe is the slowest step of a run's start (restaurants: 49–68s), so only the first
+         * run of a niche each day pays it. Failures are never cached.
+         */
+        'density_cache_ttl' => (int) env('DISCOVERY_DENSITY_CACHE_TTL', 86400),
+
+        /*
+         * Ceiling on the probe process: the engine's own request timeout (200s) plus its retries' waits
+         * would outlast this only on a server refusing every attempt, which should fail over to
+         * today's order promptly rather than hold the run's start.
+         */
+        'density_timeout' => (int) env('DISCOVERY_DENSITY_TIMEOUT', 240),
     ],
 ];

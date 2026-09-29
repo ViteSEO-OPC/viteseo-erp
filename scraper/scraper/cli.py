@@ -46,6 +46,7 @@ from scraper.targets import (
     select,
     targets_per_run,
 )
+from scraper.density import run_density
 from scraper.safety import describe_target, refuse_remote_commit
 from scraper.website_discovery.runner import run_website_discovery
 from scraper.website_intelligence.runner import run_audit
@@ -648,6 +649,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     a.set_defaults(func=_audit)
 
+    dn = sub.add_parser(
+        "density",
+        help="Print where a niche's named OSM businesses are across a country (JSON on stdout). Read-only.",
+    )
+    dn.add_argument("--category", required=True, help='Category word (e.g. "dentist") or "key=value".')
+    dn.add_argument("--country", required=True, help="ISO 3166-1 alpha-2 country, e.g. PH.")
+    dn.set_defaults(func=_density)
+
     args = parser.parse_args(argv)
 
     # ONE choke point for every write, present and future. Enforcing this per-command would mean each
@@ -666,6 +675,11 @@ def main(argv: list[str] | None = None) -> int:
         # presentation as the targets-file errors above — a clear line, not a stack trace.
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
+
+
+def _density(args: argparse.Namespace) -> int:
+    """National density probe for nationwide ordering. Reads Overpass only; writes nothing."""
+    return run_density(Config.load(), args.category, args.country)
 
 
 def _audit(args: argparse.Namespace) -> int:

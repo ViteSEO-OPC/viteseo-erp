@@ -11,6 +11,7 @@ use Carbon\CarbonInterface;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Sleep;
+use Throwable;
 
 /**
  * Executes one discovery run: task by task, provider-honestly, without touching anything frozen.
@@ -44,6 +45,7 @@ class DiscoveryRunOrchestrator
         private readonly ScraperProcessRunner $runner,
         private readonly NationwidePlanner $planner,
         private readonly NerbyServiceIdentity $service,
+        private readonly DensityEvidence $density,
     ) {}
 
     /**
@@ -581,12 +583,16 @@ class DiscoveryRunOrchestrator
         // because it falls out of the geometry rather than being typed in.
         $scope = (array) $run->scope;
         $cellDegrees = (float) ($scope['cellDegrees'] ?? config('discovery.nationwide.cell_degrees', 0.25));
+        // Null unless density ordering is switched on, the lane is OpenStreetMap-based and the probe
+        // answered for every niche — and null is exactly the order this run would have had anyway.
+        $density = $this->densityFor($run, $provider, $cellDegrees);
         $cells = $this->planner->plan(
             $this->nichesOf($run),
             $cellDegrees,
             // The plan is the CELL list; niches multiply within each cell at execution time, so the
             // ceiling passed here bounds cells, not calls. The budget bounds calls.
             PHP_INT_MAX,
+            $density,
         );
 
         // `plan()` returns (cell x niche) tasks interleaved by island group; the distinct cells in
@@ -613,6 +619,10 @@ class DiscoveryRunOrchestrator
             $this->fail($run, 'The national boundary produced no searchable cells. Nationwide discovery cannot run.');
 
             return false;
+        }
+
+        if ($density !== null) {
+            $queue = $this->markQuickPass($queue, count($this->nichesOf($run)));
         }
 
         $run->forceFill([
@@ -756,7 +766,7 @@ class DiscoveryRunOrchestrator
                         'truncated' => $truncated,
                         'searchFailed' => $searchFailed,
                         'parentForChildren' => $parentForChildren,
-                    ]);
+                    ] + array_intersect_key($cell, ['quickPass' => true, 'held' => true]));
 
                     return array_values($queue);
                 }
@@ -832,6 +842,11 @@ class DiscoveryRunOrchestrator
             }
 
             $run->increment('cells_subdivided');
+            if ($cell['quickPass'] ?? false) {
+                $queue = $this->holdChildren($queue, $children, $cell, $parentForChildren);
+
+                continue;
+            }
             foreach ($children as $child) {
                 // Children go to the FRONT, so a dense area is finished before the sweep moves on.
                 // Appending instead would push every subdivision behind the entire rest of the
@@ -848,6 +863,96 @@ class DiscoveryRunOrchestrator
         }
 
         return null;
+    }
+
+    /**
+     * The density map for this run's plan, or null for today's order.
+     *
+     * Only when `nationwide.density_ordering` is on, and never for Google Places: the probe describes
+     * what OpenStreetMap holds, which is what the OpenStreetMap and AI-assisted lanes search and not
+     * what Google does. Anything the evidence cannot answer — including an unexpected exception —
+     * costs the run its ordering, never the run.
+     *
+     * @return array<string, int>|null
+     */
+    private function densityFor(DiscoveryRun $run, NerbyProvider $provider, float $cellDegrees): ?array
+    {
+        if (! config('discovery.nationwide.density_ordering', false) || $provider === NerbyProvider::GOOGLE_PLACES) {
+            return null;
+        }
+
+        try {
+            return $this->density->forRun($this->nichesOf($run), $this->countryOf($run), $cellDegrees);
+        } catch (Throwable $e) {
+            Log::warning('Nationwide density ordering skipped; the probe raised', ['exception' => $e::class]);
+
+            return null;
+        }
+    }
+
+    /**
+     * Mark the FIRST PASS: the head of a density-ordered queue, which the island-group round-robin has
+     * already made the densest cells of Luzon, Visayas and Mindanao in turn.
+     *
+     * Sized in searches (`nationwide.quick_pass_tasks`), so a multi-niche run marks fewer cells — but
+     * never fewer than three, one per island group, or the pass would stop being national.
+     *
+     * @param  list<array<string, mixed>>  $queue
+     * @return list<array<string, mixed>>
+     */
+    private function markQuickPass(array $queue, int $nicheCount): array
+    {
+        $tasks = (int) config('discovery.nationwide.quick_pass_tasks', 6);
+        if ($tasks <= 0) {
+            return $queue;
+        }
+
+        $cells = max(3, (int) ceil($tasks / max(1, $nicheCount)));
+        foreach (array_slice(array_keys($queue), 0, $cells) as $index) {
+            $queue[$index]['quickPass'] = true;
+        }
+
+        return $queue;
+    }
+
+    /**
+     * A first-pass cell came back full: queue its children AFTER the rest of the first pass instead
+     * of in front of it.
+     *
+     * Without this the densest cell (Metro Manila) is subdivided to the depth limit before Visayas
+     * or Mindanao is searched once. The children are not skipped or demoted: they go immediately
+     * after the remaining first-pass cells and any children already held — so held blocks keep the
+     * order their parents were searched in — and each block is in the same order the existing
+     * front-insertion would have produced. Once the first pass is over the queue's head is these
+     * children, which is exactly where the existing rule would have put them.
+     *
+     * @param  list<array<string, mixed>>  $queue
+     * @param  list<array{0: float, 1: float, 2: float, 3: float}>  $children
+     * @param  array<string, mixed>  $cell
+     * @return list<array<string, mixed>>
+     */
+    private function holdChildren(array $queue, array $children, array $cell, ?int $parent): array
+    {
+        $block = [];
+        foreach ($children as $child) {
+            array_unshift($block, [
+                'bbox' => $child,
+                'group' => $cell['group'],
+                'label' => $cell['label'],
+                'depth' => $cell['depth'] + 1,
+                'parent' => $parent,
+                'held' => true,
+            ]);
+        }
+
+        $queue = array_values($queue);
+        $at = 0;
+        while (isset($queue[$at]) && (($queue[$at]['quickPass'] ?? false) || ($queue[$at]['held'] ?? false))) {
+            $at++;
+        }
+        array_splice($queue, $at, 0, $block);
+
+        return $queue;
     }
 
     /**

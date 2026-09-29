@@ -127,6 +127,13 @@ def _drain_nominatim_interval() -> None:
 
 atexit.register(_drain_nominatim_interval)
 
+#: The national density probe returns every named match in the country in one response (measured:
+#: 17,671 restaurants, 1.83 MB, 49–68s on the public endpoint), so it needs longer than the default
+#: client timeout. Matches the query's own server-side `[timeout:180]` with room for transfer.
+NATIONAL_PROBE_TIMEOUT_SECONDS = 200.0
+
+_COUNTRY_CODE = re.compile(r"^[A-Za-z]{2}$")
+
 
 def category_selectors(category: str) -> list[tuple[str, str]]:
     """Resolve a friendly category word to OSM tag selectors, or parse a raw ``key=value``."""
@@ -499,13 +506,54 @@ class OpenStreetMapProvider(DiscoveryProvider):
     # Transient Overpass responses (rate limit / gateway) worth retrying with backoff.
     _RETRY_STATUS = {406, 429, 502, 503, 504}
 
-    def _post_with_retry(self, query: str, attempts: int = 4) -> httpx.Response:
+    def national_points(
+        self, selectors: list[tuple[str, str]], *, country_code: str
+    ) -> list[tuple[float, float]]:
+        """Where every NAMED match for ``selectors`` sits in a country — positions only.
+
+        THE DENSITY PROBE. One query over the country's own OSM boundary (ISO 3166-1, resolved by
+        Overpass, never a list of places) returns the position of every element the per-cell sweep
+        could ever return: same selectors, node and way, named only because ``parse_element`` drops
+        unnamed elements. Counted into the planner's cells, that is exactly what each cell's own
+        search would find — verified cell-by-cell against direct queries (657/657, 25/25, 3/3).
+
+        ``out skel center`` carries positions and ids and nothing else, so no business data travels
+        here and nothing is ever ingested from it: it decides WHERE to look first, never WHAT is found.
+        Transient refusals are retried exactly as every other Overpass call is.
+        """
+        if not _COUNTRY_CODE.match(country_code or ""):
+            raise ValueError(f"Country must be an ISO 3166-1 alpha-2 code, got {country_code!r}.")
+        parts = []
+        for key, value in selectors:
+            parts.append(f'node["{key}"="{value}"][name](area.c);')
+            parts.append(f'way["{key}"="{value}"][name](area.c);')
+        query = (
+            f'[out:json][timeout:180];area["ISO3166-1"="{country_code.upper()}"][admin_level=2]->.c;'
+            f"({''.join(parts)});out skel center qt;"
+        )
+        resp = self._post_with_retry(query, timeout=NATIONAL_PROBE_TIMEOUT_SECONDS)
+        points: list[tuple[float, float]] = []
+        for element in resp.json().get("elements", []):
+            lat = element.get("lat", (element.get("center") or {}).get("lat"))
+            lon = element.get("lon", (element.get("center") or {}).get("lon"))
+            if lat is None or lon is None:
+                continue
+            # Five decimals is ~1 m: far finer than any cell, and a smaller payload to hand the CRM.
+            points.append((round(float(lat), 5), round(float(lon), 5)))
+        return points
+
+    def _post_with_retry(
+        self, query: str, attempts: int = 4, *, timeout: float | None = None
+    ) -> httpx.Response:
         """POST an Overpass query, retrying transient rate-limit/gateway responses with backoff."""
         delay = 5.0
         last_status = None
         for attempt in range(1, attempts + 1):
+            # A per-request timeout only when the caller asks for one (the density probe); every
+            # existing call sends exactly what it always did and keeps the client's own timeout.
+            extra = {"timeout": timeout} if timeout is not None else {}
             resp = self._client.post(
-                self.overpass_url, content=query, headers={"Content-Type": "text/plain"}
+                self.overpass_url, content=query, headers={"Content-Type": "text/plain"}, **extra
             )
             if resp.status_code not in self._RETRY_STATUS:
                 resp.raise_for_status()

@@ -237,6 +237,56 @@ class ScraperProcessRunner
     }
 
     /**
+     * Where a niche's named OpenStreetMap businesses are across a country — the density probe.
+     *
+     * Read-only on both sides: the engine queries Overpass once and prints positions, and asks the CRM
+     * nothing (so it is handed no token). Unlike every other sub-command this one's stdout IS the
+     * result, because a density map is an input to planning rather than a finding the CRM records.
+     *
+     * `unsupported` (exit 3) and `failed` (anything else, including a malformed body) both mean the
+     * caller keeps today's ordering; only `ok` carries points.
+     *
+     * @return array{status: 'ok'|'unsupported'|'failed', points: list<array{0: float, 1: float}>}
+     */
+    public function density(string $niche, string $country): array
+    {
+        try {
+            $result = Process::path((string) config('discovery.path', '/scraper'))
+                ->env($this->environment($this->metricsPath(), false, null))
+                ->timeout(max(1, (int) config('discovery.nationwide.density_timeout', 240)))
+                ->run([
+                    (string) config('discovery.python', '/opt/scraper-venv/bin/python'),
+                    '-m', 'scraper', 'density',
+                    '--category', $niche,
+                    '--country', $country,
+                ]);
+        } catch (Throwable) {
+            return ['status' => 'failed', 'points' => []];
+        }
+
+        if ($result->exitCode() === 3) {
+            return ['status' => 'unsupported', 'points' => []];
+        }
+        if ($result->exitCode() !== 0) {
+            return ['status' => 'failed', 'points' => []];
+        }
+
+        $decoded = json_decode(trim((string) $result->output()), true);
+        if (! is_array($decoded) || ! is_array($decoded['points'] ?? null)) {
+            return ['status' => 'failed', 'points' => []];
+        }
+
+        $points = [];
+        foreach ($decoded['points'] as $point) {
+            if (is_array($point) && count($point) === 2 && is_numeric($point[0]) && is_numeric($point[1])) {
+                $points[] = [(float) $point[0], (float) $point[1]];
+            }
+        }
+
+        return ['status' => 'ok', 'points' => $points];
+    }
+
+    /**
      * `south,west,north,east`, latitude first — the order the engine parses and every provider
      * adapter already uses. Six decimals is roughly a tenth of a metre: far finer than a search
      * cell, and short enough that the command line stays readable in a process list.
