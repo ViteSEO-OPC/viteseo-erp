@@ -204,6 +204,9 @@ def run_discovery(
     country: str | None = None,
     ai_total_limit: int | None = None,
     skip_ai_lanes: bool = False,
+    volume: bool = False,
+    volume_raw_cap: int | None = None,
+    volume_task_cap: int | None = None,
 ) -> int:
     """Discover one (area, category) pair and ingest it. The single discovery path.
 
@@ -224,6 +227,15 @@ def run_discovery(
     # absent — the default — the config is exactly the one every run has always been given.
     if ai_total_limit is not None or skip_ai_lanes:
         config = Config(**{**config.__dict__, "ai_total_limit": ai_total_limit, "skip_ai_lanes": skip_ai_lanes})
+
+    # VOLUME MODE, carried on the run like capacity mode. Read only by the combined `openai` provider.
+    if volume:
+        config = Config(**{
+            **config.__dict__,
+            "volume": True,
+            **({"volume_raw_cap": volume_raw_cap} if volume_raw_cap else {}),
+            **({"volume_task_cap": volume_task_cap} if volume_task_cap else {}),
+        })
 
     # THE PROVIDER BOUNDARY. This is the single point where the Settings switch enters the runtime;
     # everything downstream (normalize -> ingest -> prospect -> qualification -> scoring) is identical
@@ -469,6 +481,9 @@ def _discover(args: argparse.Namespace) -> int:
         country=args.country,
         ai_total_limit=args.ai_total_limit,
         skip_ai_lanes=args.skip_ai_lanes,
+        volume=args.volume,
+        volume_raw_cap=args.raw_cap,
+        volume_task_cap=args.task_new_cap,
     )
 
 
@@ -633,6 +648,17 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="AI-assisted only: run the OpenStreetMap sweep alone (the run already covered this area and niche).",
     )
+    d.add_argument(
+        "--volume",
+        action="store_true",
+        help=(
+            "AI-assisted (--provider openai) only: VOLUME MODE. One sweep reads the whole cell (up to "
+            "--raw-cap raw elements), the CRM says which businesses it already holds, and up to "
+            "--task-new-cap NEW businesses are geocoded and returned. The AI name lane does not run."
+        ),
+    )
+    d.add_argument("--raw-cap", type=int, default=None, help="Volume mode: raw OSM elements read per cell (default 400).")
+    d.add_argument("--task-new-cap", type=int, default=None, help="Volume mode: new businesses returned per search (default 100).")
     d.set_defaults(func=_discover)
 
     da = sub.add_parser(

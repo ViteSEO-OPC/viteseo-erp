@@ -54,6 +54,14 @@ class Config:
     ai_total_limit: Optional[int] = None
     skip_ai_lanes: bool = False
 
+    # VOLUME MODE (the combined `openai` provider, nationwide only; off unless a run asks for it). One
+    # sweep per cell reads up to `volume_raw_cap` raw OSM elements, the CRM says which it already
+    # holds, and up to `volume_task_cap` NEW businesses are geocoded and returned. The AI name lane
+    # does not run; the AI tag-expansion lane feeds the sweep. False — the default — changes nothing.
+    volume: bool = False
+    volume_raw_cap: int = 400
+    volume_task_cap: int = 100
+
     # Where the scheduled command's discovery targets come from. Empty (the default) means the
     # version-controlled targets file, which is the behaviour that predates this setting. A URL points
     # at a managed registry instead — see `scraper.target_sources`. Kept as configuration rather than

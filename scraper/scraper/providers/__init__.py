@@ -139,6 +139,9 @@ def get_provider(config: Config) -> DiscoveryProvider:
         from scraper.providers.ai_assisted import AiAssistedDiscoveryProvider
         from scraper.providers.openai_discovery import OpenAiDiscoveryProvider
 
+        if config.volume:
+            return _volume_mode(config)
+
         if config.ai_total_limit is not None:
             return _ai_assisted_capacity_mode(config)
 
@@ -221,4 +224,43 @@ def _ai_assisted_capacity_mode(config: Config) -> DiscoveryProvider:
         total_limit=config.ai_total_limit,
         skip_ai_lanes=config.skip_ai_lanes,
         call_counter=counter,
+    )
+
+
+def _volume_mode(config: Config) -> DiscoveryProvider:
+    """The combined `openai` provider in VOLUME MODE — see `scraper.providers.volume`.
+
+    Built only when a run asks for it; without `volume` `get_provider` builds exactly what it always
+    built. ONE OSM client, built without per-business geocoding: the provider geocodes the new
+    businesses it returns and nothing else (R2). Every outbound request is counted.
+    """
+    from scraper.call_counts import CallCounter
+    from scraper.known_places import KnownPlacesClient
+    from scraper.providers.openai_discovery import OpenAiDiscoveryProvider
+    from scraper.providers.volume import VolumeDiscoveryProvider
+
+    counter = CallCounter(overpass_url=config.overpass_url, nominatim_url=config.nominatim_url)
+    osm = build_openstreetmap(config, reverse_geocode=False)
+    # Used for tag expansion only — the name lane never runs in this mode.
+    ai = OpenAiDiscoveryProvider(
+        crm_base_url=config.crm_base_url,
+        crm_token=config.crm_token,
+        timeout=config.openai_timeout,
+        osm=osm,
+    )
+    known = KnownPlacesClient(
+        base_url=config.crm_base_url, token=config.crm_token, user_agent=config.user_agent
+    )
+    counter.attach(osm._client)
+    counter.attach(ai._client, as_ai=True)
+    counter.attach(known.http_client)
+
+    return VolumeDiscoveryProvider(
+        osm=osm,
+        ai=ai,
+        known=known.known,
+        raw_cap=config.volume_raw_cap,
+        task_cap=config.volume_task_cap,
+        call_counter=counter,
+        closers=(known.close,),
     )

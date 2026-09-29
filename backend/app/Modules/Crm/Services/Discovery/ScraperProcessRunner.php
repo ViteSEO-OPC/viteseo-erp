@@ -178,6 +178,16 @@ class ScraperProcessRunner
             // AI-assisted capacity mode subdivides on this, so the sweep's own coverage decides
             // the descent exactly as it would without the extra AI capacity.
             'baselineDiscovered' => isset($record['baseline_discovered']) ? (int) $record['baseline_discovered'] : null,
+            // VOLUME MODE's read of the cell, when the engine ran in it; null otherwise. The descent
+            // subdivides on `rawTruncated` / `newCapped` there, never on the named-row count.
+            'volume' => ($record['volume'] ?? false) === true ? [
+                'rawElements' => (int) ($record['volume_raw_elements'] ?? 0),
+                'rawTruncated' => (bool) ($record['volume_raw_truncated'] ?? false),
+                'newCandidates' => (int) ($record['volume_new_candidates'] ?? 0),
+                'newReturned' => (int) ($record['volume_new_returned'] ?? 0),
+                'newCapped' => (bool) ($record['volume_new_capped'] ?? false),
+                'known' => (int) ($record['volume_known'] ?? 0),
+            ] : null,
         ];
     }
 
@@ -317,7 +327,10 @@ class ScraperProcessRunner
      * `unsupported` (exit 3) and `failed` (anything else, including a malformed body) both mean the
      * caller keeps today's ordering; only `ok` carries points.
      *
-     * @return array{status: 'ok'|'unsupported'|'failed', points: list<array{0: float, 1: float}>}
+     * `ids` is the OSM key of each point, in the same order, when the engine reported them (volume
+     * mode counts, per cell, the businesses the CRM does not hold yet); an empty list otherwise.
+     *
+     * @return array{status: 'ok'|'unsupported'|'failed', points: list<array{0: float, 1: float}>, ids?: list<string>}
      */
     public function density(string $niche, string $country): array
     {
@@ -348,13 +361,20 @@ class ScraperProcessRunner
         }
 
         $points = [];
-        foreach ($decoded['points'] as $point) {
+        $ids = [];
+        $rawIds = is_array($decoded['ids'] ?? null) && count($decoded['ids']) === count($decoded['points'])
+            ? array_values($decoded['ids'])
+            : null;
+        foreach (array_values($decoded['points']) as $i => $point) {
             if (is_array($point) && count($point) === 2 && is_numeric($point[0]) && is_numeric($point[1])) {
                 $points[] = [(float) $point[0], (float) $point[1]];
+                if ($rawIds !== null) {
+                    $ids[] = is_string($rawIds[$i]) ? $rawIds[$i] : '';
+                }
             }
         }
 
-        return ['status' => 'ok', 'points' => $points];
+        return ['status' => 'ok', 'points' => $points, 'ids' => $ids];
     }
 
     /**

@@ -169,6 +169,12 @@ def build_record(
             if key in stats:
                 record[key] = stats[key]
 
+        # VOLUME MODE: the cell's raw read, what the CRM already held, and what was new. Absent outside
+        # the mode. `volume_raw_truncated` / `volume_new_capped` drive the CRM's subdivision there.
+        for key, value in stats.items():
+            if key.startswith("volume"):
+                record[key] = value
+
     # PROVENANCE-ONLY AI FINDINGS — the AI-lane businesses the per-task limit dropped, sent beside the
     # batch so an EXISTING lead can still be recorded as found by AI. Absent unless the provider can
     # produce them (the composite), so every other record keeps its exact shape. `recorded` and

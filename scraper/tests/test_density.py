@@ -126,6 +126,16 @@ def test_the_command_prints_points_as_json_and_exits_zero(monkeypatch, capsys):
     assert out["count"] == 2
     assert out["points"] == [[14.55123, 121.01988], [10.3, 123.9]]
     assert out["selectors"] == ["amenity=restaurant"]
+    # Parallel to `points`: the same `type/id` key a discovered business carries.
+    assert out["ids"] == ["node/1", "way/2"]
+
+
+def test_national_points_is_unchanged_by_the_places_variant(monkeypatch):
+    p = _provider([Resp(200, ELEMENTS), Resp(200, ELEMENTS)])
+    assert p.national_points([("amenity", "dentist")], country_code="PH") == [(14.55123, 121.01988), (10.3, 123.9)]
+    assert p.national_places([("amenity", "dentist")], country_code="PH") == [
+        (14.55123, 121.01988, "node/1"), (10.3, 123.9, "way/2"),
+    ]
 
 
 def test_an_unsupported_niche_exits_unsupported_and_asks_overpass_nothing(monkeypatch, capsys):

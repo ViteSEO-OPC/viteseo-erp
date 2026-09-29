@@ -132,6 +132,11 @@ atexit.register(_drain_nominatim_interval)
 #: client timeout. Matches the query's own server-side `[timeout:180]` with room for transfer.
 NATIONAL_PROBE_TIMEOUT_SECONDS = 200.0
 
+#: Volume mode's cell sweep: the query's own server-side `[timeout:60]` plus room for the response to
+#: arrive. A client that gives up at the same moment the server does races it and reports a
+#: ReadTimeout for a query Overpass was about to answer — measured on the AI lanes' name lookup.
+CELL_SWEEP_TIMEOUT_SECONDS = 75.0
+
 _COUNTRY_CODE = re.compile(r"^[A-Za-z]{2}$")
 
 
@@ -196,6 +201,24 @@ def parse_element(element: dict) -> Optional[RawBusiness]:
         province=(tags.get("addr:province") or "").strip() or None,
         city=(tags.get("addr:city") or tags.get("addr:town") or "").strip() or None,
     )
+
+
+@dataclass
+class CellSweep:
+    """Every RAW element one volume-mode sweep returned for a cell, and whether the cap cut it off.
+
+    RAW, deliberately. Overpass applies `out center N` to elements before anything is parsed, and
+    unnamed elements are dropped only afterwards — so "fewer named businesses than the limit" does not
+    mean the cell ran out. Only the raw count against the raw cap says that: fewer raw elements than
+    the cap means the whole cell was read.
+    """
+
+    elements: list[dict] = field(default_factory=list)
+    raw_cap: int = 0
+
+    @property
+    def raw_truncated(self) -> bool:
+        return self.raw_cap > 0 and len(self.elements) >= self.raw_cap
 
 
 @dataclass
@@ -511,6 +534,15 @@ class OpenStreetMapProvider(DiscoveryProvider):
     ) -> list[tuple[float, float]]:
         """Where every NAMED match for ``selectors`` sits in a country — positions only.
 
+        {@see national_places} without the ids: the same single query, the same points.
+        """
+        return [(lat, lon) for lat, lon, _ in self.national_places(selectors, country_code=country_code)]
+
+    def national_places(
+        self, selectors: list[tuple[str, str]], *, country_code: str
+    ) -> list[tuple[float, float, str]]:
+        """Where every NAMED match for ``selectors`` sits in a country — position and OSM key.
+
         THE DENSITY PROBE. One query over the country's own OSM boundary (ISO 3166-1, resolved by
         Overpass, never a list of places) returns the position of every element the per-cell sweep
         could ever return: same selectors, node and way, named only because ``parse_element`` drops
@@ -532,15 +564,37 @@ class OpenStreetMapProvider(DiscoveryProvider):
             f"({''.join(parts)});out skel center qt;"
         )
         resp = self._post_with_retry(query, timeout=NATIONAL_PROBE_TIMEOUT_SECONDS)
-        points: list[tuple[float, float]] = []
+        places: list[tuple[float, float, str]] = []
         for element in resp.json().get("elements", []):
             lat = element.get("lat", (element.get("center") or {}).get("lat"))
             lon = element.get("lon", (element.get("center") or {}).get("lon"))
             if lat is None or lon is None:
                 continue
+            # The same `type/id` key `parse_element` gives a business, so the CRM can tell which of
+            # these it already holds. A key only — still no business data.
+            key = f"{element.get('type', '')}/{element.get('id', '')}"
             # Five decimals is ~1 m: far finer than any cell, and a smaller payload to hand the CRM.
-            points.append((round(float(lat), 5), round(float(lon), 5)))
-        return points
+            places.append((round(float(lat), 5), round(float(lon), 5), key))
+        return places
+
+    def sweep_cell(
+        self, selectors: list[tuple[str, str]], bbox: tuple[float, float, float, float], raw_cap: int
+    ) -> CellSweep:
+        """VOLUME MODE's one Overpass query for a cell: up to ``raw_cap`` raw elements, tags included.
+
+        The same union-of-selectors query ``_overpass`` sends, with a larger cap and a client timeout
+        longer than the server's. Separate from ``discover()`` so the default sweep is untouched.
+        """
+        south, west, north, east = bbox
+        bbox_str = f"{south},{west},{north},{east}"
+        parts = []
+        for key, value in selectors:
+            parts.append(f'node["{key}"="{value}"]({bbox_str});')
+            parts.append(f'way["{key}"="{value}"]({bbox_str});')
+        query = f"[out:json][timeout:60];({''.join(parts)});out center {int(raw_cap)};"
+
+        resp = self._post_with_retry(query, timeout=CELL_SWEEP_TIMEOUT_SECONDS)
+        return CellSweep(elements=list(resp.json().get("elements", [])), raw_cap=int(raw_cap))
 
     def _post_with_retry(
         self, query: str, attempts: int = 4, *, timeout: float | None = None

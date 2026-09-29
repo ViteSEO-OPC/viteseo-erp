@@ -1,6 +1,7 @@
 """``density``: where a niche's businesses are, nationally, before a nationwide run decides its order.
 
-Prints one JSON object on stdout — ``{"category", "country", "selectors", "count", "points"}`` — and
+Prints one JSON object on stdout — ``{"category", "country", "selectors", "count", "points", "ids"}``
+(``ids[i]`` is the OSM key of ``points[i]``, the same ``type/id`` a discovered business carries) — and
 nothing else there, so the CRM can read it. Every diagnostic goes to stderr. It asks the CRM nothing
 and writes nothing anywhere: the probe informs ORDER, and only the per-cell sweep ever finds leads.
 
@@ -38,7 +39,7 @@ def run_density(config: Any, category: str, country: str) -> int:
 
     provider = build_openstreetmap(config)
     try:
-        points = provider.national_points(selectors, country_code=country)
+        places = provider.national_places(selectors, country_code=country)
     except ValueError as exc:
         print(f"density: {exc}", file=sys.stderr)
         return EXIT_BAD_ARGUMENTS
@@ -54,8 +55,11 @@ def run_density(config: Any, category: str, country: str) -> int:
             "category": category,
             "country": country.upper(),
             "selectors": [f"{k}={v}" for k, v in selectors],
-            "count": len(points),
-            "points": [[lat, lon] for lat, lon in points],
+            "count": len(places),
+            "points": [[lat, lon] for lat, lon, _ in places],
+            # Parallel to `points`. Lets a volume-mode run count, per cell, the businesses its CRM
+            # does not hold yet; every other reader ignores it.
+            "ids": [key for _, _, key in places],
         },
         sys.stdout,
         separators=(",", ":"),

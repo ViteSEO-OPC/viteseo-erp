@@ -442,6 +442,38 @@ return [
             : null,
 
         /*
+         * VOLUME MODE — the combined `openai` provider only, nationwide only, and OFF unless enabled.
+         *
+         * The default sweep reads the first 20 raw OpenStreetMap elements of a cell, in id order, so
+         * every run of a cell sees the same 20, and a cell whose first 20 include a few unnamed
+         * elements is recorded as EXHAUSTED while it holds hundreds (measured: a 0.25° Quezon City
+         * cell, 174 named dentists, 17 in the CRM, recorded exhausted after 17). Volume mode instead:
+         *
+         *   - reads up to `raw_cap` raw elements per cell in the same single Overpass query;
+         *   - asks the CRM which of them it already holds (the ingest still deduplicates);
+         *   - returns up to `task_cap` NEW businesses per search, likely-no-website first, and
+         *     reverse-geocodes only those (R2) through the shared 1/second Nominatim gate;
+         *   - subdivides on the RAW read (`raw_cap` reached) or on more new businesses than the cap —
+         *     never on the named count — so unnamed elements can no longer end a dense cell;
+         *   - orders cells by how many businesses the CRM does NOT hold yet (density probe ids minus
+         *     the org's place_ids), so the budget goes where new leads are;
+         *   - does not run the AI name lane (the tag-expansion lane still feeds the sweep).
+         *
+         * `new_target` is what counts a task as PRODUCTIVE in reporting; it is not a stop rule. Google
+         * Places, Google + AI, OpenStreetMap and the default AI-assisted path never read this block.
+         *
+         * TIME BUDGET: task_cap × 1.1s of Nominatim + the sweep's 75s client timeout must stay inside
+         * `task_timeout_by_provider.openai` (300s): 100 × 1.1 + 75 = 185. {@see NationwideVolumeModeTest}
+         * enforces it.
+         */
+        'volume' => [
+            'enabled' => (bool) env('DISCOVERY_NATIONWIDE_VOLUME', false),
+            'raw_cap' => (int) env('DISCOVERY_NATIONWIDE_VOLUME_RAW_CAP', 400),
+            'task_cap' => (int) env('DISCOVERY_NATIONWIDE_VOLUME_TASK_CAP', 100),
+            'new_target' => (int) env('DISCOVERY_NATIONWIDE_VOLUME_NEW_TARGET', 50),
+        ],
+
+        /*
          * ORDER THE TILING BY WHAT HAS ALREADY BEEN SEARCHED, instead of by latitude.
          *
          * The cells are emitted from the southern edge of the national extent upward, and the island

@@ -585,7 +585,10 @@ class DiscoveryRunOrchestrator
         $cellDegrees = (float) ($scope['cellDegrees'] ?? config('discovery.nationwide.cell_degrees', 0.25));
         // Null unless density ordering is switched on, the lane is OpenStreetMap-based and the probe
         // answered for every niche — and null is exactly the order this run would have had anyway.
-        $density = $this->densityFor($run, $provider, $cellDegrees);
+        // VOLUME MODE orders by what the org does NOT hold yet, and falls back to plain density (or
+        // today's order) whenever that cannot be answered.
+        $density = ($this->volumeFor($provider) ? $this->unknownDensityFor($run, $cellDegrees) : null)
+            ?? $this->densityFor($run, $provider, $cellDegrees);
         $cells = $this->planner->plan(
             $this->nichesOf($run),
             $cellDegrees,
@@ -808,7 +811,15 @@ class DiscoveryRunOrchestrator
                 // A cell is truncated when the search filled its per-cell limit. In AI-assisted
                 // capacity mode a search may return more than that from the AI lanes, so it is the
                 // OpenStreetMap sweep's own count that decides — the descent is the sweep's.
-                if (($result['baselineDiscovered'] ?? $result['discovered']) >= $limit) {
+                //
+                // VOLUME MODE decides on the RAW read instead: the cap cut the cell off, or it held more
+                // new businesses than one search may return. Never on the named count, which unnamed
+                // elements shrink below the page and so used to end dense cells as "exhausted".
+                if (($result['volume'] ?? null) !== null) {
+                    if ($result['volume']['rawTruncated'] || $result['volume']['newCapped']) {
+                        $truncated = true;
+                    }
+                } elseif (($result['baselineDiscovered'] ?? $result['discovered']) >= $limit) {
                     $truncated = true;
                 }
                 $parentForChildren ??= (int) $target->id;
@@ -971,6 +982,49 @@ class DiscoveryRunOrchestrator
      * @return array{ok: bool, discovered: int, inserted: int, duplicates: int, rejected: int}
      */
     /**
+     * VOLUME MODE is on for this search: the combined `openai` provider, with the setting enabled.
+     * Only nationwide searches reach {@see runBoundedTarget()}, so a scoped run never sees it.
+     */
+    private function volumeFor(NerbyProvider $provider): bool
+    {
+        return $provider === NerbyProvider::OPENAI && (bool) config('discovery.nationwide.volume.enabled', false);
+    }
+
+    /**
+     * VOLUME MODE's engine flags, or none — in which case the search runs exactly as before.
+     *
+     * @return list<string>
+     */
+    private function volumeArgs(NerbyProvider $provider): array
+    {
+        if (! $this->volumeFor($provider)) {
+            return [];
+        }
+
+        return [
+            '--volume',
+            '--raw-cap', (string) max(1, (int) config('discovery.nationwide.volume.raw_cap', 400)),
+            '--task-new-cap', (string) max(1, (int) config('discovery.nationwide.volume.task_cap', 100)),
+        ];
+    }
+
+    /**
+     * Per cell, the probed businesses this org does not hold yet — or null for the fallback order.
+     *
+     * @return array<string, int>|null
+     */
+    private function unknownDensityFor(DiscoveryRun $run, float $cellDegrees): ?array
+    {
+        try {
+            return $this->density->unknownForRun($this->nichesOf($run), $this->countryOf($run), $cellDegrees);
+        } catch (Throwable $e) {
+            Log::warning('Nationwide volume ordering skipped; the probe raised', ['exception' => $e::class]);
+
+            return null;
+        }
+    }
+
+    /**
      * AI-ASSISTED CAPACITY MODE: the extra engine flags for one nationwide search, or none.
      *
      * Only for the combined `openai` provider, and only when `discovery.nationwide.ai_total_limit`
@@ -1011,7 +1065,8 @@ class DiscoveryRunOrchestrator
             'started_at' => now(),
         ])->save();
 
-        $capacity = $this->aiCapacityArgs($target, $provider, $metricsPath);
+        $volume = $this->volumeArgs($provider);
+        $capacity = $volume !== [] ? $volume : $this->aiCapacityArgs($target, $provider, $metricsPath);
 
         $result = $this->withRateLimitRetry($run, fn (): array => $capacity === []
             ? $this->runner->run(
@@ -1044,6 +1099,8 @@ class DiscoveryRunOrchestrator
             // AI-assisted capacity mode: the sweep's own count, which the descent subdivides on.
             // Null outside the mode, where the descent reads `discovered` exactly as before.
             'baselineDiscovered' => $capacity !== [] ? ($result['baselineDiscovered'] ?? null) : null,
+            // VOLUME MODE's read of the cell (null outside it, or when the engine did not report one).
+            'volume' => $volume !== [] ? ($result['volume'] ?? null) : null,
             // Did this search actually run? A failed one (rate-limited after its retries, provider
             // error, engine refusal) returned zero businesses without looking — see workQueue().
             'ok' => $result['exitCode'] === 0,
