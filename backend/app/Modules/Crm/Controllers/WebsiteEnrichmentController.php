@@ -12,6 +12,7 @@ use App\Modules\Crm\Services\Website\LlmIdentityAdjudicator;
 use App\Modules\Crm\Services\Website\WebsiteEvidenceService;
 use App\Modules\Crm\Services\WebsiteIdentityVerifier;
 use App\Modules\Crm\Services\WebsiteStatusDeriver;
+use App\Modules\Crm\Support\LeadIdScope;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -32,8 +33,13 @@ class WebsiteEnrichmentController extends Controller
 
         // Join only for ordering (never-checked first, then oldest-checked); select Lead columns only
         // and eager-load the audit record for output.
+        // OPTIONAL SCOPE: only these leads (a volume-mode run's new ones). Absent, the whole queue as
+        // always; present but empty or malformed, nothing — never silently the whole queue.
+        $scope = LeadIdScope::from($request);
+
         $leads = Lead::query()
             ->whereNotNull('crm_leads.website')
+            ->when($scope !== null, fn ($q) => $q->whereIn('crm_leads.id', $scope))
             ->leftJoin('crm_lead_website_enrichments as e', 'e.lead_id', '=', 'crm_leads.id')
             ->with('websiteEnrichment')
             ->orderByRaw('e.last_checked_at IS NOT NULL') // never-checked (NULL) first

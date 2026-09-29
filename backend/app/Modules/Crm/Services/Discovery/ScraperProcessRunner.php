@@ -249,6 +249,44 @@ class ScraperProcessRunner
     }
 
     /**
+     * {@see audit()} over THESE leads only — a volume-mode run's new ones ({@see EnrichRunLeadsJob}).
+     * Same engine, same queue endpoint and ordering, narrowed by `lead_ids`; `$timeout` bounds the step
+     * so the job stays inside its worker's own timeout.
+     *
+     * @param  list<int>  $leadIds
+     * @return array{exitCode: int, stderrTail: string}
+     */
+    public function auditLeads(array $leadIds, ?string $crmToken, int $timeout): array
+    {
+        return $this->runCommand(
+            ['audit', '--limit', (string) count($leadIds), '--commit', '--lead-ids', $this->leadIdList($leadIds)],
+            $crmToken,
+            $timeout,
+        );
+    }
+
+    /**
+     * {@see findWebsites()} over THESE leads only. See {@see auditLeads()}.
+     *
+     * @param  list<int>  $leadIds
+     * @return array{exitCode: int, stderrTail: string}
+     */
+    public function findWebsitesForLeads(array $leadIds, ?string $crmToken, int $timeout): array
+    {
+        return $this->runCommand(
+            ['find-websites', '--limit', (string) count($leadIds), '--commit', '--lead-ids', $this->leadIdList($leadIds)],
+            $crmToken,
+            $timeout,
+        );
+    }
+
+    /** @param list<int> $leadIds */
+    private function leadIdList(array $leadIds): string
+    {
+        return implode(',', array_map(fn ($id): string => (string) (int) $id, $leadIds));
+    }
+
+    /**
      * How long ONE task of this provider may run before it is killed.
      *
      * The provider is already a parameter of the only call site, so this needs no new plumbing and
@@ -277,12 +315,12 @@ class ScraperProcessRunner
      * @param  list<string>  $arguments
      * @return array{exitCode: int, stderrTail: string}
      */
-    private function runCommand(array $arguments, ?string $crmToken = null): array
+    private function runCommand(array $arguments, ?string $crmToken = null, ?int $timeout = null): array
     {
         try {
             $result = Process::path((string) config('discovery.path', '/scraper'))
                 ->env($this->environment($this->metricsPath(), false, $crmToken))
-                ->timeout((int) config('discovery.enrichment_timeout', 900))
+                ->timeout(max(1, $timeout ?? (int) config('discovery.enrichment_timeout', 900)))
                 ->run([
                     (string) config('discovery.python', '/opt/scraper-venv/bin/python'),
                     '-m', 'scraper',

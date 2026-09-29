@@ -361,3 +361,76 @@ def test_volume_fields_reach_the_metrics_record_and_nothing_changes_without_them
                                      commit=True, duration_ms=1, discovered=3, with_website=0, provider_stats={})
     assert not any(k.startswith("volume") for k in plain)
 
+
+# -- post-run Website Intelligence: scoped to one run's leads ---------------------------------------
+
+
+def test_audit_and_find_websites_pass_lead_ids_to_their_queues(monkeypatch):
+    from scraper.website_discovery import runner as evidence_runner
+    from scraper.website_intelligence import runner as audit_runner
+
+    seen = {}
+
+    class Client:
+        def __init__(self, **kw):
+            pass
+
+        def fetch_enrichment_queue(self, limit, lead_ids=None):
+            seen["audit"] = (limit, lead_ids)
+            return []
+
+        def queue(self, limit, lead_ids=None):
+            seen["evidence"] = (limit, lead_ids)
+            return []
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(audit_runner, "CrmIngestClient", Client)
+    monkeypatch.setattr(evidence_runner, "CrmEvidenceClient", Client)
+    monkeypatch.setenv("CRM_TOKEN", "t")
+    assert cli.main(["audit", "--limit", "5", "--lead-ids", "12,x,15"]) == 0
+    assert cli.main(["find-websites", "--limit", "5", "--lead-ids", "12,15"]) == 0
+    assert seen["audit"] == (5, ["12", "15"])
+    assert seen["evidence"] == (5, ["12", "15"])
+
+
+def test_without_lead_ids_the_queues_are_read_exactly_as_before(monkeypatch):
+    from scraper.website_intelligence import runner as audit_runner
+
+    seen = {}
+
+    class Client:
+        def __init__(self, **kw):
+            pass
+
+        def fetch_enrichment_queue(self, *args):
+            seen["args"] = args
+            return []
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(audit_runner, "CrmIngestClient", Client)
+    monkeypatch.setenv("CRM_TOKEN", "t")
+    assert cli.main(["audit", "--limit", "5"]) == 0
+    assert seen["args"] == (5,)
+
+
+def test_the_queue_clients_send_lead_ids_only_when_given():
+    from scraper.ingest import CrmIngestClient
+    from scraper.website_discovery.runner import CrmEvidenceClient
+
+    urls = []
+
+    def handler(request):
+        urls.append(str(request.url))
+        return httpx.Response(200, json={"data": []})
+
+    for cls, call in ((CrmIngestClient, "fetch_enrichment_queue"), (CrmEvidenceClient, "queue")):
+        c = cls(base_url="http://crm.test", token="t", user_agent="ua")
+        c._client = httpx.Client(transport=httpx.MockTransport(handler))
+        getattr(c, call)(5)
+        getattr(c, call)(5, ["1", "2"])
+    assert "lead_ids" not in urls[0] and "lead_ids=1%2C2" in urls[1]
+    assert "lead_ids" not in urls[2] and "lead_ids=1%2C2" in urls[3]

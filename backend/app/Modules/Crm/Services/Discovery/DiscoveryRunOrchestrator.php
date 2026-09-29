@@ -3,6 +3,7 @@
 namespace App\Modules\Crm\Services\Discovery;
 
 use App\Modules\Crm\Enums\NerbyProvider;
+use App\Modules\Crm\Jobs\EnrichRunLeadsJob;
 use App\Modules\Crm\Jobs\RunDiscoveryJob;
 use App\Modules\Crm\Models\DiscoveryRun;
 use App\Modules\Crm\Models\DiscoveryRunTarget;
@@ -664,6 +665,7 @@ class DiscoveryRunOrchestrator
         }
         $this->finishNationwide($run);
         $this->clearCheckpoint($run);
+        $this->queueWebsiteIntelligence($run, $provider);
 
         return false;
     }
@@ -1022,6 +1024,27 @@ class DiscoveryRunOrchestrator
 
             return null;
         }
+    }
+
+    /**
+     * WEBSITE INTELLIGENCE FOR A VOLUME RUN'S NEW LEADS — queued once the run is over, whatever ended it.
+     *
+     * An additive verification step, never part of discovery: a separate job on the same worker, scoped
+     * to the leads this run created, so they do not wait on the (deliberately stopped) scheduler and
+     * stay "Not audited". Nothing here can change what the run found.
+     */
+    private function queueWebsiteIntelligence(DiscoveryRun $run, NerbyProvider $provider): void
+    {
+        if (! $this->volumeFor($provider) || ! config('discovery.nationwide.volume.enrich_after_run', true)) {
+            return;
+        }
+
+        $run->refresh();
+        if ((int) $run->inserted <= 0) {
+            return;
+        }
+
+        EnrichRunLeadsJob::dispatch($run->uuid, (int) $run->org_id)->onQueue('discovery');
     }
 
     /**

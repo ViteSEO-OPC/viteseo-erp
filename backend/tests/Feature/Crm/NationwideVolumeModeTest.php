@@ -4,10 +4,12 @@ namespace Tests\Feature\Crm;
 
 use App\Models\Org;
 use App\Models\User;
+use App\Modules\Crm\Jobs\EnrichRunLeadsJob;
 use App\Modules\Crm\Models\DiscoveryRun;
 use App\Modules\Crm\Models\Lead;
 use App\Modules\Crm\Models\NerbyProviderSetting;
 use App\Modules\Crm\Services\Discovery\DiscoveryRunOrchestrator;
+use App\Modules\Crm\Services\Discovery\NerbyServiceIdentity;
 use App\Modules\Crm\Services\Discovery\ScraperProcessRunner;
 use App\Support\CurrentOrg;
 use App\Support\Entitlements;
@@ -30,6 +32,7 @@ use Tests\TestCase;
  *    return — never on the named count, which is what used to end dense cells as "exhausted".
  *  - Cells are ordered by what the org does not hold yet.
  *  - The known-places pre-filter is machine-only, org-scoped and answers only what was asked.
+ *  - A run that created leads queues Website Intelligence for exactly those leads.
  */
 class NationwideVolumeModeTest extends TestCase
 {
@@ -302,6 +305,98 @@ class NationwideVolumeModeTest extends TestCase
         $this->assertNotEmpty($this->calls);
     }
 
+    // ── post-run Website Intelligence ──────────────────────────────────────────────────────────
+
+    public function test_a_volume_run_that_created_leads_queues_website_intelligence_for_them(): void
+    {
+        config()->set('discovery.nationwide.volume.enabled', true);
+        $this->openaiLive();
+        $this->fakeEngine(fn () => ['discovered' => 8, 'inserted' => 4, 'volume' => $this->volumeRead(new: 4)]);
+
+        $run = $this->runNationwide();
+
+        Queue::assertPushedOn('discovery', EnrichRunLeadsJob::class, fn (EnrichRunLeadsJob $job) => $job->runUuid === $run->uuid
+            && $job->orgId === (int) $run->org_id && $job->afterLeadId === 0);
+    }
+
+    public function test_no_enrichment_is_queued_without_new_leads_outside_volume_mode_or_when_disabled(): void
+    {
+        $this->openaiLive();
+
+        config()->set('discovery.nationwide.volume.enabled', true);
+        $this->fakeEngine(fn () => ['discovered' => 8, 'inserted' => 0, 'volume' => $this->volumeRead(new: 0)]);
+        $this->runNationwide();
+        Queue::assertNotPushed(EnrichRunLeadsJob::class);
+
+        config()->set('discovery.nationwide.volume.enabled', false);
+        $this->fakeEngine(fn () => ['discovered' => 8, 'inserted' => 4]);
+        $this->runNationwide();
+        Queue::assertNotPushed(EnrichRunLeadsJob::class);
+
+        config()->set('discovery.nationwide.volume.enabled', true);
+        config()->set('discovery.nationwide.volume.enrich_after_run', false);
+        $this->fakeEngine(fn () => ['discovered' => 8, 'inserted' => 4, 'volume' => $this->volumeRead(new: 4)]);
+        $this->runNationwide();
+        Queue::assertNotPushed(EnrichRunLeadsJob::class);
+    }
+
+    public function test_the_enrichment_job_runs_both_steps_over_exactly_the_runs_new_leads_in_chunks(): void
+    {
+        $this->openaiLive();
+        $this->fakeEngine(fn () => ['discovered' => 3]);
+        $run = $this->runNationwide();
+        $admin = User::query()->firstOrFail();
+
+        $inside = [];
+        for ($i = 0; $i < EnrichRunLeadsJob::CHUNK + 2; $i++) {
+            $inside[] = Lead::factory()->create(['created_by' => $admin->id, 'source' => 'openstreetmap', 'created_at' => $run->started_at])->id;
+        }
+        $before = Lead::factory()->create(['created_by' => $admin->id, 'source' => 'openstreetmap', 'created_at' => $run->started_at->copy()->subHour()]);
+        $manual = Lead::factory()->create(['created_by' => $admin->id, 'source' => null, 'created_at' => $run->started_at]);
+
+        $seen = [];
+        $runner = new class($seen) extends ScraperProcessRunner
+        {
+            public function __construct(public array &$seen) {}
+
+            public function findWebsitesForLeads(array $leadIds, ?string $crmToken, int $timeout): array
+            {
+                $this->seen[] = ['find', $leadIds, $crmToken !== null && $crmToken !== '', $timeout];
+
+                return ['exitCode' => 0, 'stderrTail' => ''];
+            }
+
+            public function auditLeads(array $leadIds, ?string $crmToken, int $timeout): array
+            {
+                $this->seen[] = ['audit', $leadIds, $crmToken !== null && $crmToken !== '', $timeout];
+
+                return ['exitCode' => 0, 'stderrTail' => ''];
+            }
+        };
+
+        Queue::fake();
+        (new EnrichRunLeadsJob($run->uuid, (int) $run->org_id))->handle($runner, app(NerbyServiceIdentity::class));
+
+        $firstChunk = array_slice($inside, 0, EnrichRunLeadsJob::CHUNK);
+        $this->assertSame([
+            ['find', $firstChunk, true, 400],
+            ['audit', $firstChunk, true, 400],
+        ], $seen, 'website search first (it may find a URL), then the audit; one token, bounded steps');
+        $this->assertNotContains($before->id, $seen[0][1]);
+        $this->assertNotContains($manual->id, $seen[0][1]);
+
+        Queue::assertPushedOn('discovery', EnrichRunLeadsJob::class, fn (EnrichRunLeadsJob $job) => $job->afterLeadId === end($firstChunk));
+        $this->assertSame(0, app(NerbyServiceIdentity::class)->user()->tokens()->where('name', 'like', 'nerby:enrich:%')->count(),
+            'the enrichment token is revoked');
+
+        // The second chunk is the remainder, and nothing further is queued.
+        $seen = [];
+        Queue::fake();
+        (new EnrichRunLeadsJob($run->uuid, (int) $run->org_id, (int) end($firstChunk)))->handle($runner, app(NerbyServiceIdentity::class));
+        $this->assertSame(array_slice($inside, EnrichRunLeadsJob::CHUNK), $seen[0][1]);
+        Queue::assertNothingPushed();
+    }
+
     // ── the known-places pre-filter ───────────────────────────────────────────────────────────
 
     public function test_known_places_answers_only_the_asked_keys_this_org_holds(): void
@@ -340,6 +435,30 @@ class NationwideVolumeModeTest extends TestCase
         ])->assertUnprocessable();
     }
 
+    // ── the queue scope ──────────────────────────────────────────────────────────────────────
+
+    public function test_the_website_queues_narrow_to_lead_ids_only_when_asked(): void
+    {
+        $admin = $this->admin();
+        [$a, $b, $c, $d] = CurrentOrg::runAs($this->tenant()->id, fn () => [
+            Lead::factory()->create(['created_by' => $admin->id, 'source' => 'openstreetmap', 'website' => 'https://a.example']),
+            Lead::factory()->create(['created_by' => $admin->id, 'source' => 'openstreetmap', 'website' => 'https://b.example']),
+            Lead::factory()->create(['created_by' => $admin->id, 'source' => 'openstreetmap', 'website' => null]),
+            Lead::factory()->create(['created_by' => $admin->id, 'source' => 'openstreetmap', 'website' => null]),
+        ]);
+
+        $this->actingAsNerbyService($this->tenant()->id);
+        $ids = fn (string $uri) => collect($this->getJson($uri)->assertOk()->json('data'))->pluck('id')->map(fn ($id) => (int) $id)->sort()->values()->all();
+
+        $this->assertSame([$a->id, $b->id], $ids('/api/v1/crm/website-enrichment/queue?limit=50'));
+        $this->assertSame([$b->id], $ids("/api/v1/crm/website-enrichment/queue?limit=50&lead_ids={$b->id},{$c->id}"));
+        $this->assertSame([], $ids('/api/v1/crm/website-enrichment/queue?limit=50&lead_ids=abc'), 'malformed is nothing, never everything');
+
+        $this->assertSame([$c->id, $d->id], $ids('/api/v1/crm/website-evidence/queue?limit=50'));
+        $this->assertSame([$d->id], $ids("/api/v1/crm/website-evidence/queue?limit=50&lead_ids={$a->id},{$d->id}"));
+        $this->assertSame([], $ids('/api/v1/crm/website-evidence/queue?limit=50&lead_ids='));
+    }
+
     // ── safety arithmetic and the engine's report ─────────────────────────────────────────────
 
     public function test_a_full_task_fits_inside_the_ai_assisted_task_timeout(): void
@@ -347,6 +466,14 @@ class NationwideVolumeModeTest extends TestCase
         $geocoding = (int) config('discovery.nationwide.volume.task_cap') * 1.1;
         $sweep = 75;
         $this->assertLessThanOrEqual((int) config('discovery.task_timeout_by_provider.openai'), $geocoding + $sweep);
+        $this->assertLessThanOrEqual(900, 2 * (int) config('discovery.nationwide.volume.enrich_step_timeout'),
+            'both enrichment steps fit in one job on the 900s worker');
+    }
+
+    public function test_a_runs_own_enrichment_covers_up_to_five_hundred_new_leads_in_bounded_chunks(): void
+    {
+        $this->assertSame(500, (int) config('discovery.nationwide.volume.enrich_limit'));
+        $this->assertSame(50, EnrichRunLeadsJob::CHUNK, 'the per-job unit of work is unchanged');
     }
 
     public function test_the_runner_reads_the_engines_volume_report(): void

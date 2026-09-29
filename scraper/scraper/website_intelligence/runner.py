@@ -19,7 +19,7 @@ from scraper.website_intelligence.spider import WebsiteAuditSpider
 from scraper.website_intelligence.urls import normalize_website_url
 
 
-def run_audit(config: Config, limit: int, *, commit: bool = False) -> int:
+def run_audit(config: Config, limit: int, *, commit: bool = False, lead_ids: list[str] | None = None) -> int:
     """Audit the queued websites.
 
     ``commit`` defaults to False — reading the queue and crawling are safe, but submitting findings
@@ -33,7 +33,9 @@ def run_audit(config: Config, limit: int, *, commit: bool = False) -> int:
         base_url=config.crm_base_url, token=config.crm_token, user_agent=config.user_agent
     )
     try:
-        queue = client.fetch_enrichment_queue(limit)
+        # `lead_ids` narrows the queue to those leads (a discovery run's new ones); absent, the whole
+        # queue exactly as before.
+        queue = client.fetch_enrichment_queue(limit, lead_ids) if lead_ids is not None else client.fetch_enrichment_queue(limit)
     finally:
         client.close()
 

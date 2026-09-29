@@ -471,6 +471,21 @@ return [
             'raw_cap' => (int) env('DISCOVERY_NATIONWIDE_VOLUME_RAW_CAP', 400),
             'task_cap' => (int) env('DISCOVERY_NATIONWIDE_VOLUME_TASK_CAP', 100),
             'new_target' => (int) env('DISCOVERY_NATIONWIDE_VOLUME_NEW_TARGET', 50),
+
+            /*
+             * WEBSITE INTELLIGENCE FOR THE RUN'S NEW LEADS, as one queued job after the run finishes —
+             * never the scheduler (it would also fire the stale scheduled-email sender). Scoped to the
+             * leads this run created, capped at `enrich_limit`, each step bounded by
+             * `enrich_step_timeout` so the job fits inside the worker's 900s.
+             *
+             * 500 covers a run's own new leads up to 500 (a 10-search benchmark created 464). The work is
+             * still done 50 leads per job (EnrichRunLeadsJob::CHUNK), each chunk its own bounded job, so
+             * a larger limit means more chunks queued behind the run — measured ~3.5 min per chunk —
+             * never a longer single job.
+             */
+            'enrich_after_run' => (bool) env('DISCOVERY_NATIONWIDE_VOLUME_ENRICH', true),
+            'enrich_limit' => (int) env('DISCOVERY_NATIONWIDE_VOLUME_ENRICH_LIMIT', 500),
+            'enrich_step_timeout' => (int) env('DISCOVERY_NATIONWIDE_VOLUME_ENRICH_STEP_TIMEOUT', 400),
         ],
 
         /*

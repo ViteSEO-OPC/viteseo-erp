@@ -53,9 +53,12 @@ class CrmIngestClient:
 
     # -- Website Intelligence --------------------------------------------------------------------
 
-    def fetch_enrichment_queue(self, limit: int) -> list[dict]:
-        """Businesses with a website URL to audit (never-audited first)."""
-        resp = self._client.get(f"{self.base_url}/website-enrichment/queue", params={"limit": limit})
+    def fetch_enrichment_queue(self, limit: int, lead_ids: list[str] | None = None) -> list[dict]:
+        """Businesses with a website URL to audit (never-audited first) — only ``lead_ids`` when given."""
+        params: dict = {"limit": limit}
+        if lead_ids is not None:
+            params["lead_ids"] = ",".join(lead_ids)
+        resp = self._client.get(f"{self.base_url}/website-enrichment/queue", params=params)
         resp.raise_for_status()
         return resp.json().get("data", [])
 

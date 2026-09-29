@@ -712,6 +712,7 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Record the evidence in the CRM (default is a dry run that submits nothing).",
     )
+    fw.add_argument("--lead-ids", default=None, help="Only these lead ids (comma-separated) — e.g. one run's new leads.")
     fw.set_defaults(func=_find_websites)
 
     a = sub.add_parser("audit", help="Audit the websites of leads that have a URL (Website Intelligence).")
@@ -721,6 +722,7 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Submit audit findings to the CRM (default is a dry run).",
     )
+    a.add_argument("--lead-ids", default=None, help="Only these lead ids (comma-separated) — e.g. one run's new leads.")
     a.set_defaults(func=_audit)
 
     dn = sub.add_parser(
@@ -756,10 +758,17 @@ def _density(args: argparse.Namespace) -> int:
     return run_density(Config.load(), args.category, args.country)
 
 
+def _lead_ids(raw: str | None) -> list[str] | None:
+    """`--lead-ids 12,15,40` -> ["12", "15", "40"]; absent -> None (the whole queue, as always)."""
+    if raw is None:
+        return None
+    return [part.strip() for part in raw.split(",") if part.strip().isdigit()]
+
+
 def _audit(args: argparse.Namespace) -> int:
-    return run_audit(Config.load(), args.limit, commit=args.commit)
+    return run_audit(Config.load(), args.limit, commit=args.commit, lead_ids=_lead_ids(args.lead_ids))
 
 
 def _find_websites(args: argparse.Namespace) -> int:
     """Tier 0 candidate discovery. Proposes and verifies; never concludes absence."""
-    return run_website_discovery(Config.load(), args.limit, commit=args.commit)
+    return run_website_discovery(Config.load(), args.limit, commit=args.commit, lead_ids=_lead_ids(args.lead_ids))

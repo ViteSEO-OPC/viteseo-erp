@@ -51,8 +51,11 @@ class CrmEvidenceClient:
             },
         )
 
-    def queue(self, limit: int) -> list[dict]:
-        r = self._client.get(f"{self.base_url}/website-evidence/queue", params={"limit": limit})
+    def queue(self, limit: int, lead_ids: list[str] | None = None) -> list[dict]:
+        params: dict = {"limit": limit}
+        if lead_ids is not None:
+            params["lead_ids"] = ",".join(lead_ids)
+        r = self._client.get(f"{self.base_url}/website-evidence/queue", params=params)
         r.raise_for_status()
         return r.json().get("data", [])
 
@@ -76,7 +79,9 @@ class CrmEvidenceClient:
         self._client.close()
 
 
-def run_website_discovery(config: Config, limit: int, *, commit: bool = False) -> int:
+def run_website_discovery(
+    config: Config, limit: int, *, commit: bool = False, lead_ids: list[str] | None = None
+) -> int:
     """Find and verify candidate websites for leads that have none."""
     if not config.crm_token:
         print("ERROR: CRM_TOKEN is not set.", file=sys.stderr)
@@ -90,7 +95,7 @@ def run_website_discovery(config: Config, limit: int, *, commit: bool = False) -
 
     try:
         try:
-            leads = client.queue(limit)
+            leads = client.queue(limit, lead_ids) if lead_ids is not None else client.queue(limit)
         except httpx.HTTPStatusError as exc:
             # Name the status: a 401 here almost always means the token belongs to another
             # deployment (they are per-database), which is otherwise a slow thing to work out.
