@@ -13,6 +13,7 @@ use App\Modules\Crm\Models\PlannerEvent;
 use App\Modules\Crm\Requests\PerformanceScopeRequest;
 use App\Modules\Crm\Resources\LeadResource;
 use App\Modules\Crm\Services\CrmAccessService;
+use App\Modules\Crm\Services\Dashboard\DashboardMetricsService;
 use App\Modules\Crm\Services\Kpi\BdKpiService;
 use App\Modules\Crm\Services\Kpi\KpiMetric;
 use App\Modules\Crm\Services\Performance\PerformancePdfExporter;
@@ -25,114 +26,17 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
-use Illuminate\Support\Carbon;
 use Symfony\Component\HttpFoundation\Response as SymfonyResponse;
 
 class DashboardController extends Controller
 {
     /**
-     * The pending follow-up set — the ONE definition behind every follow-up queue figure this
-     * controller serves (the dashboard's Follow-ups Due KPI and the reports page's overdue/today/
-     * upcoming buckets).
-     *
-     * Frozen rule (Reports & Performance milestone): a Planner event of type `follow-up` that is
-     * DATED and NOT completed, scoped by PlannerEvent::visibleTo — Admin/SA see the whole CRM, a BD
-     * sees their own events plus events on the leads they own. An outbound email is deliberately NOT
-     * a follow-up (PO ruling 2026-07-09); only real Planner events count here.
-     *
-     * Returned as a builder factory rather than a builder so each caller gets a fresh query — the
-     * bucket counts below run four of them off this one definition.
-     *
-     * @return callable(): Builder<PlannerEvent>
-     */
-    private function pendingFollowUps(User $user): callable
-    {
-        return fn (): Builder => PlannerEvent::query()
-            ->visibleTo($user)
-            // The whole follow-up-work category ({@see PlannerEvent::scopeFollowUpWork}), not the bare
-            // `follow-up` literal: an Email/Call/Meeting task that is due IS work due, and once Lead
-            // Details routes the BD's channel choice into `event_type` those rows would otherwise
-            // disappear from this card and its three buckets.
-            ->followUpWork()
-            ->where('status', '!=', 'completed')
-            ->whereNotNull('starts_at');
-    }
-
-    /**
-     * The Asia/Manila day boundary as half-open UTC windows, `[todayStart, todayEnd)`.
-     *
-     * Datetimes are stored UTC but the business day is Manila's (the platform rule), and the windows
-     * are half-open so an event landing exactly on midnight is counted once — never in two buckets.
-     *
-     * @return array{0: Carbon, 1: Carbon}
-     */
-    private function manilaDayWindow(): array
-    {
-        $tz = 'Asia/Manila';
-
-        return [now($tz)->startOfDay()->utc(), now($tz)->startOfDay()->addDay()->utc()];
-    }
-
-    /**
      * Supported KPI counts (backend-computable only) + per-status breakdown.
      * Scoped by ownership: Admin/SA see all leads; a BD sees only their own (Lead::scopeVisibleTo).
      */
-    public function kpis(Request $request): JsonResponse
+    public function kpis(Request $request, DashboardMetricsService $metrics): JsonResponse
     {
-        $user = $request->user();
-
-        // Single status aggregation (same groupBy pattern as the website-status buckets);
-        // powers both the `interested` KPI and the Lead Status Summary tab counts —
-        // no duplicate aggregation, no new endpoint.
-        $statusCounts = Lead::query()
-            ->active()
-            ->visibleTo($user)
-            ->selectRaw('status, COUNT(*) as count')
-            ->groupBy('status')
-            ->pluck('count', 'status');
-
-        return response()->json([
-            'data' => [
-                'totalLeads' => Lead::query()->active()->visibleTo($user)->count(),
-                'highPriority' => Lead::query()->active()->visibleTo($user)->where('priority', 'high')->count(),
-                'interested' => (int) $statusCounts->get('interested', 0),
-                // Follow-ups Due — the WHOLE scoped pending set (overdue + today + upcoming), which
-                // is the same "actionable items" reading the Planner sidebar badge already uses. It
-                // rides the shared pendingFollowUps() definition, so this card and the reports
-                // page's three buckets can never drift apart: this is their sum by construction.
-                'followUpsDue' => ($this->pendingFollowUps($user))()->count(),
-                // Completed Outreach (PO decision) — outbound emails the system actually SENT.
-                //
-                // Counts ACTIONS, not leads: emailing one lead three times is three completed
-                // outreach actions, which is what makes this an effort metric rather than a
-                // coverage one (coverage is M-04, deliberately a different KPI).
-                //
-                // `crm_emails.status = 'sent'` is the source because it is written by the send
-                // path itself. `crm_leads.email_outreach` is deliberately NOT used: nothing in the
-                // codebase ever writes its `sent` value — only `replied`, by the inbound processor
-                // — so it records what happened TO us, not what we did. Using it would let an
-                // inbound reply credit outreach that was never performed.
-                //
-                // Every other status is excluded by being unequal to 'sent': draft, scheduled,
-                // queued, failed, cancelled. Inbound mail cannot leak in — it is a different
-                // direction AND carries `received`. Calls and Planner follow-ups are out of scope
-                // by PO decision; no combined channel rule is invented here.
-                'completedOutreach' => Email::query()
-                    ->where('direction', 'outbound')
-                    ->where('status', 'sent')
-                    ->whereIn('lead_id', Lead::query()->active()->visibleTo($user)->select('id'))
-                    ->count(),
-                // Raw per-status counts (frozen enum keys). The UI applies its own
-                // label mapping — keeping this response terminology-neutral.
-                'statusCounts' => [
-                    'new' => (int) $statusCounts->get('new', 0),
-                    'interested' => (int) $statusCounts->get('interested', 0),
-                    'awaiting-reply' => (int) $statusCounts->get('awaiting-reply', 0),
-                    'call-back-req' => (int) $statusCounts->get('call-back-req', 0),
-                    'declined' => (int) $statusCounts->get('declined', 0),
-                ],
-            ],
-        ]);
+        return response()->json(['data' => $metrics->kpis($request->user())]);
     }
 
     /** Latest leads (newest first) — same newest-by-id ordering as the Leads list, so
@@ -393,7 +297,7 @@ class DashboardController extends Controller
      *   Outreach Email  completed=`replied` · in-progress=`sent`+`opened` · not-started=`none`.
      *           Call   completed=`called` · in-progress=`scheduled` · not-started=`not-called`.
      */
-    public function reportsAnalytics(PerformanceScopeRequest $request, PerformanceTargetService $targets): JsonResponse
+    public function reportsAnalytics(PerformanceScopeRequest $request, PerformanceTargetService $targets, DashboardMetricsService $metrics): JsonResponse
     {
         $scope = $request->scope();
         $user = $scope->subject;
@@ -563,9 +467,9 @@ class DashboardController extends Controller
         // day boundary (dates stored UTC, day computed in Manila — the platform rule). Both the set
         // and the window come from the shared helpers, so the dashboard's Follow-ups Due KPI counts
         // exactly the rows these three buckets partition. ----
-        [$todayStart, $todayEnd] = $this->manilaDayWindow();
+        [$todayStart, $todayEnd] = $metrics->manilaDayWindow();
 
-        $pending = $this->pendingFollowUps($user);
+        $pending = $metrics->pendingFollowUps($user);
 
         $rows = $pending()
             ->with('lead:id,business_name')
@@ -592,17 +496,7 @@ class DashboardController extends Controller
             ->values();
 
         $pendingFollowUps = [
-            'counts' => [
-                // Half-open [start, end) windows — identical to the row classifier above, so an event
-                // landing exactly on the Manila midnight boundary is counted once (in `upcoming`),
-                // never in two buckets. The three counts always sum to the pending total.
-                'overdue' => (clone $pending())->where('starts_at', '<', $todayStart)->count(),
-                'today' => (clone $pending())
-                    ->where('starts_at', '>=', $todayStart)
-                    ->where('starts_at', '<', $todayEnd)
-                    ->count(),
-                'upcoming' => (clone $pending())->where('starts_at', '>=', $todayEnd)->count(),
-            ],
+            'counts' => $metrics->followUpCounts($user),
             'rows' => $rows,
         ];
 
