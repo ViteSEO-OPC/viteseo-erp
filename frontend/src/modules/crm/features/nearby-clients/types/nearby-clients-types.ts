@@ -80,6 +80,11 @@ export type WebsiteSummary = {
   status: WebsiteStatus | null;
   audited: boolean;
   auditedAt: string | null;
+  /**
+   * Wider than `audited`: also true once a website SEARCH for a lead with no URL has concluded (or a
+   * BD confirmed there is no site). Such a lead cannot be audited, but it has been checked.
+   */
+  checked: boolean;
   signals: WebsiteSignals | null;
 };
 

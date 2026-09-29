@@ -261,6 +261,10 @@ class NearbyClientResource extends JsonResource
             'status' => $this->website_status, // has-website | needs-redesign | no-website | website-unknown | website-unreachable
             'audited' => $e !== null,
             'auditedAt' => $e?->last_checked_at?->toIso8601String(),
+            // CHECKED is wider than AUDITED: a lead with no URL cannot be audited, but it HAS been
+            // checked once the website search has run to its end (or a BD confirmed there is no site).
+            // Without this such a lead read "not checked yet" forever, however conclusive the search.
+            'checked' => $e !== null || $this->websiteSearchConcluded(),
             // Whether the audited page was confirmed to BELONG to this business, and how strongly.
             // `null` = never evaluated (no audit yet, or a row audited before verification existed) —
             // which `false` would misreport as "checked and rejected".
@@ -285,6 +289,18 @@ class NearbyClientResource extends JsonResource
                 'youtube' => ! empty($e->youtube_url),
             ],
         ];
+    }
+
+    /** The website search reached a conclusion: exhausted, or absence confirmed by a BD. */
+    private function websiteSearchConcluded(): bool
+    {
+        if (! $this->resource->relationLoaded('websiteSearch')) {
+            return $this->website_status === 'no-website';
+        }
+        $search = $this->websiteSearch;
+
+        return $this->website_status === 'no-website'
+            || ($search !== null && ($search->exhausted_at !== null || $search->confirmed_absent_at !== null));
     }
 
     private function initialsFor(string $businessName): string

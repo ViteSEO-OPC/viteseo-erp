@@ -7,6 +7,7 @@ use App\Models\User;
 use App\Modules\Crm\Jobs\EnrichRunLeadsJob;
 use App\Modules\Crm\Models\DiscoveryRun;
 use App\Modules\Crm\Models\Lead;
+use App\Modules\Crm\Models\LeadWebsiteSearch;
 use App\Modules\Crm\Models\NerbyProviderSetting;
 use App\Modules\Crm\Services\Discovery\DiscoveryRunOrchestrator;
 use App\Modules\Crm\Services\Discovery\NerbyServiceIdentity;
@@ -33,6 +34,7 @@ use Tests\TestCase;
  *  - Cells are ordered by what the org does not hold yet.
  *  - The known-places pre-filter is machine-only, org-scoped and answers only what was asked.
  *  - A run that created leads queues Website Intelligence for exactly those leads.
+ *  - A lead whose website search concluded no longer reads "not checked".
  */
 class NationwideVolumeModeTest extends TestCase
 {
@@ -457,6 +459,37 @@ class NationwideVolumeModeTest extends TestCase
         $this->assertSame([$c->id, $d->id], $ids('/api/v1/crm/website-evidence/queue?limit=50'));
         $this->assertSame([$d->id], $ids("/api/v1/crm/website-evidence/queue?limit=50&lead_ids={$a->id},{$d->id}"));
         $this->assertSame([], $ids('/api/v1/crm/website-evidence/queue?limit=50&lead_ids='));
+    }
+
+    // ── "not checked yet" ──────────────────────────────────────────────────────────────────────
+
+    public function test_a_lead_whose_website_search_concluded_is_checked_though_never_audited(): void
+    {
+        $this->tenant(); // the admin must belong to the org the leads are in
+        $admin = $this->admin();
+        [$searched, $absent, $untouched] = CurrentOrg::runAs($this->tenant()->id, function () use ($admin): array {
+            $searched = Lead::factory()->create(['created_by' => $admin->id, 'source' => 'openstreetmap', 'website' => null,
+                'website_status' => 'website-unknown', 'qualified_at' => null, 'business_name' => 'Searched Dental']);
+            LeadWebsiteSearch::query()->create(['lead_id' => $searched->id, 'tiers_run' => ['osm_tag'], 'exhausted_at' => now(), 'last_searched_at' => now()]);
+            $absent = Lead::factory()->create(['created_by' => $admin->id, 'source' => 'openstreetmap', 'website' => null,
+                'website_status' => 'no-website', 'qualified_at' => null, 'business_name' => 'Absent Dental']);
+            $untouched = Lead::factory()->create(['created_by' => $admin->id, 'source' => 'openstreetmap', 'website' => null,
+                'website_status' => 'website-unknown', 'qualified_at' => null, 'business_name' => 'Untouched Dental']);
+
+            return [$searched, $absent, $untouched];
+        });
+
+        // The Nearby board is a BD surface (`role:super_admin|crm_bd`).
+        $bd = User::factory()->create(['status' => 'active']);
+        $bd->assignRole('crm_bd');
+        Sanctum::actingAs($bd);
+        $rows = collect($this->getJson('/api/v1/crm/nearby-clients')->assertOk()->json('data'))->keyBy('id');
+
+        foreach ([[$searched, true], [$absent, true], [$untouched, false]] as [$lead, $checked]) {
+            $website = $rows[(string) $lead->id]['website'];
+            $this->assertFalse($website['audited']);
+            $this->assertSame($checked, $website['checked'], $lead->business_name);
+        }
     }
 
     // ── safety arithmetic and the engine's report ─────────────────────────────────────────────

@@ -84,7 +84,9 @@ function websiteHeadline(website: NonNullable<NearbyClient["website"]>): string 
     return "No website — directory listing only";
   }
   if (!website.audited) {
-    return website.url ? "Website found — not audited yet" : "Website — not checked yet";
+    if (website.url) return "Website found — not audited yet";
+    // A lead with no URL is only "not checked" until its website search has concluded.
+    if (!website.checked) return "Website — not checked yet";
   }
   switch (website.status) {
     case "has-website": return "Website audited";
