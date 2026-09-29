@@ -805,7 +805,10 @@ class DiscoveryRunOrchestrator
                 }
 
                 // The provider filled the page: there is more in this box than it was willing to say.
-                if ($result['discovered'] >= $limit) {
+                // A cell is truncated when the search filled its per-cell limit. In AI-assisted
+                // capacity mode a search may return more than that from the AI lanes, so it is the
+                // OpenStreetMap sweep's own count that decides — the descent is the sweep's.
+                if (($result['baselineDiscovered'] ?? $result['discovered']) >= $limit) {
                     $truncated = true;
                 }
                 $parentForChildren ??= (int) $target->id;
@@ -967,6 +970,35 @@ class DiscoveryRunOrchestrator
      * @param  array{0: float, 1: float, 2: float, 3: float}  $bbox
      * @return array{ok: bool, discovered: int, inserted: int, duplicates: int, rejected: int}
      */
+    /**
+     * AI-ASSISTED CAPACITY MODE: the extra engine flags for one nationwide search, or none.
+     *
+     * Only for the combined `openai` provider, and only when `discovery.nationwide.ai_total_limit`
+     * is configured; every other search — OpenStreetMap, Google Places, Google + AI, or `openai`
+     * with the setting unset — gets none, and so runs with exactly the command it always had.
+     *
+     * The AI lanes search the AREA named on the task, not the cell, so every cell sharing that name
+     * would ask the model the same question and resolve the same answer. They run once per (area,
+     * niche) per run: a later cell with the same pair runs the sweep alone, unless every earlier AI
+     * attempt for it failed, in which case it tries again.
+     *
+     * @return list<string>
+     */
+    private function aiCapacityArgs(DiscoveryRunTarget $target, NerbyProvider $provider, string $metricsPath): array
+    {
+        $total = config('discovery.nationwide.ai_total_limit');
+        if ($provider !== NerbyProvider::OPENAI || $total === null || (int) $total <= (int) $target->limit_per_task) {
+            return [];
+        }
+
+        $args = ['--ai-total-limit', (string) (int) $total];
+        if ($this->runner->aiLanesRanFor($metricsPath, (string) $target->area, (string) $target->category)) {
+            $args[] = '--skip-ai-lanes';
+        }
+
+        return $args;
+    }
+
     private function runBoundedTarget(
         DiscoveryRun $run,
         DiscoveryRunTarget $target,
@@ -979,21 +1011,39 @@ class DiscoveryRunOrchestrator
             'started_at' => now(),
         ])->save();
 
-        $result = $this->withRateLimitRetry($run, fn (): array => $this->runner->run(
-            $target->area,
-            $target->category,
-            (int) $target->limit_per_task,
-            $provider->value,
-            $metricsPath,
-            $bbox,
-            $this->countryOf($run),
-            $this->aiFor($run, $provider),
-            $this->crmToken,
-        ));
+        $capacity = $this->aiCapacityArgs($target, $provider, $metricsPath);
+
+        $result = $this->withRateLimitRetry($run, fn (): array => $capacity === []
+            ? $this->runner->run(
+                $target->area,
+                $target->category,
+                (int) $target->limit_per_task,
+                $provider->value,
+                $metricsPath,
+                $bbox,
+                $this->countryOf($run),
+                $this->aiFor($run, $provider),
+                $this->crmToken,
+            )
+            : $this->runner->runWithEngineFlags(
+                $capacity,
+                $target->area,
+                $target->category,
+                (int) $target->limit_per_task,
+                $provider->value,
+                $metricsPath,
+                $bbox,
+                $this->countryOf($run),
+                $this->aiFor($run, $provider),
+                $this->crmToken,
+            ));
 
         $this->recordTarget($run, $target, $provider, $result);
 
         return [
+            // AI-assisted capacity mode: the sweep's own count, which the descent subdivides on.
+            // Null outside the mode, where the descent reads `discovered` exactly as before.
+            'baselineDiscovered' => $capacity !== [] ? ($result['baselineDiscovered'] ?? null) : null,
             // Did this search actually run? A failed one (rate-limited after its retries, provider
             // error, engine refusal) returned zero businesses without looking — see workQueue().
             'ok' => $result['exitCode'] === 0,

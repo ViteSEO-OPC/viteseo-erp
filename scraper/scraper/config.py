@@ -46,6 +46,14 @@ class Config:
     # must not become a breaking change to the config contract.
     openai_timeout: float = 30.0
 
+    # AI-ASSISTED CAPACITY MODE (the combined `openai` provider only; every other provider ignores
+    # both). `ai_total_limit` is how many businesses one search may return once the AI lanes have
+    # added to the OpenStreetMap sweep, which itself stays capped at the ordinary per-search limit.
+    # None — the default — is the behaviour that predates the mode, exactly. `skip_ai_lanes` runs the
+    # sweep alone, for a search whose area and niche the AI lanes already covered earlier in the run.
+    ai_total_limit: Optional[int] = None
+    skip_ai_lanes: bool = False
+
     # Where the scheduled command's discovery targets come from. Empty (the default) means the
     # version-controlled targets file, which is the behaviour that predates this setting. A URL points
     # at a managed registry instead — see `scraper.target_sources`. Kept as configuration rather than

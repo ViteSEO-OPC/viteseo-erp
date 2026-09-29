@@ -202,6 +202,8 @@ def run_discovery(
     partition: int | None = None,
     bbox: BBox | None = None,
     country: str | None = None,
+    ai_total_limit: int | None = None,
+    skip_ai_lanes: bool = False,
 ) -> int:
     """Discover one (area, category) pair and ingest it. The single discovery path.
 
@@ -217,6 +219,11 @@ def run_discovery(
     # location outside the country cannot become a request rather than merely failing to be stored.
     if country:
         config = Config(**{**config.__dict__, "discovery_country": country})
+
+    # AI-ASSISTED CAPACITY MODE, also carried on the run. Read only by the combined `openai` provider;
+    # absent — the default — the config is exactly the one every run has always been given.
+    if ai_total_limit is not None or skip_ai_lanes:
+        config = Config(**{**config.__dict__, "ai_total_limit": ai_total_limit, "skip_ai_lanes": skip_ai_lanes})
 
     # THE PROVIDER BOUNDARY. This is the single point where the Settings switch enters the runtime;
     # everything downstream (normalize -> ingest -> prospect -> qualification -> scoring) is identical
@@ -460,6 +467,8 @@ def _discover(args: argparse.Namespace) -> int:
         partition=args.partition,
         bbox=parse_bbox(args.bbox),
         country=args.country,
+        ai_total_limit=args.ai_total_limit,
+        skip_ai_lanes=args.skip_ai_lanes,
     )
 
 
@@ -608,6 +617,21 @@ def main(argv: list[str] | None = None) -> int:
             "an area is too large to answer in one provider request. The limit is DIVIDED across the "
             "tasks, never multiplied."
         ),
+    )
+    d.add_argument(
+        "--ai-total-limit",
+        type=int,
+        default=None,
+        help=(
+            "AI-assisted (--provider openai) only: let the AI lanes add businesses until the search "
+            "returns up to this many. The OpenStreetMap sweep stays capped at --limit. Other providers "
+            "ignore it."
+        ),
+    )
+    d.add_argument(
+        "--skip-ai-lanes",
+        action="store_true",
+        help="AI-assisted only: run the OpenStreetMap sweep alone (the run already covered this area and niche).",
     )
     d.set_defaults(func=_discover)
 

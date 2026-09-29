@@ -57,6 +57,46 @@ class ScraperProcessRunner
         bool $aiStrategy = false,
         ?string $crmToken = null,
     ): array {
+        return $this->execute($area, $category, $limit, $provider, $metricsPath, $bbox, $country, $aiStrategy, $crmToken, []);
+    }
+
+    /**
+     * {@see run()}, plus engine flags appended to the command line. Used only by AI-assisted
+     * capacity mode ({@see DiscoveryRunOrchestrator}); every other search goes through `run()` and
+     * keeps exactly the command it always had.
+     *
+     * @param  list<string>  $engineFlags
+     */
+    public function runWithEngineFlags(
+        array $engineFlags,
+        string $area,
+        string $category,
+        int $limit,
+        string $provider,
+        string $metricsPath,
+        ?array $bbox = null,
+        ?string $country = null,
+        bool $aiStrategy = false,
+        ?string $crmToken = null,
+    ): array {
+        return $this->execute($area, $category, $limit, $provider, $metricsPath, $bbox, $country, $aiStrategy, $crmToken, $engineFlags);
+    }
+
+    /**
+     * @param  list<string>  $extraArgs
+     */
+    private function execute(
+        string $area,
+        string $category,
+        int $limit,
+        string $provider,
+        string $metricsPath,
+        ?array $bbox,
+        ?string $country,
+        bool $aiStrategy,
+        ?string $crmToken,
+        array $extraArgs,
+    ): array {
         $before = $this->countLines($metricsPath);
 
         try {
@@ -87,6 +127,9 @@ class ScraperProcessRunner
                     // The engine itself refuses `--commit` against a non-loopback CRM unless an
                     // operator has explicitly opted in — that guard is left switched on.
                     '--commit',
+                    // AI-assisted capacity flags ({@see DiscoveryRunOrchestrator}); empty for every
+                    // other search, so its command line is exactly the one it always was.
+                    ...$extraArgs,
                 ]);
 
             $exitCode = $result->exitCode() ?? 1;
@@ -131,7 +174,35 @@ class ScraperProcessRunner
             'retryAfter' => isset($record['retry_after']) && is_numeric($record['retry_after'])
                 ? max(0, (int) $record['retry_after'])
                 : null,
+            // What the OpenStreetMap sweep alone returned, when the engine ran more than one lane.
+            // AI-assisted capacity mode subdivides on this, so the sweep's own coverage decides
+            // the descent exactly as it would without the extra AI capacity.
+            'baselineDiscovered' => isset($record['baseline_discovered']) ? (int) $record['baseline_discovered'] : null,
         ];
+    }
+
+    /**
+     * Whether an earlier search in this run already ran the AI lanes to completion for this area and
+     * niche — read from the run's own metrics file, which every search appends to and which survives
+     * continuation slices. Only a COMPLETED AI attempt counts: a failed, timed-out or skipped one is
+     * retried by the next search that shares the area and niche.
+     */
+    public function aiLanesRanFor(string $metricsPath, string $area, string $category): bool
+    {
+        if (! is_file($metricsPath)) {
+            return false;
+        }
+        foreach (@file($metricsPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $line) {
+            $record = json_decode((string) $line, true);
+            if (is_array($record)
+                && ($record['area'] ?? null) === $area
+                && ($record['category'] ?? null) === $category
+                && ($record['ai_execution_status'] ?? null) === 'ok') {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -408,6 +479,7 @@ class ScraperProcessRunner
             'strategyApplied' => null,
             'strategyStatus' => null,
             'retryAfter' => null,
+            'baselineDiscovered' => null,
         ];
     }
 

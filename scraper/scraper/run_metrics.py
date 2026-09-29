@@ -163,6 +163,12 @@ def build_record(
         record["expansion_net_new"] = int(stats.get("expansion_net_new", 0))
         record["expansion_by_selector"] = stats.get("expansion_by_selector") or {}
 
+        # AI-ASSISTED CAPACITY MODE: the search's AI capacity, how many returned AI candidates had to
+        # be geocoded, and every outbound request it made by service. Absent outside the mode.
+        for key in ("ai_total_limit", "ai_geocoded", "calls"):
+            if key in stats:
+                record[key] = stats[key]
+
     # PROVENANCE-ONLY AI FINDINGS — the AI-lane businesses the per-task limit dropped, sent beside the
     # batch so an EXISTING lead can still be recorded as found by AI. Absent unless the provider can
     # produce them (the composite), so every other record keeps its exact shape. `recorded` and

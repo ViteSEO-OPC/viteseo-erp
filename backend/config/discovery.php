@@ -427,6 +427,21 @@ return [
         'limit_per_task' => (int) env('DISCOVERY_NATIONWIDE_LIMIT_PER_TASK', 20),
 
         /*
+         * AI-ASSISTED CAPACITY — the combined `openai` provider only, and OFF unless set.
+         *
+         * How many businesses one nationwide search may return once the AI lanes have added to the
+         * OpenStreetMap sweep. The sweep itself stays capped at `limit_per_task`, and a cell is
+         * still subdivided only when the SWEEP fills it, so OpenStreetMap coverage is exactly what it
+         * is without this. With it set, the AI lanes also run once per (area, niche) per run instead
+         * of in every cell that shares the area's name, and their candidates are geocoded only when
+         * returned. Unset (null) — the default — leaves every run exactly as it was. OpenStreetMap
+         * and Google Places runs never read it.
+         */
+        'ai_total_limit' => env('DISCOVERY_NATIONWIDE_AI_TOTAL_LIMIT') !== null && env('DISCOVERY_NATIONWIDE_AI_TOTAL_LIMIT') !== ''
+            ? (int) env('DISCOVERY_NATIONWIDE_AI_TOTAL_LIMIT')
+            : null,
+
+        /*
          * ORDER THE TILING BY WHAT HAS ALREADY BEEN SEARCHED, instead of by latitude.
          *
          * The cells are emitted from the southern edge of the national extent upward, and the island

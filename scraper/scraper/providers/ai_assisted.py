@@ -57,6 +57,11 @@ LANE_AI = "openai"
 #: The AI lanes were not attempted because the baseline already satisfied the caller's limit.
 SKIPPED_BASELINE_FULL = "baseline_satisfied_limit"
 
+#: The AI lanes were not attempted because an earlier search in the same run already ran them for this
+#: area and niche. The AI lanes search the AREA, not the cell, so a repeat would only re-ask the same
+#: question and re-resolve the same answer. Capacity mode only.
+SKIPPED_ALREADY_COVERED = "ai_lanes_already_ran_for_area"
+
 #: The AI leg predates tag expansion and does not offer the capability. Not a failure.
 EXPANSION_UNSUPPORTED = "unsupported"
 
@@ -86,10 +91,32 @@ class AiAssistedDiscoveryProvider(DiscoveryProvider):
 
     name = "openai"
 
-    def __init__(self, *, osm: OpenStreetMapProvider, ai: DiscoveryProvider) -> None:
+    def __init__(
+        self,
+        *,
+        osm: OpenStreetMapProvider,
+        ai: DiscoveryProvider,
+        lane_osm: OpenStreetMapProvider | None = None,
+        total_limit: int | None = None,
+        skip_ai_lanes: bool = False,
+        call_counter: Any = None,
+    ) -> None:
         self._osm = osm
         self._ai = ai
         self._stats: dict[str, Any] = {}
+        # AI-ASSISTED CAPACITY MODE — every one of these is off by default, and off means the
+        # composite behaves exactly as it did before the mode existed.
+        #   `total_limit`   how many businesses a search may return once the AI lanes have added to
+        #                   the sweep; the sweep itself stays capped at the caller's `limit`.
+        #   `lane_osm`      the AI lanes' own OSM client, built without per-business geocoding: their
+        #                   candidates are geocoded after the merge, and only the ones returned (R1).
+        #   `skip_ai_lanes` the sweep alone, because the run already covered this area and niche (R3).
+        self._lane_osm = lane_osm or osm
+        self._defer_lane_geocoding = lane_osm is not None and lane_osm is not osm
+        self._total_limit = total_limit
+        self._skip_ai_lanes = skip_ai_lanes
+        self._counter = call_counter
+        self._calls_before: dict[str, int] = {}
         # AI-lane findings the last `discover()` had to drop at the caller's limit. See
         # `provenance_only()`.
         self._provenance_only: list[RawBusiness] = []
@@ -108,6 +135,10 @@ class AiAssistedDiscoveryProvider(DiscoveryProvider):
         bounded = {"bbox": bbox} if bbox is not None else {}
         # Per search: a previous call's dropped findings must never be reported against this one.
         self._provenance_only = []
+        # The most this search may return. Equal to `limit` unless capacity mode raised it.
+        total = max(limit, self._total_limit) if self._total_limit else limit
+        if self._counter is not None:
+            self._calls_before = self._counter.snapshot()
 
         # THE BASELINE, UNCHANGED AND UNCONDITIONAL. The exact call a plain OpenStreetMap run makes,
         # against the same untouched `discover()`. Everything after this point can only add.
@@ -118,7 +149,7 @@ class AiAssistedDiscoveryProvider(DiscoveryProvider):
 
         merged: dict[str, RawBusiness] = {b.provider_id: b for b in baseline}
 
-        if len(merged) >= limit:
+        if len(merged) >= total:
             print(
                 f"  baseline returned {len(merged)}/{limit} — the AI lanes have no room to add, "
                 f"skipping both model calls.",
@@ -132,18 +163,33 @@ class AiAssistedDiscoveryProvider(DiscoveryProvider):
                 net_new=0,
                 skipped=SKIPPED_BASELINE_FULL,
             )
-            return list(merged.values())[:limit]
+            return self._capacity_stats(list(merged.values())[:limit], total, geocoded=0)
+
+        if self._skip_ai_lanes:
+            print(
+                "  the AI lanes already ran for this area and niche in this run — sweep only.",
+                file=sys.stderr,
+            )
+            self._stats = self._compose_stats(
+                baseline_count=len(baseline),
+                expansion=self._skipped_expansion(SKIPPED_ALREADY_COVERED),
+                ai_stats={},
+                duplicates=0,
+                net_new=0,
+                skipped=SKIPPED_ALREADY_COVERED,
+            )
+            return self._capacity_stats(list(merged.values())[:limit], total, geocoded=0)
 
         # LANE 2 — TAG EXPANSION. Merges into `merged` in place and reports what it contributed.
         # Runs before the name lane so a business reachable by BOTH is attributed to the cheaper,
         # fully deterministic route.
-        expansion = self._expand_lane(area=area, category=category, limit=limit, merged=merged)
+        expansion = self._expand_lane(area=area, category=category, limit=total, merged=merged)
 
         # LANE 3 — NAME PROPOSALS, WRAPPED. Asked for the full limit rather than the shortfall: some
         # of what it resolves will duplicate what is already held, and truncating it to the gap first
         # would throw away the resolutions that were the net-new ones.
         try:
-            extra = self._ai.discover(area=area, category=category, limit=limit, **bounded)
+            extra = self._ai.discover(area=area, category=category, limit=total, **bounded)
             ai_stats = self._ai_stats()
         except Exception as exc:  # noqa: BLE001 - the baseline must survive anything the AI lanes do.
             print(
@@ -158,7 +204,7 @@ class AiAssistedDiscoveryProvider(DiscoveryProvider):
                 duplicates=0,
                 net_new=0,
             )
-            return self._within_limit(merged, limit)
+            return self._within_limit(merged, total)
 
         duplicates = 0
         net_new = 0
@@ -196,7 +242,7 @@ class AiAssistedDiscoveryProvider(DiscoveryProvider):
 
         # Baseline records were inserted first, so truncation spends the caller's limit on the
         # deterministic lane before the expanded ones.
-        return self._within_limit(merged, limit)
+        return self._within_limit(merged, total)
 
     def provenance_only(self) -> list[RawBusiness]:
         """AI-lane findings the last search found but could not return, because of the limit.
@@ -271,7 +317,7 @@ class AiAssistedDiscoveryProvider(DiscoveryProvider):
             return stats
 
         try:
-            sweep = self._osm.find_by_selectors(outcome.selectors, area=area, limit=limit)
+            sweep = self._lane_osm.find_by_selectors(outcome.selectors, area=area, limit=limit)
         except Exception as exc:  # noqa: BLE001 - an Overpass failure here must not lose the baseline.
             stats["expansion_status"] = EXECUTION_ERRORED
             stats["expansion_error"] = type(exc).__name__
@@ -327,6 +373,9 @@ class AiAssistedDiscoveryProvider(DiscoveryProvider):
         # The AI leg owns the shared OSM client and closes it; closing here as well would be the
         # kind of duplicate teardown that only shows up under a provider that does not tolerate it.
         self._ai.close()
+        # Capacity mode gives the sweep its own client, which nothing else owns.
+        if self._defer_lane_geocoding:
+            self._osm.close()
 
     # -- internals ---------------------------------------------------------------------------
 
@@ -334,7 +383,40 @@ class AiAssistedDiscoveryProvider(DiscoveryProvider):
         """The result — exactly ``list(merged.values())[:limit]`` — and, aside, the AI findings past it."""
         ordered = list(merged.values())
         self._provenance_only = [b for b in ordered[limit:] if b.discovered_by == LANE_AI]
-        return ordered[:limit]
+        kept = ordered[:limit]
+        geocoded = self._geocode_kept_ai_candidates(kept) if self._defer_lane_geocoding else 0
+        return self._capacity_stats(kept, limit, geocoded=geocoded)
+
+    def _geocode_kept_ai_candidates(self, kept: list[RawBusiness]) -> int:
+        """R1: fill the administrative area of the AI candidates this search RETURNS, and only those.
+
+        The AI lanes' client skipped this per business, so a candidate that was a duplicate of the
+        sweep, fell past the limit, or was one of the dozens of chain branches the name lane matched
+        and then discarded never cost a Nominatim call. The condition and the call are exactly the
+        sweep's own (the sweep's client, its pacing and its gate), so a returned candidate carries the
+        same region, province and city it always would have.
+        """
+        geocoded = 0
+        for business in kept:
+            if business.discovered_by != LANE_AI or business.latitude is None or business.longitude is None:
+                continue
+            if business.region and business.province and business.city:
+                continue
+            self._osm._fill_admin_area(business)  # noqa: SLF001 - the sweep's own reverse geocoder.
+            geocoded += 1
+        return geocoded
+
+    def _capacity_stats(self, result: list[RawBusiness], total: int, *, geocoded: int) -> list[RawBusiness]:
+        """Capacity mode only: add what this search cost to its stats. A no-op otherwise, so the stats of
+        every ordinary search keep their exact shape."""
+        if self._total_limit is None and self._counter is None:
+            return result
+        self._stats["ai_total_limit"] = total
+        self._stats["ai_geocoded"] = geocoded
+        if self._counter is not None:
+            now = self._counter.snapshot()
+            self._stats["calls"] = {k: now[k] - self._calls_before.get(k, 0) for k in now}
+        return result
 
     def _ai_stats(self) -> dict[str, Any]:
         stats_fn = getattr(self._ai, "stats", None)
