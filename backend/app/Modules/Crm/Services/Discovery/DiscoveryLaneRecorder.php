@@ -27,29 +27,31 @@ class DiscoveryLaneRecorder
 
     /**
      * @param  list<string>  $placeIds  places the AI lane found in this ingest (each at most once)
+     * @return list<string> the place ids that matched an eligible lead and were recorded
      */
-    public function recordAi(array $placeIds, ?int $runId): void
+    public function recordAi(array $placeIds, ?int $runId): array
     {
         $placeIds = array_values(array_unique(array_filter($placeIds, static fn ($p) => is_string($p) && $p !== '')));
         if ($placeIds === []) {
-            return;
+            return [];
         }
 
         $orgId = CurrentOrg::id();
         if ($orgId === null) {
-            return;
+            return [];
         }
 
         // Matched by place_id only — the provider's stable key. An email-only match is deliberately
         // not recorded: it is not proof the AI lane found THIS business.
-        $leads = Lead::query()
+        $matched = Lead::query()
             ->whereIn('place_id', $placeIds)
             ->where(fn ($q) => $q->whereNull('source')->orWhere('source', '!=', NerbyProvider::GOOGLE_PLACES->value))
-            ->pluck('id')
+            ->pluck('place_id', 'id')
             ->all();
-        if ($leads === []) {
-            return;
+        if ($matched === []) {
+            return [];
         }
+        $leads = array_keys($matched);
 
         $now = now();
         DB::table('crm_lead_discovery_lanes')->upsert(
@@ -73,5 +75,7 @@ class DiscoveryLaneRecorder
                 'times_seen' => DB::raw('crm_lead_discovery_lanes.times_seen + 1'),
             ],
         );
+
+        return array_values(array_map('strval', $matched));
     }
 }

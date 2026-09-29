@@ -74,6 +74,12 @@ class IngestDiscoveredLeadsRequest extends FormRequest
             // (`WEBSITE_MAX_LENGTH`) and keeps the business, so an oversized URL costs its own field
             // and nothing else. Body size is bounded by the 500-business cap and PHP's own limits.
             'businesses.*.website' => ['nullable', 'string'],
+            // PROVENANCE-ONLY AI FINDINGS: AI-lane businesses the engine's per-search limit dropped,
+            // which may only annotate a lead the CRM ALREADY holds (see LeadImportService). Only the
+            // container is validated here, for the same reason `website` is lenient: a rule on an
+            // entry would 422 the whole request and lose the ordinary batch with it. Each entry is
+            // checked — OSM identity, lane, coordinates — and a bad one dropped, in the service.
+            'provenance_only' => ['sometimes', 'array'],
         ];
     }
 }

@@ -249,6 +249,71 @@ class LeadDiscoveryLanesTest extends TestCase
 
     // ── the Nearby board ─────────────────────────────────────────────────────────────────────
 
+    public function test_an_existing_non_osm_non_google_lead_found_by_ai_gets_the_lane(): void
+    {
+        // Any primary source other than Google Places is eligible — here an older `nearby` lead.
+        $lead = $this->existingOsmLead('node/30', ['source' => 'nearby']);
+        $before = DB::table('crm_leads')->where('id', $lead->id)->first();
+        $activities = DB::table('crm_activities')->count();
+        $leads = DB::table('crm_leads')->count();
+
+        $this->ingestDiscovered(['businesses' => [$this->row('node/30', 'openai')]])
+            ->assertOk()->assertJsonPath('data.summary.duplicates', 1);
+
+        $this->assertEquals($before, DB::table('crm_leads')->where('id', $lead->id)->first(), 'source nearby, owner, status, score… untouched');
+        $this->assertSame($activities, DB::table('crm_activities')->count());
+        $this->assertSame($leads, DB::table('crm_leads')->count());
+        $this->assertCount(1, $this->lanes());
+        $this->assertSame($lead->id, (int) $this->lanes()[0]->lead_id);
+        $this->assertSame('openai', $this->lanes()[0]->lane);
+    }
+
+    /**
+     * RUN 112, IN MINIATURE. An AI-assisted run's batch is mostly the embedded OpenStreetMap sweep:
+     * those rows are OpenStreetMap discoveries of leads the CRM already holds, and they stay
+     * OpenStreetMap-only. Only what an AI lane actually found — its own rows, and a sweep row the AI
+     * lane also found in the same search — is AI provenance.
+     */
+    public function test_a_run_112_shaped_batch_gives_ai_provenance_only_to_actual_ai_lane_findings(): void
+    {
+        foreach (['node/40', 'node/41', 'node/42', 'node/43', 'node/44'] as $id) {
+            $this->existingOsmLead($id);
+        }
+        $aiLead = $this->existingOsmLead('node/45', ['source' => 'openai']);
+        $osmFoundByAi = $this->existingOsmLead('node/46');
+        $google = Lead::factory()->create(['place_id' => 'places/g-112', 'source' => 'google_places', 'assigned_to' => null, 'qualified_at' => null]);
+        $sources = DB::table('crm_leads')->pluck('source', 'id')->all();
+        $leads = DB::table('crm_leads')->count();
+
+        $this->ingestDiscovered(['businesses' => [
+            // The baseline sweep re-finding five existing OSM leads — "already known", not AI.
+            ...array_map(fn ($id) => $this->row($id, 'openstreetmap'), ['node/40', 'node/41', 'node/42', 'node/43', 'node/44']),
+            // The AI name lane re-finding an existing AI lead and an existing OSM lead.
+            $this->row('node/45', 'openai'),
+            $this->row('node/46', 'openai'),
+            // A NEW business the sweep and the AI lane both found in this search.
+            $this->row('node/48', 'openstreetmap', ['discovery_also_found_by' => ['openai']]),
+            // An AI finding outside the Philippines.
+            $this->row('node/49', 'openai', ['latitude' => 35.6762, 'longitude' => 139.6503]),
+        ]])->assertOk()
+            ->assertJsonPath('data.summary.duplicates', 7)
+            ->assertJsonPath('data.summary.valid', 1)
+            ->assertJsonPath('data.summary.rejected', 1);
+
+        $laneLeads = collect($this->lanes())->pluck('lead_id')->map(fn ($id) => (int) $id)->sort()->values()->all();
+        $expected = collect([$aiLead->id, $osmFoundByAi->id, $this->lead('node/48')->id])->sort()->values()->all();
+        $this->assertSame($expected, $laneLeads, 'only the AI lane\'s findings carry the AI lane');
+        foreach (['node/40', 'node/41', 'node/42', 'node/43', 'node/44'] as $id) {
+            $this->assertSame(0, DB::table('crm_lead_discovery_lanes')->where('lead_id', $this->lead($id)->id)->count(), "{$id} stays OpenStreetMap-only");
+        }
+        $this->assertSame(0, DB::table('crm_lead_discovery_lanes')->where('lead_id', $google->id)->count());
+        $this->assertSame($leads + 1, DB::table('crm_leads')->count(), 'one new lead (node/48), no duplicates');
+        foreach ($sources as $id => $source) {
+            $this->assertSame($source, DB::table('crm_leads')->where('id', $id)->value('source'), 'primary source unchanged');
+        }
+        $this->assertSame('openstreetmap', $this->lead('node/48')->source);
+    }
+
     public function test_nearby_reports_every_lane_that_found_a_lead(): void
     {
         $this->ingestDiscovered(['businesses' => [

@@ -90,6 +90,9 @@ class AiAssistedDiscoveryProvider(DiscoveryProvider):
         self._osm = osm
         self._ai = ai
         self._stats: dict[str, Any] = {}
+        # AI-lane findings the last `discover()` had to drop at the caller's limit. See
+        # `provenance_only()`.
+        self._provenance_only: list[RawBusiness] = []
 
     def discover(
         self,
@@ -103,6 +106,8 @@ class AiAssistedDiscoveryProvider(DiscoveryProvider):
         # optional: a collaborator written before the partitioning contract — a third-party provider,
         # or a test double — must still be callable exactly as it always was.
         bounded = {"bbox": bbox} if bbox is not None else {}
+        # Per search: a previous call's dropped findings must never be reported against this one.
+        self._provenance_only = []
 
         # THE BASELINE, UNCHANGED AND UNCONDITIONAL. The exact call a plain OpenStreetMap run makes,
         # against the same untouched `discover()`. Everything after this point can only add.
@@ -153,7 +158,7 @@ class AiAssistedDiscoveryProvider(DiscoveryProvider):
                 duplicates=0,
                 net_new=0,
             )
-            return list(merged.values())[:limit]
+            return self._within_limit(merged, limit)
 
         duplicates = 0
         net_new = 0
@@ -191,7 +196,18 @@ class AiAssistedDiscoveryProvider(DiscoveryProvider):
 
         # Baseline records were inserted first, so truncation spends the caller's limit on the
         # deterministic lane before the expanded ones.
-        return list(merged.values())[:limit]
+        return self._within_limit(merged, limit)
+
+    def provenance_only(self) -> list[RawBusiness]:
+        """AI-lane findings the last search found but could not return, because of the limit.
+
+        Read optionally by the CLI, like ``stats()``. These are NOT results: the result is exactly
+        what ``discover()`` returned, unchanged. They are the part of the AI lanes' work the limit
+        would otherwise erase — a business the AI lane genuinely found, which the CRM may already
+        hold as a lead and can then record as found by AI. Only AI-lane records are ever here; the
+        baseline lane is capped at ``limit`` by its own sweep, so it is never truncated.
+        """
+        return list(self._provenance_only)
 
     # -- lane 2: AI-expanded tag sweep ---------------------------------------------------------
 
@@ -313,6 +329,12 @@ class AiAssistedDiscoveryProvider(DiscoveryProvider):
         self._ai.close()
 
     # -- internals ---------------------------------------------------------------------------
+
+    def _within_limit(self, merged: dict[str, RawBusiness], limit: int) -> list[RawBusiness]:
+        """The result — exactly ``list(merged.values())[:limit]`` — and, aside, the AI findings past it."""
+        ordered = list(merged.values())
+        self._provenance_only = [b for b in ordered[limit:] if b.discovered_by == LANE_AI]
+        return ordered[:limit]
 
     def _ai_stats(self) -> dict[str, Any]:
         stats_fn = getattr(self._ai, "stats", None)

@@ -145,3 +145,25 @@ class NormalizedBusiness(BaseModel):
     def to_payload(self) -> dict:
         """Ingest payload — drop ``None`` fields so the CRM applies its column defaults."""
         return self.model_dump(exclude_none=True)
+
+
+class ProvenanceOnlyRecord(BaseModel):
+    """"An AI lane found this business" — and nothing else. Never a lead, never business data.
+
+    The composite provider returns at most ``limit`` businesses per search, baseline first, so an AI
+    finding past the limit is dropped from the result. When that business is ALREADY a CRM lead, the
+    AI lane's discovery of it is still true, and this record is how it reaches the CRM: sent beside
+    the ordinary batch (``provenance_only``), it can only annotate an existing lead's discovery lanes.
+
+    Deliberately four fields. With no name, phone, email, website or category it cannot be mistaken
+    for — or turned into — a business record; the coordinates exist only so the CRM can apply its
+    national boundary to it exactly as it does to every discovered business.
+    """
+
+    place_id: str
+    lane: str
+    latitude: float
+    longitude: float
+
+    def to_payload(self) -> dict:
+        return self.model_dump()

@@ -35,7 +35,7 @@ export type NearbyFilters = {
   status: string; // "" = all
   /** Derived prospecting priority label ("High" | "Medium" | "Low"); "" = all. */
   priority: string;
-  /** Discovery lane label ("OpenStreetMap" | "AI-assisted"); "" = all sources. */
+  /** Discovery lane label ("OpenStreetMap" | "AI-assisted" | …); "" = all sources. */
   foundBy: string;
 };
 
@@ -281,7 +281,7 @@ function formatPriority(priority: string): string {
 // decides, not a set derived from whatever the pool currently contains.
 const FOUND_BY_ORDER = [
   "OpenStreetMap",
-  "AI-assisted · OpenStreetMap",
+  "AI-assisted",
   "Google Places",
   "AI-assisted · Google Places",
 ] as const;
@@ -291,10 +291,13 @@ const FOUND_BY_ORDER = [
 // deterministic sweep with a lead it never found. "Unknown" is deliberately absent from
 // FOUND_BY_ORDER, so such a row is never selectable by lane but still appears under "All sources".
 //
-// TWO DIMENSIONS IN ONE LABEL, and only where the record carries both. The AI lane's businesses are
-// OpenStreetMap nodes reached through AI-proposed searches, so "AI-assisted" alone read as though AI
-// were itself the factual source; naming the source keeps this answering "where did the business
-// come from".
+// "AI-assisted" (PO decision 2026-09-25). The `ai-assisted` lane is every business the OpenStreetMap
+// baseline sweep did NOT return and an AI lane did — an AI-expanded tag sweep OR an AI-proposed name —
+// each one verified against a real OSM element before it can exist. Measured on the live pool: of 21
+// such leads, 6 came from tag expansion and 15 from name proposal, so a names-only label would have
+// mislabelled a quarter of them. The factual source stays OpenStreetMap; "OpenStreetMap" (baseline
+// sweep only) and "AI-assisted" are distinct, exact-match filter values that can never select each
+// other's rows. The underlying `found_by` value is untouched — this is the label only.
 //
 // "AI-assisted · Google Places" IS EARNED, NEVER INFERRED. It is shown only for a lead the server
 // resolved to the `ai-assisted-google-places` lane, which requires `crm_leads.discovery_ai_assisted`
@@ -312,7 +315,7 @@ const FOUND_BY_ORDER = [
 // that claims less.
 const FOUND_BY_LABELS: Record<string, string> = {
   openstreetmap: "OpenStreetMap",
-  "ai-assisted": "AI-assisted · OpenStreetMap",
+  "ai-assisted": "AI-assisted",
   "google-places": "Google Places",
   "ai-assisted-google-places": "AI-assisted · Google Places",
 };

@@ -849,6 +849,12 @@ class LeadController extends Controller
             $token !== null && str_starts_with((string) $token->name, 'nerby:run:')
                 ? DiscoveryRun::query()->where('uuid', substr((string) $token->name, strlen('nerby:run:')))->value('id')
                 : null,
+            // Provenance-only AI findings are accepted from a discovery RUN's own token only — the
+            // process that actually ran the AI lane. Any other NERBY caller's (an enrichment tick's)
+            // claim is ignored, so nothing else can make a lead appear AI-discovered.
+            $token !== null && str_starts_with((string) $token->name, 'nerby:run:')
+                ? (array) $request->validated('provenance_only', [])
+                : [],
         );
 
         return response()->json(['data' => $result]);

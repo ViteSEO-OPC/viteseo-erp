@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 from scraper import run_metrics
 from scraper.config import Config
 from scraper.ingest import CrmIngestClient
-from scraper.normalizer import normalize
+from scraper.normalizer import normalize, normalize_provenance
 from scraper.partition import (
     BBox,
     DiscoveryTask,
@@ -32,6 +32,7 @@ from scraper.partition import (
     plan_tasks,
 )
 from scraper.providers import build_openstreetmap, config_for, get_provider, resolve_provider_choice
+from scraper.providers.ai_assisted import LANE_AI
 from scraper.target_sources import resolve_source
 from scraper.targets import (
     DEFAULT_TARGETS_FILE,
@@ -138,7 +139,7 @@ def _plan_discovery_tasks(
         geocoder.close()
 
 
-def _run_tasks(provider, tasks: list[DiscoveryTask], limit: int):
+def _run_tasks(provider, tasks: list[DiscoveryTask], limit: int, provenance: list | None = None):
     """Execute the planned tasks and merge their results on the provider's own identity key.
 
     ONE TASK IS THE UNTOUCHED PATH. It calls the provider exactly as this function's caller always
@@ -158,9 +159,15 @@ def _run_tasks(provider, tasks: list[DiscoveryTask], limit: int):
 
     def run(task: DiscoveryTask):
         bounded = {"bbox": task.bbox} if task.bbox is not None else {}
-        return provider.discover(
+        found = provider.discover(
             area=task.area, category=task.category, limit=task.limit, **bounded
         )
+        # AI findings this task's own limit dropped (a composite provider only). Read per task,
+        # because the provider resets them on every search. Collected aside; `found` is untouched.
+        dropped = getattr(provider, "provenance_only", None)
+        if provenance is not None and callable(dropped):
+            provenance.extend(dropped())
+        return found
 
     if len(tasks) == 1:
         return run(tasks[0])
@@ -237,7 +244,8 @@ def run_discovery(
             f"({'sub-areas' if tasks[0].label == 'sub-area' else 'grid cells'}).",
             file=sys.stderr,
         )
-    raw = _run_tasks(provider, tasks, limit)
+    provenance_raw: list = []
+    raw = _run_tasks(provider, tasks, limit, provenance_raw)
 
     # Optional per-provider numbers (proposals, resolution rate, token usage). Read the same way
     # `close` is — a provider that has nothing to add simply does not implement it.
@@ -250,6 +258,19 @@ def run_discovery(
 
     businesses = [normalize(r, provider.name) for r in raw]
     print(f"Discovered {len(businesses)} business(es).", file=sys.stderr)
+
+    # PROVENANCE-ONLY: AI-lane findings the per-task limit dropped. Not results — `businesses` above
+    # is exactly what it was — and never able to create a lead: the CRM only records them against a
+    # lead it already holds. Deduplicated on the OSM key; one that is also a kept business is still
+    # sent, and the CRM records the lane once. Absent for any provider without the capability.
+    provenance_capable = callable(getattr(provider, "provenance_only", None))
+    provenance: list = []
+    seen_provenance: set[str] = set()
+    for r in provenance_raw:
+        record = normalize_provenance(r, LANE_AI)
+        if record is not None and record.place_id not in seen_provenance:
+            seen_provenance.add(record.place_id)
+            provenance.append(record)
 
     def record_run(ingest_summary: dict | None = None, imported: int = 0) -> None:
         """Log this run's funnel. Called on EVERY path that finished discovery, including the ones
@@ -270,6 +291,7 @@ def run_discovery(
                 provider_stats=provider_stats,
                 started_at=started_at.isoformat(),
                 choice=choice,
+                provenance_sent=len(provenance) if provenance_capable else None,
             )
         )
 
@@ -314,7 +336,9 @@ def run_discovery(
         base_url=config.crm_base_url, token=config.crm_token, user_agent=config.user_agent
     )
     try:
-        result = client.ingest(businesses, dry_run=not commit)
+        # Passed only when there is some, so an ordinary run makes exactly the call it always made.
+        extra = {"provenance_only": provenance} if provenance else {}
+        result = client.ingest(businesses, dry_run=not commit, **extra)
     finally:
         client.close()
 

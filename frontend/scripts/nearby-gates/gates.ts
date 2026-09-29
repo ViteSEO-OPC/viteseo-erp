@@ -807,7 +807,10 @@ const aiRun = (status: DiscoveryRun["status"], ai: DiscoveryRun["ai"], isTermina
 
   // The factual row reads the PROVIDER, never the engine name.
   if (!dialog.includes("{providerLabel(provider.effective)}")) bad.push("the run's factual row no longer reads provider.effective");
-  if (!/openai: "AI-assisted · OpenStreetMap"/.test(types)) bad.push("the openai lane label no longer names its factual source");
+  // The lane label is "AI-assisted" (PO decision 2026-09-25): it covers both AI routes — expanded tag
+  // sweeps and proposed names — and a names-only label mislabelled the tag-expansion leads.
+  if (!/openai: "AI-assisted"/.test(types)) bad.push("the openai lane label is not 'AI-assisted'");
+  if (/openai: "[^"]*OpenStreetMap"/.test(types)) bad.push("the openai lane label names OSM again, colliding with the OSM lane");
 
   // The engine name is one constant, not a word retyped per surface.
   if (!dialog.includes("AI_ENGINE_NAME")) bad.push("the dialog hard-codes the engine name instead of using AI_ENGINE_NAME");
@@ -815,7 +818,7 @@ const aiRun = (status: DiscoveryRun["status"], ai: DiscoveryRun["ai"], isTermina
   // Naming the engine must not have moved provenance: no surface may map a lead source to OpenAI.
   if (/google_places:\s*"[^"]*(OpenAI|AI-assisted)/.test(types)) bad.push("Google Places is labelled as an AI source");
 
-  report("AA the AI engine and the factual source are named separately", 7 - bad.length, 7, bad);
+  report("AA the AI engine and the factual source are named separately", 8 - bad.length, 8, bad);
 }
 
 // ── AB  the board names provenance, and never invents it ─────────────────────────────────────
@@ -837,8 +840,23 @@ const aiRun = (status: DiscoveryRun["status"], ai: DiscoveryRun["ai"], isTermina
   );
 
   // ONE VOCABULARY. The board and the run panel must not name the same lane two ways.
-  if (!/"ai-assisted": "AI-assisted · OpenStreetMap"/.test(hook)) bad.push("the board no longer names the AI lane's factual source");
-  if (/"ai-assisted": "AI-assisted",/.test(hook)) bad.push("the bare 'AI-assisted' label is back on the board");
+  if (!/"ai-assisted": "AI-assisted",/.test(hook)) bad.push("the board does not label the AI lane 'AI-assisted'");
+  if (!/"ai-assisted": "AI-assisted",/.test(card)) bad.push("the card and the board name the AI lane differently");
+  if (/AI-proposed names/.test(hook + card)) bad.push("the narrower names-only label is back on the board");
+  // NEVER CROSS-POPULATE: the lane filter matches labels exactly, so every lane needs its own label.
+  const order = hook.match(/const FOUND_BY_ORDER = \[([\s\S]*?)\] as const/)?.[1] ?? "";
+  const labels = [...order.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+  if (labels.length !== new Set(labels).size) bad.push("two Found By lanes share a label, so one filter would select both");
+  const want = ["OpenStreetMap", "AI-assisted", "Google Places", "AI-assisted · Google Places"];
+  if (JSON.stringify(labels) !== JSON.stringify(want)) bad.push(`the Found By options are not exactly ${want.join(" / ")}`);
+  // MULTI-PROVENANCE (change set D): the filter reads EVERY lane that found a lead, so one lead found
+  // by OpenStreetMap and the AI lane appears under both — as one row each time, never two leads.
+  if (!/\(c\.foundByAll \?\? \[c\.foundBy\]\)\.some\(/.test(hook)) bad.push("the Found By filter does not read foundByAll");
+  if ((hook.match(/matchesFoundBy\(c, filters\.foundBy\)/g) ?? []).length !== 2) bad.push("both Found By filter paths must use matchesFoundBy");
+  // The dual chip is earned only by exactly OpenStreetMap + AI-assisted; Google chips never change.
+  if (!/"OpenStreetMap · also AI-assisted"/.test(card)) bad.push("the dual-provenance chip text changed");
+  if (!/client\.foundBy === "openstreetmap" && client\.foundByAll\?\.includes\("ai-assisted"\)/.test(card)) bad.push("the dual chip is not limited to OpenStreetMap + AI-assisted");
+  if (!/"google-places": "Google Places",\s*"ai-assisted-google-places": "AI-assisted · Google Places",/.test(card)) bad.push("a Google chip label changed");
 
   // EARNED, NEVER INVENTED. "AI-assisted · Google Places" may exist ONLY as the label of the
   // `ai-assisted-google-places` lane — the one the server resolves from a per-lead
@@ -889,16 +907,7 @@ const aiRun = (status: DiscoveryRun["status"], ai: DiscoveryRun["ai"], isTermina
   // renamed option would silently match nothing. This guards it staying put.
   if (!/PRIORITY_ORDER = \["High", "Medium", "Low"\]/.test(hook)) bad.push("the priority filter vocabulary changed, which silently breaks filtering");
 
-  // MULTI-PROVENANCE (change set D): the filter reads EVERY lane that found a lead, so one lead found
-  // by OpenStreetMap and the AI lane appears under both — as one row each time, never two leads.
-  if (!/\(c\.foundByAll \?\? \[c\.foundBy\]\)\.some\(/.test(hook)) bad.push("the Found By filter does not read foundByAll");
-  if ((hook.match(/matchesFoundBy\(c, filters\.foundBy\)/g) ?? []).length !== 2) bad.push("both Found By filter paths must use matchesFoundBy");
-  // The dual chip is earned only by exactly OpenStreetMap + AI-assisted; Google chips never change.
-  if (!/"OpenStreetMap · also AI-assisted"/.test(card)) bad.push("the dual-provenance chip text changed");
-  if (!/client\.foundBy === "openstreetmap" && client\.foundByAll\?\.includes\("ai-assisted"\)/.test(card)) bad.push("the dual chip is not limited to OpenStreetMap + AI-assisted");
-  if (!/"google-places": "Google Places",\s*"ai-assisted-google-places": "AI-assisted · Google Places",/.test(card)) bad.push("a Google chip label changed");
-
-  report("AB the board names provenance and never invents it", 20 - bad.length, 20, bad);
+  report("AB the board names provenance and never invents it", 21 - bad.length, 21, bad);
 }
 
 
