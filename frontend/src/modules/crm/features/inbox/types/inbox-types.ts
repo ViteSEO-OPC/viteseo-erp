@@ -65,16 +65,14 @@ export type OutboundFailureCode =
     | "policy_violation"
     | "credential_rejected"
     | "delivery_unknown"
+    | "operator_confirmed_not_sent"
     | (string & {});
 
 /**
- * THE TWO CODES THAT MUST NEVER OFFER A RETRY.
- *
- * Both mean the message may already have reached the customer: the server leaves such a row
- * `pending` rather than `failed` precisely so nothing re-sends it, and a Retry button in the UI
- * would undo that guarantee from the other end.
+ * THE TWO CODES THAT MUST NEVER OFFER A RETRY. Defined in `lib/outbound-lock` (which must stay free of
+ * runtime imports) and re-exported here so existing callers keep their import.
  */
-export const UNRESOLVED_FAILURE_CODES: readonly string[] = ["delivery_unknown", "provider_unavailable"];
+export { UNRESOLVED_FAILURE_CODES } from "@/modules/crm/features/inbox/lib/outbound-lock";
 
 export type InboxMessage = {
     id: string;
@@ -91,8 +89,41 @@ export type InboxMessage = {
     failureCode: OutboundFailureCode | null;
     deliveredAt: string | null;
 
-    /** Whether a provider message id was recorded. The identifier itself is never sent. */
+    /**
+     * Whether a provider message id was recorded. The identifier itself is never sent. On an
+     * outbound `sent` row, `false` means an OPERATOR confirmed the send (Phase 3H.5A never invents
+     * a provider id), `true` means the provider acknowledged it.
+     */
     providerMessageIdPresent: boolean;
+};
+
+/**
+ * One outbound message whose delivery nobody could confirm (Phase 3H.5A), as listed on the detail
+ * payload. Read from the database, so it survives a reload, another device and another operator.
+ * Identifiers and timing only — the text, if shown, comes from `messages`.
+ */
+export type InboxUnresolvedOutbound = {
+    id: string;
+    createdAt: string | null;
+    sendAttemptedAt: string | null;
+    failureCode: OutboundFailureCode | null;
+    /** True when no outcome was ever recorded (the request died mid-send). */
+    stranded: boolean;
+};
+
+/** An operator's verdict on an unresolved outbound message. */
+export type ResolutionOutcome = "sent" | "not_sent";
+
+/**
+ * What POST /conversations/{id}/messages/{message}/resolution answers with. 200 carries
+ * `resolved: true`; a 409 carries the same shape with `resolved: false`, `outcome: null` and the
+ * server's own `reason`. `message` is the row as it now stands.
+ */
+export type ResolutionResponse = {
+    resolved: boolean;
+    outcome: ResolutionOutcome | null;
+    reason: string | null;
+    message: InboxMessage | null;
 };
 
 /**
@@ -127,6 +158,8 @@ export type InboxConversationDetail = {
     messages: InboxMessage[];
     reply: InboxReplyCapability;
     link: InboxLinkCapability;
+    /** Optional so a server without Phase 3H.5A still parses; always read as `?? []`. */
+    unresolvedOutbound?: InboxUnresolvedOutbound[];
 };
 
 /**

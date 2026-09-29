@@ -222,11 +222,14 @@ export function InboxPage() {
                             title="No conversation selected"
                             body="Choose a conversation on the left to read it."
                         />
-                    ) : detail.isLoading ? (
-                        <Notice icon={Loader2} title="Loading conversation" body="Fetching the messages." />
-                    ) : detail.isError ? (
-                        <Notice icon={TriangleAlert} title="Could not load" body={errorMessage(detail.error)} />
                     ) : detail.data ? (
+                        /*
+                         * DATA WINS OVER ERROR. In TanStack Query 5 a failed background refetch
+                         * keeps the cached data but sets `isError`; checking the error first would
+                         * swap the whole pane for "Could not load" and unmount the composer and
+                         * the resolve dialog — losing the reply lock and hiding the very "Check
+                         * again" that exists for a failed re-read.
+                         */
                         <div className="flex min-h-0 flex-1 flex-col">
                             <header className="shrink-0 border-b border-border bg-card px-4 py-3">
                                 <div className="flex flex-wrap items-center gap-2">
@@ -256,7 +259,10 @@ export function InboxPage() {
                             />
 
                             <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
-                                <MessageThread messages={detail.data.messages} />
+                                <MessageThread
+                                    messages={detail.data.messages}
+                                    unresolvedIds={new Set((detail.data.unresolvedOutbound ?? []).map((entry) => entry.id))}
+                                />
                             </div>
 
                             <ReplyComposer
@@ -266,8 +272,15 @@ export function InboxPage() {
                                 key={detail.data.id}
                                 conversationId={detail.data.id}
                                 capability={detail.data.reply}
+                                messages={detail.data.messages}
+                                unresolvedOutbound={detail.data.unresolvedOutbound}
+                                serverReadAt={detail.dataUpdatedAt}
                             />
                         </div>
+                    ) : detail.isLoading ? (
+                        <Notice icon={Loader2} title="Loading conversation" body="Fetching the messages." />
+                    ) : detail.isError ? (
+                        <Notice icon={TriangleAlert} title="Could not load" body={errorMessage(detail.error)} />
                     ) : null}
                 </section>
             </div>
