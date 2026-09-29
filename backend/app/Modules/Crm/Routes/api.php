@@ -11,6 +11,7 @@ use App\Modules\Crm\Controllers\BusinessRuleController;
 use App\Modules\Crm\Controllers\CallController;
 use App\Modules\Crm\Controllers\ConversationController;
 use App\Modules\Crm\Controllers\ConversationLeadController;
+use App\Modules\Crm\Controllers\ConversationMessageResolutionController;
 use App\Modules\Crm\Controllers\ConversationReplyController;
 use App\Modules\Crm\Controllers\DashboardController;
 use App\Modules\Crm\Controllers\DeliveryMonitorController;
@@ -379,6 +380,21 @@ Route::middleware(['auth:sanctum', 'set-current-org', 'subscription-active', 'fe
          */
         Route::post('/conversations/{conversation}/reply', [ConversationReplyController::class, 'store'])
             ->middleware(['permission:crm.conversations.reply', 'throttle:10,1']);
+
+        /*
+         * Phase 3H.5A — an operator's verdict on an outbound message whose delivery nobody could
+         * confirm: `{"outcome": "sent" | "not_sent"}`. It never calls a provider and never re-sends.
+         *
+         * Reply authority, because confirming what the business said to a customer belongs to the
+         * people allowed to say it — plus conversation view, because the response carries the
+         * message, and reply authority alone must not become a way to read threads.
+         *
+         * `scopeBindings()` resolves `{message}` through the conversation's own `messages()`, so a
+         * message from another thread is a 404 at binding time.
+         */
+        Route::post('/conversations/{conversation}/messages/{message}/resolution', [ConversationMessageResolutionController::class, 'store'])
+            ->middleware(['permission:crm.conversations.view', 'permission:crm.conversations.reply', 'throttle:10,1'])
+            ->scopeBindings();
 
         /*
          * Phase 3H.3A — attaching a thread to a CRM lead by hand. LINK ONLY: NULL → lead. Relinking

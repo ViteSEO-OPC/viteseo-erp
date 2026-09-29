@@ -70,6 +70,8 @@ class ConversationMessage extends Model
             'received_at' => 'datetime',
             'processed_at' => 'datetime',
             'delivered_at' => 'datetime',
+            // Phase 3H.5A. Deliberately NOT fillable: only the persister's atomic claim writes it.
+            'send_attempted_at' => 'datetime',
         ];
     }
 

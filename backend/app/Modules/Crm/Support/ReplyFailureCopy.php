@@ -59,6 +59,7 @@ final class ReplyFailureCopy
              */
             OutboundFailureCode::ProviderUnavailable => 'Delivery could not be confirmed because the messaging provider is unavailable.',
             OutboundFailureCode::DeliveryUnknown => 'Delivery could not be confirmed.',
+            OutboundFailureCode::OperatorConfirmedNotSent => 'This message was confirmed as not sent.',
         };
     }
 }

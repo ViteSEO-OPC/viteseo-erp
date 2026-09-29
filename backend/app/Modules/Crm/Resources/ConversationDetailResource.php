@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace App\Modules\Crm\Resources;
 
 use App\Modules\Crm\Models\Conversation;
+use App\Modules\Crm\Models\ConversationMessage;
 use App\Modules\Crm\Services\ConversationLinkCapability;
+use App\Modules\Crm\Services\Outbound\OutboundMessagePersister;
 use App\Modules\Crm\Services\Outbound\ReplyCapability;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -72,6 +74,29 @@ class ConversationDetailResource extends JsonResource
              * `lead`.
              */
             'link' => app(ConversationLinkCapability::class)->for($this->resource, $viewer),
+
+            /*
+             * Phase 3H.5A — every outbound message in this thread whose delivery nobody could
+             * confirm, read from the database so it survives a reload, another device and another
+             * operator. The browser used to be the only thing that remembered an unresolved send,
+             * and a reload forgot it.
+             *
+             * Identifiers and timing only; the message itself is already in `messages`. A message
+             * still inside its sending window is not listed — it is in flight, not unresolved.
+             */
+            'unresolvedOutbound' => app(OutboundMessagePersister::class)
+                ->unresolvedInConversation($this->resource)
+                ->map(fn (ConversationMessage $message): array => [
+                    'id' => (string) $message->id,
+                    'createdAt' => $message->created_at?->toIso8601String(),
+                    'sendAttemptedAt' => $message->send_attempted_at?->toIso8601String(),
+                    'failureCode' => $message->failure_code,
+                    // True when no outcome was ever recorded (the request died mid-send), as
+                    // opposed to a recorded timeout or provider error.
+                    'stranded' => $message->failure_code === null,
+                ])
+                ->values()
+                ->all(),
 
             'messageCount' => (int) ($this->messages_count ?? $this->messages->count()),
             'messages' => ConversationMessageResource::collection($this->whenLoaded('messages')),
