@@ -137,6 +137,39 @@ NATIONAL_PROBE_TIMEOUT_SECONDS = 200.0
 #: ReadTimeout for a query Overpass was about to answer — measured on the AI lanes' name lookup.
 CELL_SWEEP_TIMEOUT_SECONDS = 75.0
 
+#: How far past its cell a BOUNDED name lookup reaches, in degrees (~11 km). A business the model
+#: named may sit just outside the cell that prompted it; the lookup still must not sweep a province.
+NAME_LOOKUP_MARGIN_DEGREES = 0.1
+
+#: The bounded name lookup's server-side `[timeout:…]`, deliberately BELOW the client's own timeout,
+#: so a slow query ends as Overpass's own reported timeout rather than a client socket ReadTimeout.
+NAME_LOOKUP_SERVER_TIMEOUT_SECONDS = 25
+
+
+def name_lookup_box(
+    cell: tuple[float, float, float, float], area: tuple[float, float, float, float]
+) -> tuple[float, float, float, float]:
+    """The box a bounded name lookup searches: ``cell`` widened by the margin, clipped to ``area``.
+
+    Clipped because the proposals were asked for BY AREA, so the lookup stays inside it. When the two
+    do not overlap at all — a nationwide cell labelled with an anchor city whose own box does not
+    reach it — the widened cell alone is searched: the cell is the planned ground, and the area label
+    is only a name for it. Either way the result is never larger than the widened cell.
+    """
+    south, west, north, east = cell
+    m = NAME_LOOKUP_MARGIN_DEGREES
+    widened = (south - m, west - m, north + m, east + m)
+    a_south, a_west, a_north, a_east = area
+    clipped = (
+        max(widened[0], a_south),
+        max(widened[1], a_west),
+        min(widened[2], a_north),
+        min(widened[3], a_east),
+    )
+    if clipped[0] >= clipped[2] or clipped[1] >= clipped[3]:
+        return widened
+    return clipped
+
 _COUNTRY_CODE = re.compile(r"^[A-Za-z]{2}$")
 
 
@@ -312,7 +345,14 @@ class OpenStreetMapProvider(DiscoveryProvider):
                 break
         return businesses
 
-    def find_by_name(self, names: list[str], *, area: str, limit: int = 200) -> list[RawBusiness]:
+    def find_by_name(
+        self,
+        names: list[str],
+        *,
+        area: str,
+        limit: int = 200,
+        bbox: tuple[float, float, float, float] | None = None,
+    ) -> list[RawBusiness]:
         """Look up businesses BY NAME within ``area``, deliberately without a category filter.
 
         This is the deterministic half of AI-assisted discovery: something proposes names, this
@@ -335,13 +375,28 @@ class OpenStreetMapProvider(DiscoveryProvider):
         a guest on it, so batch cost stays the same order as a normal discover() run.
 
         Additive: ``discover()`` and every function it calls are untouched by this method's existence.
+
+        A CELL ``bbox`` BOUNDS THE SEARCH. Without one the whole geocoded ``area`` is searched, exactly
+        as before. With one, only the cell widened by ``NAME_LOOKUP_MARGIN_DEGREES`` and clipped to the
+        area is — because a nationwide cell's area is an anchor LABEL, and a province-sized box made
+        this unindexed regex query outlast its own timeout (measured: "Cebu", 61.7s). The bounded query
+        also asks Overpass for a shorter server timeout than the client's, and a server-side timeout
+        raises instead of passing for "no matches".
         """
         wanted = [n.strip() for n in names if isinstance(n, str) and n.strip()]
         if not wanted:
             return []
 
-        bbox = self._geocode_area(area)
-        elements = self._overpass_by_name(wanted, bbox, limit)
+        area_box = self._geocode_area(area)
+        if bbox is None:
+            elements = self._overpass_by_name(wanted, area_box, limit)
+        else:
+            elements = self._overpass_by_name(
+                wanted,
+                name_lookup_box(bbox, area_box),
+                limit,
+                server_timeout=NAME_LOOKUP_SERVER_TIMEOUT_SECONDS,
+            )
 
         businesses: list[RawBusiness] = []
         for element in elements:
@@ -408,9 +463,20 @@ class OpenStreetMapProvider(DiscoveryProvider):
     # -- OSM calls -----------------------------------------------------------------------------
 
     def _overpass_by_name(
-        self, names: list[str], bbox: tuple[float, float, float, float], limit: int
+        self,
+        names: list[str],
+        bbox: tuple[float, float, float, float],
+        limit: int,
+        *,
+        server_timeout: int | None = None,
     ) -> list[dict]:
-        """One name-filtered Overpass query for a whole batch of names."""
+        """One name-filtered Overpass query for a whole batch of names.
+
+        ``server_timeout`` (bounded lookups only) replaces the query's ``[timeout:60]``. Overpass reports
+        a query that hit it as HTTP 200 with a ``remark`` and a partial or empty element list — which
+        would read as "no business by that name" — so on that path the remark is checked and raises.
+        Without it the query and its handling are exactly what they always were.
+        """
         south, west, north, east = bbox
         bbox_str = f"{south},{west},{north},{east}"
 
@@ -433,10 +499,16 @@ class OpenStreetMapProvider(DiscoveryProvider):
         for kind in ("node", "way"):
             # `,i` = case-insensitive: OSM casing is inconsistent and a proposer's casing is a guess.
             parts.append(f'{kind}["name"~"{pattern}",i]({bbox_str});')
-        query = f"[out:json][timeout:60];({''.join(parts)});out center {limit};"
+        seconds = 60 if server_timeout is None else int(server_timeout)
+        query = f"[out:json][timeout:{seconds}];({''.join(parts)});out center {limit};"
 
         resp = self._post_with_retry(query)
-        return resp.json().get("elements", [])
+        payload = resp.json()
+        if server_timeout is not None:
+            remark = str(payload.get("remark") or "")
+            if "runtime error" in remark.lower():
+                raise RuntimeError(f"Overpass name lookup failed on the server: {remark[:200]}")
+        return payload.get("elements", [])
 
     def geocode_area(self, area: str) -> tuple[float, float, float, float]:
         """Resolve a place name to a bounding box — the PUBLIC geocoding seam.
