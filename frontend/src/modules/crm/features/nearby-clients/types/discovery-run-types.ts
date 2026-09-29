@@ -208,6 +208,14 @@ export type StartDiscoveryRunInput =
       country: CountryCode;
       idempotencyKey: string;
       aiStrategy?: boolean;
+      /**
+       * The budget the SERVER said this provider may spend, handed straight back.
+       *
+       * Optional, and never a scoped run's field: `limitPerTask` is how many businesses one search
+       * returns, this is how many searches the run may make. Keeping them in different arms of the
+       * union is what stops the dialog's 20 from ever reaching a nationwide request.
+       */
+      maxTasks?: number;
     };
 
 export const DISCOVERY_RUN_TERMINAL: readonly DiscoveryRunStatus[] = [

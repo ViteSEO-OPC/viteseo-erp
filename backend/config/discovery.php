@@ -168,6 +168,38 @@ return [
     'task_timeout' => (int) env('DISCOVERY_TASK_TIMEOUT', 180),
 
     /*
+     * Per-task wall clock for the providers that are not Google, BY PROVIDER — because the cost of a
+     * task is a fact about the provider, not about the run that asked for it.
+     *
+     * WHY THIS IS NOT ONE GLOBAL NUMBER. Measured over every task this database has recorded:
+     * Google Places averages 3.2s and has never exceeded 47s, while the AI-assisted lane averages
+     * ~42s and has been seen at 118s. They differ by more than an order of magnitude because the
+     * AI lane does three sweeps where Google does one, and then reverse-geocodes each business at
+     * Nominatim's required one-request-per-second. Raising the GLOBAL timeout to fit the slow lane
+     * would hand a hung Google task 300s of worker time to fit a lane whose worst case is 47s — it
+     * would buy nothing and cost exactly the protection this ceiling exists to provide.
+     *
+     * WHY 300 AND NOT MORE. The slice deadline is checked BETWEEN searches, never inside one (see
+     * DiscoveryRunOrchestrator::workQueue), so a task starting one second before the deadline still
+     * runs to completion. The worst-case job therefore costs `nationwide.slice_seconds` plus one
+     * whole task timeout, and that must stay inside RunDiscoveryJob's 900s:
+     *
+     *     540 + 180 = 720   the old global value, 180s of headroom
+     *     540 + 300 = 840   this value, 60s of headroom
+     *     540 + 360 = 900   no headroom at all — the job dies exactly as the task ends
+     *     540 + 420 = 960   the job is killed mid-task, losing the slice
+     *
+     * 360 and 420 are therefore not "more generous", they are unsafe. {@see DiscoveryTaskTimeoutTest}
+     * enforces this arithmetic so a later env change cannot quietly cross the line.
+     *
+     * A timeout is a CEILING, not a duration: giving the AI lane 300s does not make any task slower,
+     * it only stops killing the ones that were going to finish.
+     */
+    'task_timeout_by_provider' => [
+        'openai' => (int) env('DISCOVERY_TASK_TIMEOUT_OPENAI', 300),
+    ],
+
+    /*
      * Volume fences. These are BILLING and INFRASTRUCTURE limits, not discovery boundaries: they cap
      * how much one click may spend, never which businesses are reachable. `limit_per_task` is capped
      * at 60 because that is the structured provider's own ceiling (PAGE_SIZE 20 × MAX_PAGES 3) —
@@ -345,6 +377,26 @@ return [
          * can spend without limit.
          */
         'max_tasks_ceiling' => (int) env('DISCOVERY_NATIONWIDE_MAX_TASKS_CEILING', 25000),
+
+        /*
+         * The largest budget a nationwide run may use WITHOUT Google Places — the Overpass fence.
+         *
+         * Nationwide used to demand Google Places outright, for a good reason: the OpenStreetMap
+         * baseline answers from Overpass, a free endpoint funded and run by volunteers, and a full
+         * sweep aimed at it is abuse of someone else's infrastructure rather than a fallback. But
+         * "how many queries" is a question about SIZE, not about which provider is configured, and
+         * refusing every size denied the AI-assisted path the only planner that covers the country.
+         *
+         * A task costs about three Overpass queries — the baseline selector sweep, the expanded-tag
+         * sweep, and the resolver's batched name lookup — because `_overpass` unions selectors into
+         * one request instead of issuing one per tag. So this default is roughly 180 queries for a
+         * whole run, spread across a run that is already rate-limit-aware (exponential backoff) and
+         * already holds itself to Nominatim's one-request-per-second policy.
+         *
+         * Google Places is not subject to this: it is a paid endpoint the spend gate meters in
+         * dollars, so its fence is `GooglePlacesSpendGate`, not this one.
+         */
+        'max_tasks_without_google' => (int) env('DISCOVERY_NATIONWIDE_MAX_TASKS_WITHOUT_GOOGLE', 60),
 
         /*
          * SLICED EXECUTION (H-5). A nationwide sweep outlives any single queued job, so each job works

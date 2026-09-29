@@ -420,23 +420,40 @@ const secure = { isSecureContext: true };
 
   // Google Places is a factual provider and backs both surfaces.
   if (!canRunDiscovery("google_places")) bad.push("google_places must allow on-demand discovery");
-  if (!canRunNationwide("google_places")) bad.push("google_places must allow nationwide");
-
-  // The AI capability plans searches; it does not answer them, so it may not offer nationwide —
-  // the orchestrator refuses any nationwide run that is not on Google.
   if (!canRunDiscovery("openai")) bad.push("openai must allow on-demand discovery");
-  if (canRunNationwide("openai")) bad.push("openai must NOT offer nationwide; the server refuses it");
 
   // THE DEFAULT EXPERIENCE IS UNTOUCHED. On the OpenStreetMap baseline none of the Stage 2 UI
   // appears — the board is what it was before on-demand discovery existed.
   if (canRunDiscovery("openstreetmap")) bad.push("the OSM baseline must not expose discovery controls");
-  if (canRunNationwide("openstreetmap")) bad.push("the OSM baseline must not expose nationwide");
+
+  // NATIONWIDE IS THE SERVER'S ANSWER, NOT A PROVIDER COMPARISON DONE HERE. The frontend used to
+  // decide this from the provider id, which is precisely how it went stale: the server replaced its
+  // Google-only refusal with a budget fence and this copy kept refusing. The gate now checks that
+  // the capability is READ rather than re-derived.
+  if (!canRunNationwide({ available: true, maxTasks: 400, reason: "default_budget" })) {
+    bad.push("an available nationwide capability must be offered");
+  }
+  if (!canRunNationwide({ available: true, maxTasks: 60, reason: "overpass_fence" })) {
+    bad.push("a fenced but available nationwide capability must still be offered");
+  }
+  // THE BASELINE'S SHAPE EXACTLY: fenced like the AI lane, but not offered. A budget alone is never
+  // permission — reading `maxTasks` as the flag is how the control would reappear on the baseline.
+  if (canRunNationwide({ available: false, maxTasks: 60, reason: "baseline_fills_on_a_schedule" })) {
+    bad.push("the OSM baseline must not expose nationwide despite having a budget");
+  }
+  // A budget of zero cannot start a run, so it is not permission however `available` reads.
+  if (canRunNationwide({ available: true, maxTasks: 0, reason: "default_budget" })) {
+    bad.push("a zero budget was read as nationwide permission");
+  }
 
   // FAIL CLOSED WHILE UNKNOWN. A lookup that has not answered, or failed, is not permission — and
   // a provider id this build does not know is never assumed to be capable.
   for (const unknown of [null, undefined, "", "some_future_provider"]) {
     if (canRunDiscovery(unknown)) bad.push(`${JSON.stringify(unknown)} was read as permission`);
-    if (canRunNationwide(unknown)) bad.push(`${JSON.stringify(unknown)} was read as nationwide permission`);
+  }
+  // A backend older than the nationwide block sends no block at all: absent is never permission.
+  for (const missing of [null, undefined]) {
+    if (canRunNationwide(missing)) bad.push(`${JSON.stringify(missing)} was read as nationwide permission`);
   }
 
   // Available means no reason to explain; unavailable always explains itself, and never by naming
@@ -446,7 +463,7 @@ const secure = { isSecureContext: true };
   if (osmReason === "") bad.push("an unavailable capability must explain itself");
   if (/key|token|secret|credential/i.test(osmReason)) bad.push(`the reason names a credential: ${osmReason}`);
 
-  report("N  discovery controls follow the real capability", 17 - bad.length, 17, bad);
+  report("N  discovery controls follow the real capability", 16 - bad.length, 16, bad);
 }
 
 // ── O  every rendered list is keyed by what actually identifies a row ─────────────────────────
@@ -588,12 +605,25 @@ const aiRun = (status: DiscoveryRun["status"], ai: DiscoveryRun["ai"], isTermina
   if (scopedKeys !== "scope,country,locations,niches,limit_per_task,idempotency_key") {
     bad.push(`scoped keys changed: ${scopedKeys}`);
   }
+  // NATIONWIDE WITHOUT A SERVER BUDGET IS UNCHANGED. No `maxTasks` means no `max_tasks` key, so the
+  // server keeps applying its own default exactly as it did before the capability block existed.
   const nwKeys = Object.keys(buildStartRunBody(nationwideInput)).join(",");
   if (nwKeys !== "scope,country,niches,idempotency_key") bad.push(`nationwide keys changed: ${nwKeys}`);
+  // WITH one, it is sent verbatim — that is what makes the run one the orchestrator accepts rather
+  // than one its fence refuses on arrival.
+  const nwBudget = buildStartRunBody({ ...nationwideInput, maxTasks: 60 });
+  if (nwBudget.max_tasks !== 60) bad.push("the server's nationwide budget is not sent as max_tasks");
+  if (Object.keys(nwBudget).join(",") !== "scope,country,niches,idempotency_key,max_tasks") {
+    bad.push(`nationwide budget keys changed: ${Object.keys(nwBudget).join(",")}`);
+  }
+  // THE SCOPED ARM NEVER GAINS IT. `limit_per_task` is how many businesses one search returns and
+  // `max_tasks` is how many searches a run makes; the 20-per-search behaviour is untouched by this.
+  if ("max_tasks" in buildStartRunBody(scopedInput)) bad.push("a scoped run sent max_tasks");
+  if (buildStartRunBody(scopedInput).limit_per_task !== 20) bad.push("the scoped 20-per-search default changed");
   if ("ai_strategy" in buildStartRunBody({ ...scopedInput, aiStrategy: false })) {
     bad.push("aiStrategy: false sends an ai_strategy key");
   }
-  report("R  an ordinary run's request is unchanged", 3 - bad.length, 3, bad);
+  report("R  an ordinary run's request is unchanged", 7 - bad.length, 7, bad);
 }
 
 // ── S  validation: the AI action is offered only when it can work ────────────────────────────

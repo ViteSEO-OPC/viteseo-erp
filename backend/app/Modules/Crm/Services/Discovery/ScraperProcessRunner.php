@@ -62,7 +62,7 @@ class ScraperProcessRunner
         try {
             $result = Process::path((string) config('discovery.path', '/scraper'))
                 ->env($this->environment($metricsPath, $aiStrategy, $crmToken))
-                ->timeout((int) config('discovery.task_timeout', 180))
+                ->timeout($this->timeoutFor($provider))
                 ->run([
                     (string) config('discovery.python', '/opt/scraper-venv/bin/python'),
                     '-m', 'scraper', 'discover',
@@ -165,6 +165,23 @@ class ScraperProcessRunner
     public function findWebsites(int $limit, ?string $crmToken = null): array
     {
         return $this->runCommand(['find-websites', '--limit', (string) $limit, '--commit'], $crmToken);
+    }
+
+    /**
+     * How long ONE task of this provider may run before it is killed.
+     *
+     * The provider is already a parameter of the only call site, so this needs no new plumbing and
+     * creates no second execution path: the same process, started the same way, with the ceiling the
+     * measurements justify. An unlisted provider — Google Places, the OpenStreetMap baseline, and
+     * anything added later — keeps the global default untouched, so this can only ever lengthen the
+     * lanes it names.
+     */
+    private function timeoutFor(string $provider): int
+    {
+        $default = (int) config('discovery.task_timeout', 180);
+        $byProvider = (array) config('discovery.task_timeout_by_provider', []);
+
+        return max(1, (int) ($byProvider[$provider] ?? $default));
     }
 
     /**

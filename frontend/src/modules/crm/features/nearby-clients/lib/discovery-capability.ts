@@ -39,15 +39,24 @@ export function canRunDiscovery(effectiveProvider: string | null | undefined): b
 }
 
 /**
+ * The nationwide block `GET /discovery/config` reports. Absent on a backend older than it.
+ */
+export type NationwideCapability = { available: boolean; maxTasks: number; reason: string };
+
+/**
  * May the Nationwide Philippines mode be offered?
  *
- * GOOGLE ONLY, matching the server exactly. A nationwide sweep on the OpenStreetMap baseline would
- * be thousands of Overpass queries against a free, shared, community-funded endpoint, and the
- * orchestrator refuses to start one — so offering the mode could only ever produce a run that fails
- * on arrival. The AI capability does not qualify either: it plans searches, it does not answer them.
+ * ASK THE SERVER; DO NOT RE-DERIVE IT. This used to read `effectiveProvider === "google_places"`,
+ * mirroring an orchestrator that refused every other provider. When the server replaced that refusal
+ * with a budget fence, this copy kept refusing — a finished, working mode stayed invisible because
+ * the rule lived in two languages and only one of them was updated. So the rule now has one home
+ * (`NationwideCapability` on the backend) and this reads its answer.
+ *
+ * FAIL CLOSED WHILE UNKNOWN, exactly as before: no block — because the lookup has not answered, or
+ * because the backend predates the field — is not permission.
  */
-export function canRunNationwide(effectiveProvider: string | null | undefined): boolean {
-  return effectiveProvider === PROVIDER_GOOGLE_PLACES;
+export function canRunNationwide(nationwide: NationwideCapability | null | undefined): boolean {
+  return nationwide?.available === true && (nationwide?.maxTasks ?? 0) > 0;
 }
 
 /**

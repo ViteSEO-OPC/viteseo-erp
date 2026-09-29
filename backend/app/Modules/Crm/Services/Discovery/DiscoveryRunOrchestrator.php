@@ -539,10 +539,14 @@ class DiscoveryRunOrchestrator
      * nothing more there), or it came back FULL and could not be split any finer (capped — there IS
      * more and this run did not reach it).
      *
-     * GOOGLE IS REQUIRED, NOT PREFERRED. A nationwide sweep on the OpenStreetMap baseline would mean
-     * thousands of Overpass queries against a free, shared, community-funded endpoint — abuse of
-     * someone else's infrastructure, not a graceful fallback. The scoped path's degrade-and-carry-on
-     * is right for a handful of user-named searches and wrong at this scale.
+     * GOOGLE IS REQUIRED AT FULL SIZE, NOT AT EVERY SIZE. A nationwide sweep on the OpenStreetMap
+     * baseline would mean thousands of Overpass queries against a free, shared, community-funded
+     * endpoint — abuse of someone else's infrastructure, not a graceful fallback. But that is a
+     * statement about HOW MANY, not about which provider is configured, and reading it as the latter
+     * left the AI-assisted path with no way to use the only planner that covers the country. So the
+     * fence is the budget: without Google, a run may spend up to
+     * `discovery.nationwide.max_tasks_without_google` searches and no more. The scoped path's
+     * degrade-and-carry-on is right for a handful of user-named searches and still wrong at scale.
      */
     private function executeNationwide(DiscoveryRun $run, NerbyProvider $provider, string $metricsPath): bool
     {
@@ -554,13 +558,16 @@ class DiscoveryRunOrchestrator
             return $this->continueNationwide($run, (array) $run->work_queue, $provider, $metricsPath, $deadline);
         }
 
-        if ($provider !== NerbyProvider::GOOGLE_PLACES) {
+        $capability = NationwideCapability::for($provider);
+
+        if ($provider !== NerbyProvider::GOOGLE_PLACES && (int) $run->budget_total > $capability->maxTasks) {
             $this->fail(
                 $run,
-                'Nationwide discovery needs Google Places as the active provider. '
-                .'It is currently running on '.$provider->value.', which is not configured for a '
-                .'search of this size. Add and enable a Google Places key in Settings, then start '
-                .'the run again.',
+                'Nationwide discovery on '.$provider->value.' is limited to '.$capability->maxTasks
+                .' searches per run, because it answers from the free, community-funded Overpass '
+                .'endpoint. This run asked for '.(int) $run->budget_total.'. Lower the budget to '
+                .$capability->maxTasks.' or fewer, or add and enable a Google Places key in Settings '
+                .'to sweep the country at full size.',
             );
 
             return false;

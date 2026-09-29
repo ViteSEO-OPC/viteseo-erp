@@ -33,6 +33,7 @@ import {
   discoveryPhase,
   isAiStartRefusal,
 } from "@/modules/crm/features/nearby-clients/lib/ai-discovery";
+import { PROVIDER_GOOGLE_PLACES } from "@/modules/crm/features/nearby-clients/lib/discovery-capability";
 import { useDiscoveryCapability } from "@/modules/crm/features/nearby-clients/hooks/use-map-provider";
 import { Badge } from "@/modules/crm/components/ui/badge";
 import {
@@ -93,10 +94,12 @@ export function AdvancedDiscoveryDialog({ open, onOpenChange }: Props) {
   const start = useStartDiscoveryRun();
   const cancelRun = useCancelDiscoveryRun();
   const { data: run } = useDiscoveryRun(runId);
-  // Nationwide is Google-only, exactly as the orchestrator requires. Offering it on any other
-  // provider could only ever produce a run that fails the moment the worker picks it up.
-  // AI Discovery is offered only when the backend reports AI available on the Google flow.
-  const { canRunNationwide, canRunAi, aiStatus, effectiveProvider } = useDiscoveryCapability();
+  // Whether nationwide may be offered, and what one run may spend, are the SERVER's answers — the
+  // same ones the orchestrator acts on. This used to be a Google-only rule written here, which kept
+  // refusing after the server had stopped. AI Discovery is still offered only when the backend
+  // reports AI available on the Google flow.
+  const { canRunNationwide, nationwideMaxTasks, canRunAi, aiStatus, effectiveProvider } =
+    useDiscoveryCapability();
   const phase = discoveryPhase({
     submitting: start.isPending,
     run,
@@ -136,7 +139,15 @@ export function AdvancedDiscoveryDialog({ open, onOpenChange }: Props) {
 
     start.mutate(
       nationwide
-        ? { scope: "nationwide", niches, country, idempotencyKey, ...aiStrategy }
+        ? {
+            scope: "nationwide",
+            niches,
+            country,
+            idempotencyKey,
+            // The server's own budget, returned unchanged: see `buildStartRunBody`.
+            ...(nationwideMaxTasks !== null ? { maxTasks: nationwideMaxTasks } : {}),
+            ...aiStrategy,
+          }
         : { scope: "scoped", locations, niches, limitPerTask, country, idempotencyKey, ...aiStrategy },
       { onSuccess: (created) => setRunId(created.runId) },
     );
@@ -221,6 +232,8 @@ export function AdvancedDiscoveryDialog({ open, onOpenChange }: Props) {
                 niches={niches}
                 onNiches={setNichesText}
                 onEnter={submitOnEnter}
+                maxTasks={nationwideMaxTasks}
+                capped={effectiveProvider !== PROVIDER_GOOGLE_PLACES}
               />
             ) : (
               <ScopeForm
@@ -427,11 +440,17 @@ function NationwideForm({
   niches,
   onNiches,
   onEnter,
+  maxTasks,
+  capped,
 }: {
   nichesText: string;
   niches: string[];
   onNiches: (v: string) => void;
   onEnter: (e: React.KeyboardEvent<HTMLInputElement>) => void;
+  /** The server's budget for this provider, or null while unknown. */
+  maxTasks: number | null;
+  /** True when that budget is the Overpass fence rather than the ordinary nationwide default. */
+  capped: boolean;
 }) {
   return (
     <div className="flex flex-col gap-4 py-2">
@@ -449,6 +468,25 @@ function NationwideForm({
           counted as already known rather than added twice, and anything outside the Philippines is
           rejected.
         </p>
+        {/* THE BUDGET, IN THE SAME BREATH AS THE WORD "NATIONWIDE". The mode is named after the
+            country, so a run that can only afford a fraction of it must say so here — before it is
+            started — rather than leaving the person to infer it from the stop reason afterwards. */}
+        {maxTasks !== null && (
+          <p className="mt-2 text-caption text-muted-foreground">
+            This run makes <strong>up to {maxTasks} searches</strong> — one niche in one map area
+            each.{" "}
+            {capped ? (
+              <>
+                That <strong>samples</strong> the country rather than sweeping all of it. This
+                provider reads OpenStreetMap through a free service run by volunteers, so its runs
+                are kept deliberately small. Expect a spread of areas across the three island groups,
+                not full coverage — the run reports how many areas it reached.
+              </>
+            ) : (
+              <>Start more runs to go further; each one picks up where the budget left off.</>
+            )}
+          </p>
+        )}
       </div>
 
       <div className="flex flex-col gap-1.5">
@@ -458,7 +496,7 @@ function NationwideForm({
           onKeyDown={onEnter}
           value={nichesText}
           onChange={(e) => onNiches(e.target.value)}
-          placeholder="bakery, dental clinic"
+          placeholder="bakery, dentist"
           autoComplete="off"
         />
         <p className="text-caption text-muted-foreground">
@@ -552,7 +590,7 @@ function ScopeForm({
           onKeyDown={onEnter}
           value={nichesText}
           onChange={(e) => onNiches(e.target.value)}
-          placeholder="bakery, dental clinic"
+          placeholder="bakery, dentist"
           autoComplete="off"
         />
         <p className="text-caption text-muted-foreground">
