@@ -14,6 +14,7 @@ use App\Modules\Crm\Console\Commands\PruneXlsImportsCommand;
 use App\Modules\Crm\Console\Commands\RecomputeLeadScoresCommand;
 use App\Modules\Crm\Events\DealWon;
 use App\Modules\Crm\Events\FollowUpCompleted;
+use App\Modules\Crm\Events\InboundConversationMessageReceived;
 use App\Modules\Crm\Events\InboundReplyReceived;
 use App\Modules\Crm\Events\LeadQualified;
 use App\Modules\Crm\Events\OutboundEmailSent;
@@ -31,6 +32,7 @@ use App\Modules\Crm\Listeners\EmitReminderDueWebhook;
 use App\Modules\Crm\Listeners\EscalateUnansweredFollowUp;
 use App\Modules\Crm\Listeners\BroadcastCrmNotification;
 use App\Modules\Crm\Listeners\InboundReplyDeliveryDispatcher;
+use App\Modules\Crm\Listeners\QueueAiAutoReply;
 use App\Modules\Crm\Listeners\ReminderDeliveryDispatcher;
 use App\Modules\Crm\Listeners\StampLastLoginAt;
 use App\Modules\Crm\Listeners\SendDueScheduledEmail;
@@ -323,6 +325,12 @@ class CrmServiceProvider extends ServiceProvider
         // `outreach.internal_notifications.mail`; slack/teams/sms later). Internal staff alerts only —
         // customer communication continues to flow through the shared outreach mailbox.
         Event::listen(InboundReplyReceived::class, InboundReplyDeliveryDispatcher::class);
+
+        // Phase 3I — guarded AI auto-reply. The FIRST listener on this event. Synchronous and
+        // never-throwing (it runs inside ingest's after-commit callback); it only applies cheap
+        // flag/allowlist filters and queues AiAutoReplyJob, which re-checks everything under a lock.
+        // Inert unless ai_auto_reply.enabled, ai_drafts and meta.outbound are ALL switched on.
+        Event::listen(InboundConversationMessageReceived::class, QueueAiAutoReply::class);
 
         // Notification Center realtime. Hooks Laravel's own notification lifecycle
         // rather than each producer, so EVERY CRM in-app notification — the two that

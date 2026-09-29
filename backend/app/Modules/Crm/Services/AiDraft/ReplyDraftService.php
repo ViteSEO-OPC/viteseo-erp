@@ -49,8 +49,17 @@ class ReplyDraftService
         return null;
     }
 
-    public function draft(Conversation $conversation, ?int $actorId = null): ReplyDraftResult
-    {
+    /**
+     * `$purpose` picks the system prompt (see {@see ReplyDraftPromptBuilder}); the transport, the
+     * single attempt and the failure vocabulary are identical for both. The default keeps the
+     * Phase 4A-lite draft behaviour byte for byte. Even for PURPOSE_AUTO_REPLY this class still only
+     * RETURNS text — sending it is the caller's decision, made through OutboundMessageService.
+     */
+    public function draft(
+        Conversation $conversation,
+        ?int $actorId = null,
+        string $purpose = ReplyDraftPromptBuilder::PURPOSE_DRAFT,
+    ): ReplyDraftResult {
         $model = (string) config('ai_drafts.model');
 
         if (($code = self::configurationFailure()) !== null) {
@@ -61,10 +70,11 @@ class ReplyDraftService
             $this->recentMessages($conversation),
             (int) config('ai_drafts.context_messages', 10),
             (int) config('ai_drafts.max_chars_per_message', 1000),
+            $purpose,
         );
 
         if ($messages === []) {
-            return $this->fail($conversation, $actorId, ReplyDraftResult::EMPTY_CONVERSATION, $model);
+            return $this->fail($conversation, $actorId, ReplyDraftResult::EMPTY_CONVERSATION, $model, $purpose);
         }
 
         try {
@@ -79,9 +89,9 @@ class ReplyDraftService
                     'messages' => $messages,
                 ]);
         } catch (ConnectionException $e) {
-            return $this->fail($conversation, $actorId, ReplyDraftResult::TIMEOUT, $model, exception: $e);
+            return $this->fail($conversation, $actorId, ReplyDraftResult::TIMEOUT, $model, $purpose, exception: $e);
         } catch (Throwable $e) {
-            return $this->fail($conversation, $actorId, ReplyDraftResult::UPSTREAM_ERROR, $model, exception: $e);
+            return $this->fail($conversation, $actorId, ReplyDraftResult::UPSTREAM_ERROR, $model, $purpose, exception: $e);
         }
 
         if ($response->failed()) {
@@ -91,7 +101,7 @@ class ReplyDraftService
                 default => ReplyDraftResult::UPSTREAM_ERROR,
             };
 
-            return $this->fail($conversation, $actorId, $code, $model, httpStatus: $response->status());
+            return $this->fail($conversation, $actorId, $code, $model, $purpose, httpStatus: $response->status());
         }
 
         $json = $response->json();
@@ -100,7 +110,7 @@ class ReplyDraftService
 
         // A 200 carrying an `error` object is a failure some gateways report in-band.
         if ($draft === '' || isset($json['error'])) {
-            return $this->fail($conversation, $actorId, ReplyDraftResult::INVALID_RESPONSE, $model, httpStatus: $response->status());
+            return $this->fail($conversation, $actorId, ReplyDraftResult::INVALID_RESPONSE, $model, $purpose, httpStatus: $response->status());
         }
 
         $draft = mb_substr($draft, 0, max(1, (int) config('ai_drafts.max_draft_chars', 2000)));
@@ -110,7 +120,8 @@ class ReplyDraftService
             'org_id' => (int) $conversation->org_id,
             'actor_id' => $actorId,
             'model' => $model,
-            'prompt_version' => ReplyDraftPromptBuilder::PROMPT_VERSION,
+            'purpose' => $purpose,
+            'prompt_version' => ReplyDraftPromptBuilder::promptVersionFor($purpose),
             'prompt_tokens' => (int) data_get($json, 'usage.prompt_tokens', 0),
             'completion_tokens' => (int) data_get($json, 'usage.completion_tokens', 0),
         ]);
@@ -153,6 +164,7 @@ class ReplyDraftService
         ?int $actorId,
         string $code,
         string $model,
+        string $purpose,
         ?int $httpStatus = null,
         ?Throwable $exception = null,
     ): ReplyDraftResult {
@@ -165,6 +177,8 @@ class ReplyDraftService
             // The CLASS only: an exception message can quote the request, which carried the key.
             'exception' => $exception !== null ? $exception::class : null,
             'model' => $model,
+            'purpose' => $purpose,
+            'prompt_version' => ReplyDraftPromptBuilder::promptVersionFor($purpose),
         ]);
 
         return ReplyDraftResult::failed($code, $model);
