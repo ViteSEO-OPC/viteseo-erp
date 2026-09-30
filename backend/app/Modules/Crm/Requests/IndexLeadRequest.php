@@ -23,6 +23,22 @@ class IndexLeadRequest extends FormRequest
     /** Whitelisted sort keys (human labels live in the frontend). Unknown/absent → newest first. */
     private const SORTS = ['recent', 'oldest', 'score-desc', 'score-asc', 'name-asc', 'name-desc'];
 
+    /**
+     * Candidate search for the conversation → lead picker (Phase 3H.4A).
+     *
+     * THE ONE THING THIS CHANGES IS THE LIFECYCLE FILTER. The Leads list applies `Lead::active()`,
+     * which is right for a sales pipeline and wrong for a link picker: the manual-link endpoint
+     * accepts any non-archived lead the operator may update, and in production 625 of 1,049 live
+     * leads are unqualified prospects. An inbound enquiry from an unknown business is exactly the
+     * case most likely to already exist as one, so a picker that could not see them would be unable
+     * to find the majority of its legitimate targets.
+     *
+     * Everything else — org scope, the ownership boundary, the four search columns, the sort
+     * whitelist, the page size — stays identical, because the picker and the endpoint that will
+     * accept its choice must never disagree about what is reachable.
+     */
+    public const SCOPE_LINKABLE = 'linkable';
+
     public function authorize(): bool
     {
         return true;
@@ -77,6 +93,18 @@ class IndexLeadRequest extends FormRequest
             // Raw `industry` filter — comma-separated free-text values (no enum: industry is raw
             // imported data). The canonical niche→industry mapping lives on the frontend for now.
             'industry' => ['nullable', 'string', 'max:1000'],
+
+            /*
+             * Which population to search. ABSENT IS THE HISTORICAL BEHAVIOUR and must stay that
+             * way: every existing caller — the Leads table, its Priority and Status summaries, the
+             * export, the niche-assign modal — sends no scope and gets the active-only list,
+             * `LeadResource`, and `paginate(10)`, exactly as before.
+             *
+             * `linkable` is validated against a one-value allowlist rather than left free-form, so
+             * a typo is a 422 like every other filter here instead of silently falling back to the
+             * ordinary list — which would quietly hide 60% of the picker's valid targets.
+             */
+            'scope' => ['nullable', Rule::in([self::SCOPE_LINKABLE])],
         ];
     }
 }

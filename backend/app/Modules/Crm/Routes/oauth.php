@@ -19,3 +19,4 @@ use Illuminate\Support\Facades\Route;
  * one cache read and a 400.
  */
 Route::get('/auth/google/callback', [GmailOAuthController::class, 'callback']);
+

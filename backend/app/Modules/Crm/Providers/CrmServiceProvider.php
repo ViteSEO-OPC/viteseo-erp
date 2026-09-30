@@ -11,10 +11,13 @@ use App\Modules\Crm\Console\Commands\SyncMailboxesCommand;
 use App\Modules\Crm\Console\Commands\N8nTokenCommand;
 use App\Modules\Crm\Console\Commands\NerbyServiceTokenCommand;
 use App\Modules\Crm\Console\Commands\PruneReadNotifications;
+use App\Modules\Crm\Console\Commands\ProvisionIntegrationAccountCommand;
+use App\Modules\Crm\Console\Commands\ProvisionMetaAccountCommand;
 use App\Modules\Crm\Console\Commands\PruneXlsImportsCommand;
 use App\Modules\Crm\Console\Commands\RecomputeLeadScoresCommand;
 use App\Modules\Crm\Events\DealWon;
 use App\Modules\Crm\Events\FollowUpCompleted;
+use App\Modules\Crm\Events\InboundConversationMessageReceived;
 use App\Modules\Crm\Events\InboundReplyReceived;
 use App\Modules\Crm\Events\LeadQualified;
 use App\Modules\Crm\Events\OutboundEmailSent;
@@ -32,6 +35,7 @@ use App\Modules\Crm\Listeners\EmitReminderDueWebhook;
 use App\Modules\Crm\Listeners\EscalateUnansweredFollowUp;
 use App\Modules\Crm\Listeners\BroadcastCrmNotification;
 use App\Modules\Crm\Listeners\InboundReplyDeliveryDispatcher;
+use App\Modules\Crm\Listeners\QueueAiAutoReply;
 use App\Modules\Crm\Listeners\ReminderDeliveryDispatcher;
 use App\Modules\Crm\Listeners\StampLastLoginAt;
 use App\Modules\Crm\Listeners\SendDueScheduledEmail;
@@ -63,6 +67,15 @@ use App\Modules\Crm\Services\Mail\Contracts\EmailProvider;
 use App\Modules\Crm\Services\Mail\Contracts\GoogleCredentialSource;
 use App\Modules\Crm\Services\Mail\Google\GoogleCredentialSourceFactory;
 use App\Modules\Crm\Services\Mail\MailboxOauthTokenStore;
+use App\Modules\Crm\Services\Inbound\Adapters\InboundAdapterRegistry;
+use App\Modules\Crm\Services\Meta\Connect\Contracts\MetaOAuthClient;
+use App\Modules\Crm\Services\Meta\Connect\GraphMetaOAuthClient;
+use App\Modules\Crm\Services\Meta\Connect\UnconfiguredMetaOAuthClient;
+use App\Modules\Crm\Services\Outbound\Adapters\OutboundAdapterRegistry;
+use App\Modules\Crm\Services\Outbound\Contracts\ProviderCredentialResolver;
+use App\Modules\Crm\Services\Outbound\Credentials\DatabaseProviderCredentialResolver;
+use App\Modules\Crm\Services\Outbound\Meta\GraphMetaSender;
+use App\Modules\Crm\Services\Outbound\Meta\MetaMessagingWindow;
 use App\Modules\Crm\Services\Mail\MailboxSyncManager;
 use App\Modules\Crm\Services\Mail\Providers\SmtpEmailProvider;
 use App\Modules\Crm\Services\Ranking\RankingConfig;
@@ -179,6 +192,60 @@ class CrmServiceProvider extends ServiceProvider
         $this->app->singleton(MailboxSyncManager::class, function (Application $app): MailboxSyncManager {
             return new MailboxSyncManager($app);
         });
+
+        // Phase 3C — resolves the one inbound adapter that owns a provider/channel pair. A
+        // singleton because adapters are stateless and worth reusing across a delivery; it reads
+        // `inbound.adapters` at RESOLUTION rather than here, so the list is never frozen at boot
+        // and a test can configure it without the registry needing a registration hook.
+        $this->app->singleton(InboundAdapterRegistry::class, function (Application $app): InboundAdapterRegistry {
+            return new InboundAdapterRegistry($app);
+        });
+
+        // Phase 3F.1 — the outbound mirror of the registry above, and deliberately a separate
+        // object rather than a shared base: they resolve different interfaces, and a change to one
+        // must not be able to alter which integration a customer's reply leaves through.
+        $this->app->singleton(OutboundAdapterRegistry::class, function (Application $app): OutboundAdapterRegistry {
+            return new OutboundAdapterRegistry($app);
+        });
+
+        // The credential boundary. Phase 3F.2 swaps the Phase 3F.1 null object for the real store,
+        // which changes nothing about what the system can do: the credential table is empty, so the
+        // resolver returns null for every org exactly as the null object did. What it changes is
+        // that the table is now load-bearing — a synthetic credential in a test travels the real
+        // lookup path. Sending still cannot happen, because no Meta adapter has a transport.
+        // NullProviderCredentialResolver is kept as the documented "nothing configured" stand-in.
+        $this->app->bind(ProviderCredentialResolver::class, DatabaseProviderCredentialResolver::class);
+
+        /*
+         * Phase 3G — the Meta outbound transport and its policy gate. Both are stateless and are
+         * shared by the two Meta adapters, which receive them by constructor injection and are
+         * forbidden (by a guard test) from building an HTTP client of their own. Registering them
+         * explicitly rather than leaning on autowiring makes the seam visible: this is the ONLY
+         * place the outbound path acquires the ability to talk to Meta.
+         *
+         * Binding them does not enable sending. `canTransmit()` also requires meta.outbound.enabled,
+         * which ships false.
+         */
+        $this->app->singleton(GraphMetaSender::class);
+        $this->app->singleton(MetaMessagingWindow::class);
+
+        // Phase 3F.3C — the real Graph client, chosen by CONFIGURATION rather than by a code
+        // change. With no app id, redirect URI or app secret set, the null object is bound and the
+        // whole flow refuses exactly as it did before, so deploying this changes nothing about what
+        // the server can do; setting those keys is what turns it on, and that is an operator action
+        // with one obvious way to undo it.
+        //
+        // Decided per resolution rather than at boot: this release runs with no config cache, and a
+        // test needs to set the keys and get the behaviour it configured.
+        $this->app->bind(MetaOAuthClient::class, function (Application $app): MetaOAuthClient {
+            $configured = (string) config('meta.oauth.app_id', '') !== ''
+                && (string) config('meta.oauth.redirect_uri', '') !== ''
+                && (string) config('meta.app_secret', '') !== '';
+
+            return $configured
+                ? $app->make(GraphMetaOAuthClient::class)
+                : $app->make(UnconfiguredMetaOAuthClient::class);
+        });
     }
 
     public function boot(): void
@@ -192,6 +259,33 @@ class CrmServiceProvider extends ServiceProvider
         Route::prefix('api')
             ->middleware('api')
             ->group(__DIR__ . '/../Routes/api.php');
+
+        // PUBLIC Meta webhook routes, at /api/webhooks/meta — the literal callback URL Meta is
+        // given. `api` middleware rather than `web`: there is no session and no CSRF token in a
+        // server-to-server delivery. Their security boundary is Meta-specific and lives in the
+        // route file (signature guard on POST, verify-token handshake on GET); none of the CRM auth
+        // stack applies, because there is no user and the tenant is resolved per Meta resource.
+        //
+        // WHY THE `api` PREFIX AND NOT THE ROOT. The production host sends only `/api`, `/storage`
+        // and two exact paths to PHP; everything else is proxied to the Next.js frontend. A
+        // root-mounted /webhooks/meta was therefore answered by the frontend with an HTML 404 and
+        // never reached Laravel, so Meta's verification could not have succeeded. Living under the
+        // existing /api ingress needs no nginx exception, no reload and no per-host config, and it
+        // keeps working if the app ever moves to another server. The `api` middleware GROUP adds no
+        // URI prefix of its own — only this call does — so the path is /api/webhooks/meta, not
+        // /api/api/webhooks/meta.
+        Route::prefix('api')
+            ->middleware('api')
+            ->group(__DIR__ . '/../Routes/webhooks.php');
+
+        // Phase 3F.3A — the Meta OAuth callback. Under the `api` prefix for the same reason the
+        // webhook is: nginx serves the domain root with Next.js and routes only /api, /storage and
+        // two exact paths to Laravel, so a root-level Meta callback would be answered by the SPA.
+        // The resulting path is /api/auth/meta/callback, which is what META_OAUTH_REDIRECT_URI
+        // must be registered as.
+        Route::prefix('api')
+            ->middleware('api')
+            ->group(__DIR__ . '/../Routes/meta-oauth.php');
 
         // The Google OAuth callback, mounted at the ROOT with no prefix so its path is exactly
         // /auth/google/callback — the string registered as GOOGLE_REDIRECT_URI on the OAuth client,
@@ -259,6 +353,12 @@ class CrmServiceProvider extends ServiceProvider
         // customer communication continues to flow through the shared outreach mailbox.
         Event::listen(InboundReplyReceived::class, InboundReplyDeliveryDispatcher::class);
 
+        // Phase 3I — guarded AI auto-reply. The FIRST listener on this event. Synchronous and
+        // never-throwing (it runs inside ingest's after-commit callback); it only applies cheap
+        // flag/allowlist filters and queues AiAutoReplyJob, which re-checks everything under a lock.
+        // Inert unless ai_auto_reply.enabled, ai_drafts and meta.outbound are ALL switched on.
+        Event::listen(InboundConversationMessageReceived::class, QueueAiAutoReply::class);
+
         // Notification Center realtime. Hooks Laravel's own notification lifecycle
         // rather than each producer, so EVERY CRM in-app notification — the two that
         // exist and every one added later — is pushed to its recipient without the
@@ -291,6 +391,10 @@ class CrmServiceProvider extends ServiceProvider
                 // an operator runs before switching per-organization accounts on, and its failure is a
                 // configuration decision rather than something a cron could act on.
                 CallingDoctorCommand::class,
+                // Provisions (or inspects) the per-org, per-provider inbound integration identity.
+                // Run by hand when an integration is set up; never scheduled.
+                ProvisionIntegrationAccountCommand::class,
+                ProvisionMetaAccountCommand::class,
             ]);
         }
 

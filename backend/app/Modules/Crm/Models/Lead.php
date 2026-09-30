@@ -229,6 +229,19 @@ class Lead extends Model
     }
 
     /**
+     * Inbound conversation threads (Messenger / Instagram DM / WhatsApp / web chat / Lead Ads)
+     * associated with this lead. A lead may hold several — one per provider channel and contact —
+     * and a thread may exist with no lead at all until a safe match is found, so this is a plain
+     * reverse of the nullable `crm_conversations.lead_id`. Newest activity first.
+     *
+     * @return HasMany<Conversation, $this>
+     */
+    public function conversations(): HasMany
+    {
+        return $this->hasMany(Conversation::class)->orderByRaw('COALESCE(last_message_at, created_at) DESC');
+    }
+
+    /**
      * Website Intelligence audit findings (1:1). Data-provider output only — availability, structure,
      * business info, and digital-presence observations. Never a Lead Score / Status / workflow field.
      *
