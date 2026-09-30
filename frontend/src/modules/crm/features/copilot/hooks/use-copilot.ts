@@ -11,6 +11,7 @@ import type { Intent, IntentConfig, CopilotContext } from "@/modules/crm/feature
 import { matchIntentWithEntity, findIntent, extractEntityPhrase } from "@/modules/crm/features/copilot/engine/matcher";
 import { buildResponse } from "@/modules/crm/features/copilot/engine/response-engine";
 import { runAction } from "@/modules/crm/features/copilot/engine/action-engine";
+import { isAiEligible } from "@/modules/crm/features/copilot/engine/ai-fallback";
 import { useCopilotContext } from "@/modules/crm/features/copilot/hooks/use-copilot-context";
 import { useCopilotData } from "@/modules/crm/features/copilot/hooks/use-copilot-data";
 import { usePermissions } from "@/modules/crm/providers/permissions-provider";
@@ -18,6 +19,7 @@ import { useCopilotLeadLookup } from "@/modules/crm/features/copilot/hooks/use-c
 import { useLeadActivityLookup } from "@/modules/crm/features/copilot/hooks/use-copilot-lead-activity";
 import { useOverdueFollowUpLookup } from "@/modules/crm/features/copilot/hooks/use-copilot-followups";
 import { useCopilotActivityFeed } from "@/modules/crm/features/copilot/hooks/use-copilot-activity-feed";
+import { useCopilotAi, useCopilotAiAvailable } from "@/modules/crm/features/copilot/hooks/use-copilot-ai";
 import intentData from "@/modules/crm/features/copilot/data/intents.json";
 import quickActionData from "@/modules/crm/features/copilot/data/quick-actions.json";
 
@@ -106,6 +108,8 @@ export function useCopilot() {
   const lookupLastActivity = useLeadActivityLookup();
   const lookupOverdueFollowUps = useOverdueFollowUpLookup();
   const lookupRecentActivity = useCopilotActivityFeed();
+  const askAi = useCopilotAi();
+  const aiAvailable = useCopilotAiAvailable();
 
   const [messages, setMessages] = useState<Message[]>(seed.messages);
   const idCounter = useRef(seed.messages.length);
@@ -182,15 +186,44 @@ export function useCopilot() {
     [ctx, makeMessage, router, lookupLead, lookupLastActivity, lookupOverdueFollowUps, lookupRecentActivity],
   );
 
+  /**
+   * The OPTIONAL AI turn, reached only when the server reports AI available AND the turn is
+   * AI-eligible (a genuine fallback or a knowledge-article match). A grounded answer is shown as
+   * plain text with the "AI-assisted" footer and no action; anything else — declined, out of scope,
+   * failed — takes the exact deterministic turn for the intent the matcher resolved: the same
+   * article, or the same help.
+   */
+  const runAiFallback = useCallback(
+    async (text: string, intent: Intent) => {
+      const answer = await askAi(text);
+      if (answer === null) {
+        await runTurn(text, intent, text);
+        return;
+      }
+      const userMessage = makeMessage("user", [{ type: "text", text }]);
+      const aiMessage: Message = { ...makeMessage("ai", [{ type: "text", text: answer }]), aiAssisted: true };
+      setMessages((prev) => [...prev, userMessage, aiMessage]);
+    },
+    [askAi, makeMessage, runTurn],
+  );
+
   // Free-text entry from the input bar — resolve the intent via the matcher.
   const send = useCallback(
     (raw: string) => {
       const text = raw.trim();
       if (!text) return;
-      const { intent } = matchIntentWithEntity(text, INTENT_CONFIG);
+      const match = matchIntentWithEntity(text, INTENT_CONFIG);
+      const { intent } = match;
+      // AI only for a genuine fallback or a knowledge-article match; every real intent and direct
+      // request for help takes the unchanged rule-based turn. Unless the server says AI is available
+      // this branch never runs.
+      if (aiAvailable && isAiEligible(match, INTENT_CONFIG)) {
+        void runAiFallback(text, intent);
+        return;
+      }
       void runTurn(text, intent, text);
     },
-    [runTurn],
+    [runTurn, runAiFallback, aiAvailable],
   );
 
   // Suggested-prompt chip — bind straight to its intent (deterministic, skips the matcher).

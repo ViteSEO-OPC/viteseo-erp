@@ -12,6 +12,8 @@ export type Message = {
   author: MessageAuthor;
   segments: RichTextSegment[];
   timestamp: string;
+  /** Set only on a reply from the optional AI fallback; renders the "AI-assisted" footer. */
+  aiAssisted?: boolean;
 };
 
 export type SuggestedPrompt = {

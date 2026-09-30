@@ -202,6 +202,13 @@ export const queryKeys = {
     // what is actually in force in a single payload, and splitting them would let the two be cached
     // at different ages and disagree on screen.
     calling: () => [...queryKeys.integrations.all, "calling"] as const,
+    // Copilot AI — the Super Admin toggle plus each gate's state. Toggling it also invalidates
+    // `copilot.aiConfig`, the boolean the Copilot itself reads.
+    copilot: () => [...queryKeys.integrations.all, "copilot"] as const,
+  },
+  copilot: {
+    // Whether the Copilot may offer a question to AI: one boolean, read by every CRM role.
+    aiConfig: () => ["copilot", "ai-config"] as const,
   },
   businessRules: {
     // Settings → Business Rules (Business Rules Administration). Keyed by module so the reserved
