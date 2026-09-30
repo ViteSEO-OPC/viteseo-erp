@@ -47,7 +47,8 @@ class CopilotContextBuilder
         foreach ($sources as $source) {
             $recordCounts[$source['source']] = 0;
             $text .= ' '.$source['describes'];
-            if ($source['scope'] !== FactScope::REFERENCE) {
+            // A lead source describes one lead, not whose view the other figures are.
+            if ($source['scope'] !== FactScope::REFERENCE && $source['scope'] !== FactScope::LEAD) {
                 $viewerScope = $source['scope'];
             }
             foreach ($source['facts'] as $fact) {

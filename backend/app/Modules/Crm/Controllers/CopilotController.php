@@ -23,8 +23,10 @@ class CopilotController extends Controller
 
     public function ask(CopilotAskRequest $request, CopilotAiService $copilot): CopilotAnswerResource
     {
+        $leadId = $request->validated('lead_id');
+
         return new CopilotAnswerResource(
-            $copilot->answer($request->user(), (string) $request->validated('question'))
+            $copilot->answer($request->user(), (string) $request->validated('question'), is_int($leadId) ? $leadId : null)
         );
     }
 }

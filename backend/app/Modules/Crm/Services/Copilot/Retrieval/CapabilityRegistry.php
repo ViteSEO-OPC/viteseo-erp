@@ -7,8 +7,9 @@ use InvalidArgumentException;
 /**
  * THE CLOSED SET of data capabilities the Copilot may supply to the model. Seven classes, listed
  * here and nowhere else; nothing can register a capability at runtime, and neither the browser nor
- * the model can name one that is not in this list. Phase 1 is aggregates, configuration and curated
- * knowledge only — no per-lead lookup, no activities, no notes, no emails.
+ * the model can name one that is not in this list. These are aggregates, configuration and curated
+ * knowledge only — no per-lead lookup, no activities, no notes, no emails. Facts about one authorised
+ * lead live in the separate {@see LeadCapabilityRegistry}, so this set stays free of per-lead data.
  */
 class CapabilityRegistry
 {
