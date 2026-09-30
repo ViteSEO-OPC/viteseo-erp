@@ -69,6 +69,11 @@ export const queryKeys = {
     // lead's phone is dialable). Nested under detail(id) like the rest, so editing the lead's phone
     // re-asks the question by prefix rather than needing its own invalidation.
     callingCapability: (id: string) => [...queryKeys.leads.detail(id), "calling-capability"] as const,
+    // Conversation → lead picker search (GET /leads?scope=linkable). Under leads.all but deliberately
+    // NOT under lists(): the Leads table invalidates lists() on nearly every lead write, and a picker
+    // that is only open for a few seconds has no reason to refetch on each of them.
+    linkable: (params: { search: string; page: number }) =>
+      [...queryKeys.leads.all, "linkable", params] as const,
   },
   niches: {
     // Business Niche registry (GET /niches) — the vocabulary behind the shared Business Niche
@@ -76,6 +81,16 @@ export const queryKeys = {
     // Create Lead wizard also refreshes the one open in the Edit Lead drawer.
     all: ["niches"] as const,
     list: () => [...queryKeys.niches.all, "list"] as const,
+  },
+  conversations: {
+    // Conversation Inbox (Phase 3E) — inbound Messenger / Instagram threads.
+    all: ["conversations"] as const,
+    lists: () => [...queryKeys.conversations.all, "list"] as const,
+    // The channel filter is part of the key, so switching channels swaps cached lists instead of
+    // briefly rendering the previous channel's rows under the new label.
+    list: (filters: Record<string, unknown>) =>
+      [...queryKeys.conversations.lists(), filters] as const,
+    detail: (id: string) => [...queryKeys.conversations.all, "detail", id] as const,
   },
   followUps: {
     all: ["follow-ups"] as const,

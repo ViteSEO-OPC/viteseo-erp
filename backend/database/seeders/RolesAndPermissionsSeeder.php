@@ -188,6 +188,31 @@ class RolesAndPermissionsSeeder extends Seeder
             // Calling Workspace — read Call History (crm.calls.view) and log/conclude a call
             // (crm.calls.log). Calls are Planner-driven; see CallSessionService.
             'crm.calls.view', 'crm.calls.log',
+            // Conversation Inbox (Phase 3E) — read inbound Messenger / Instagram threads. Its own
+            // ability rather than a lead permission: an inbound conversation from an unknown sender
+            // has no lead, so gating it on crm.leads.view would hide the very messages it exists to
+            // surface. Message bodies are the most sensitive data the module holds.
+            'crm.conversations.view',
+            // Replying to one (Phase 3F). Separate from viewing because reading a customer's
+            // message and speaking to that customer AS THE BUSINESS are different powers: the
+            // second one reaches the customer's phone under the company's name and cannot be
+            // taken back. It is in $crmPermissions, so crm_admin holds it and crm_bd does not —
+            // crm_bd's grant is an explicit list below, and this deliberately is not on it.
+            // Nothing checks it yet beyond OutboundMessageService: Phase 3F.1 ships no endpoint.
+            'crm.conversations.reply',
+            // Attaching a thread to a CRM lead by hand (Phase 3H.3A). Its own ability rather than a
+            // reuse of crm.leads.edit, for one concrete reason: in production crm_bd holds
+            // crm.leads.edit but NOT crm.conversations.view, so gating linking on the lead
+            // permission alone would authorize a user who cannot read the inbox to attach threads
+            // they cannot see. A named ability also survives a re-seed without silently widening.
+            //
+            // Like crm.conversations.reply it is in $crmPermissions, so crm_admin and super_admin
+            // hold it and crm_bd does not — crm_bd's grant is the explicit list below, and this
+            // deliberately is not on it.
+            //
+            // The route ALSO requires crm.conversations.view and LeadPolicy@update; this ability is
+            // the "may link at all" half, not the whole authorization.
+            'crm.conversations.link_lead',
             'crm.dashboard.view',
             'crm.users.view', 'crm.users.create', 'crm.users.edit', 'crm.users.delete',
         ];
@@ -196,11 +221,15 @@ class RolesAndPermissionsSeeder extends Seeder
             Permission::firstOrCreate(['name' => $name, 'guard_name' => 'web']);
         }
 
-        // RC3 Outreach Automation Pack — automation-only ability. Defined so it exists on a fresh
-        // install, but DELIBERATELY NOT synced to any human role: only the scoped n8n service
-        // account holds it, granted by `php artisan n8n:token` from config/n8n.php. This keeps the
-        // send-authorization least-privilege and off every human role.
-        foreach (['crm.outreach.automation.send'] as $automationPermission) {
+        // Integration-only abilities. Defined so they exist on a fresh install, but DELIBERATELY
+        // NOT synced to any human role: each is held by a scoped service account and nothing else.
+        //
+        //  - crm.outreach.automation.send — RC3 Outreach Automation Pack; the n8n service account,
+        //    granted by `php artisan n8n:token` from config/n8n.php.
+        //  - crm.conversations.ingest — Phase 3B inbound conversation boundary; the per-org,
+        //    per-provider accounts granted by `php artisan crm:integration-account`. It permits one
+        //    thing, writing an inbound turn, and carries no read of leads or conversations.
+        foreach (['crm.outreach.automation.send', 'crm.conversations.ingest'] as $automationPermission) {
             Permission::firstOrCreate(['name' => $automationPermission, 'guard_name' => 'web']);
         }
 
@@ -227,6 +256,10 @@ class RolesAndPermissionsSeeder extends Seeder
             'crm.calendar.view', 'crm.calendar.create', 'crm.calendar.edit', 'crm.calendar.delete',
             // A BD runs the Calling Workspace — logs calls and reads their own leads' Call History.
             'crm.calls.view', 'crm.calls.log',
+            // A BD reads the Conversation Inbox: inbound Messenger and Instagram threads are
+            // where a prospect first speaks to the business, so the people who follow prospects up
+            // are exactly the people who need to see them.
+            'crm.conversations.view',
             'crm.dashboard.view',
         ]);
 

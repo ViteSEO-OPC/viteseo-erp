@@ -2,16 +2,17 @@
 
 import { usePathname } from "next/navigation";
 import {
-  LayoutDashboard,
-  Users,
-  Clock,
+  BarChart3,
   CalendarCheck,
   CalendarClock,
-  Target,
-  MapPin,
+  Clock,
   History,
+  Inbox,
+  LayoutDashboard,
+  MapPin,
   Settings,
-  BarChart3,
+  Target,
+  Users,
   type LucideIcon,
 } from "lucide-react";
 import { SidebarNavItem } from "@/modules/crm/components/layout/sidebar/sidebar-nav-item";
@@ -31,6 +32,10 @@ const NAV_ITEMS: {
   // Management Dashboard for Admin/SA) — see app/(dashboard)/dashboard/page.tsx.
   { label: "Dashboard", icon: LayoutDashboard, href: "/zerem/dashboard", minRole: "crm_bd" },
   { label: "Leads", icon: Users, href: "/zerem/leads", minRole: "crm_bd" },
+  // Conversation Inbox — where an inbound Messenger or Instagram message first becomes visible.
+  // Sits next to Leads because that is the journey: a stranger messages the Page, and the person
+  // reading the inbox decides whether it becomes a lead. Inbound never creates one by itself.
+  { label: "Inbox", icon: Inbox, href: "/zerem/inbox", minRole: "crm_bd" },
   // Nearby Clients + Outreach — Business Development workspaces (🔒 PO decision 2026-07-24, RBAC R-3).
   // Admin (CRM Manager) is limited to Dashboard · Leads · Reports & Performance · Activity Logs ·
   // Settings, so both use an explicit allow-list: `minRole` is inherit-upward and was handing them to

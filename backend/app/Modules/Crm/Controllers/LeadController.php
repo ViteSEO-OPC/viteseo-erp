@@ -22,7 +22,9 @@ use App\Modules\Crm\Requests\UpdateLeadRequest;
 use App\Modules\Crm\Resources\ActivityResource;
 use App\Modules\Crm\Resources\ArchivedLeadResource;
 use App\Modules\Crm\Resources\EmailResource;
+use App\Modules\Crm\Resources\LeadPickerResource;
 use App\Modules\Crm\Resources\LeadResource;
+use App\Modules\Crm\Services\ConversationLinkCapability;
 use App\Modules\Crm\Services\Discovery\GooglePlacesAttestation;
 use App\Modules\Crm\Services\Import\LeadImportInProgressException;
 use App\Modules\Crm\Services\Import\XlsConverter;
@@ -50,29 +52,19 @@ class LeadController extends Controller
 {
     public function index(IndexLeadRequest $request): AnonymousResourceCollection
     {
-        // Sort whitelist → [column, direction]. Export reuses this same ordering (filter-aware).
-        //
-        // `recent` (the default) means MOST RECENTLY ENTERED THE CRM — not the highest row id. The two
-        // are the same thing only for leads created directly here. A discovered prospect is inserted
-        // into the Nearby pool the day it is scraped and can sit there for months, so its id records
-        // DISCOVERY time, not the moment a BD accepted it. Ordering by id therefore filed a prospect
-        // accepted today onto whatever page its months-old id happened to land on, which is why
-        // "Accept into CRM" looked like it had silently done nothing.
-        //
-        // COALESCE picks each lead's actual crossing point into the CRM: `qualified_at` for an accepted
-        // prospect, `created_at` for a lead created or imported directly. The latter never carry a
-        // `qualified_at`, so their relative order is unchanged — this only moves accepted prospects,
-        // to where the BD who just accepted them expects to find them.
-        $enteredCrmAt = DB::raw('COALESCE(qualified_at, created_at)');
+        /*
+         * THE PICKER IS A DIFFERENT QUESTION, SO IT TAKES A DIFFERENT PATH ENTIRELY.
+         *
+         * Branching here rather than threading conditionals through the list below is the whole
+         * safety argument for this change: everything after this line is byte-for-byte the code
+         * that has served the Leads screen, its two summary endpoints and the export since before
+         * this phase. A caller that sends no `scope` cannot reach any new behaviour.
+         */
+        if ($request->validated('scope') === IndexLeadRequest::SCOPE_LINKABLE) {
+            return $this->linkableCandidates($request);
+        }
 
-        [$sortColumn, $sortDir] = match ($request->validated('sort')) {
-            'oldest' => ['id', 'asc'],
-            'score-desc' => ['score', 'desc'],
-            'score-asc' => ['score', 'asc'],
-            'name-asc' => ['business_name', 'asc'],
-            'name-desc' => ['business_name', 'desc'],
-            default => [$enteredCrmAt, 'desc'],
-        };
+        [$sortColumn, $sortDir] = $this->leadSort($request);
 
         // Active CRM leads only — discovered prospects live in the Nearby Clients pool and enter the
         // Leads list (and its export, which reuses this query) only once qualified.
@@ -114,6 +106,115 @@ class LeadController extends Controller
         return LeadResource::collection($leads)->additional([
             'industry_counts' => $industryCounts,
         ]);
+    }
+
+    /**
+     * Sort whitelist → [column, direction]. Export reuses this same ordering (filter-aware).
+     *
+     * `recent` (the default) means MOST RECENTLY ENTERED THE CRM — not the highest row id. The two
+     * are the same thing only for leads created directly here. A discovered prospect is inserted
+     * into the Nearby pool the day it is scraped and can sit there for months, so its id records
+     * DISCOVERY time, not the moment a BD accepted it. Ordering by id therefore filed a prospect
+     * accepted today onto whatever page its months-old id happened to land on, which is why
+     * "Accept into CRM" looked like it had silently done nothing.
+     *
+     * COALESCE picks each lead's actual crossing point into the CRM: `qualified_at` for an accepted
+     * prospect, `created_at` for a lead created or imported directly. The latter never carry a
+     * `qualified_at`, so their relative order is unchanged — this only moves accepted prospects,
+     * to where the BD who just accepted them expects to find them.
+     *
+     * LIFTED VERBATIM out of {@see self::index()} so the picker cannot grow a second copy of the
+     * whitelist. A duplicated sort table is how two views of the same data start disagreeing about
+     * what "most recent" means; the behaviour of this match is unchanged in either caller.
+     *
+     * @return array{0: mixed, 1: string}
+     */
+    private function leadSort(IndexLeadRequest $request): array
+    {
+        $enteredCrmAt = DB::raw('COALESCE(qualified_at, created_at)');
+
+        return match ($request->validated('sort')) {
+            'oldest' => ['id', 'asc'],
+            'score-desc' => ['score', 'desc'],
+            'score-asc' => ['score', 'asc'],
+            'name-asc' => ['business_name', 'asc'],
+            'name-desc' => ['business_name', 'desc'],
+            default => [$enteredCrmAt, 'desc'],
+        };
+    }
+
+    /**
+     * Leads this operator could actually link a conversation to — the search behind the Phase 3H.4
+     * picker.
+     *
+     * ================== THE INVARIANT THIS METHOD EXISTS TO HOLD ==================
+     *
+     * EVERY ROW RETURNED HERE MUST BE A LEAD THE SAME OPERATOR WOULD PASS `LeadPolicy@update` FOR.
+     * If the picker and the link endpoint ever disagree, the operator picks a name from a list and
+     * is answered with a 403 — the worst possible outcome, because the mistake is invisible until
+     * after they have chosen. The two halves of that policy are enforced separately and both are
+     * load-bearing:
+     *
+     *   - the ABILITY half (`crm.leads.edit`) is checked once, below, for the whole request;
+     *   - the OWNERSHIP half (`Lead::isVisibleTo`) is `->visibleTo($user)` on the query, which is
+     *     the same predicate the policy calls.
+     *
+     * `visibleTo()` alone would NOT be enough and the distinction is easy to miss: it is a pass
+     * -through for admins and an `assigned_to = me` filter for everyone else, and it says nothing
+     * about whether the caller may edit anything at all.
+     *
+     * WHAT DIFFERS FROM THE ORDINARY LIST, AND ONLY THIS: `Lead::active()` is not applied, so
+     * unqualified prospects are reachable. They are valid link targets — the endpoint accepts them
+     * and a test pins that — and in production they are 625 of 1,049 live leads.
+     *
+     * WHAT IS UNCHANGED, DELIBERATELY: the `BelongsToOrg` scope (implicit), the `SoftDeletes` scope
+     * (also implicit — archived leads stay unreachable, and `withTrashed()` appears nowhere here),
+     * the four search columns, the sort whitelist and the page size.
+     *
+     * NO `industry_counts`. The picker has no niche chips to feed, and that aggregate is a
+     * `GROUP BY` across the tenant's entire lead table — real work, repeated on every search, for a
+     * key nothing reads. The pagination envelope itself (`data` / `links` / `meta`) is identical,
+     * so a client cannot be confused by its absence; only the extra top-level key is gone.
+     */
+    private function linkableCandidates(IndexLeadRequest $request): AnonymousResourceCollection
+    {
+        /*
+         * AUTHORIZED THROUGH `can()`, WHICH MEANS THROUGH THE GATE.
+         *
+         * The ability list is ConversationLinkCapability's, not a copy of it, so the search that
+         * finds candidates and the hint that offers the button cannot drift apart.
+         *
+         * Reading `$user->permissions` or `hasDirectPermission()` instead would answer FALSE for a
+         * super_admin: they hold no `role_has_permissions` row for `crm.conversations.link_lead`
+         * and are authorized by `Gate::before(super_admin)` in CrmServiceProvider. That is the
+         * specific trap this phase was warned about, and a regression test pins it.
+         *
+         * 403 rather than a silently narrowed result set: a caller who may not link should be told
+         * so, not handed an empty list they will misread as "no matches".
+         */
+        abort_unless(
+            app(ConversationLinkCapability::class)->authorizes($request->user()),
+            SymfonyResponse::HTTP_FORBIDDEN,
+        );
+
+        [$sortColumn, $sortDir] = $this->leadSort($request);
+
+        $query = Lead::query()->visibleTo($request->user());
+
+        // The same filters the list uses, so `search` keeps matching business_name, contact_name,
+        // email and phone with its wildcards escaped. Email and phone are SEARCHED and never
+        // SERIALIZED — see LeadPickerResource.
+        $this->applyLeadListFilters($query, $request, applyPriority: true);
+
+        $candidates = $query
+            ->orderBy($sortColumn, $sortDir)
+            ->when($sortColumn !== 'id', fn (Builder $sub) => $sub->orderByDesc('id'))
+            // The ordinary list's page size, unchanged and on purpose. Adding `per_page` here would
+            // mean adding a validated parameter that the ordinary mode still ignores — a pre-existing
+            // inconsistency this slice deliberately leaves alone rather than half-fixing.
+            ->paginate(10);
+
+        return LeadPickerResource::collection($candidates);
     }
 
     /**

@@ -5,6 +5,7 @@ use App\Modules\Crm\Controllers\ActivityController;
 use App\Modules\Crm\Controllers\Auth\MeController;
 use App\Modules\Crm\Controllers\Auth\ProfilePhotoController;
 use App\Modules\Crm\Controllers\Auth\UpdateProfileController;
+use App\Modules\Crm\Controllers\AutomationConversationController;
 use App\Modules\Crm\Controllers\AutomationEmailController;
 use App\Modules\Crm\Controllers\BusinessRuleController;
 use App\Modules\Crm\Controllers\CallController;
@@ -13,6 +14,11 @@ use App\Modules\Crm\Controllers\CopilotController;
 use App\Modules\Crm\Controllers\CopilotSettingController;
 use App\Modules\Crm\Controllers\TwilioVoiceWebhookController;
 use App\Modules\Crm\Http\Middleware\ValidateTwilioSignature;
+use App\Modules\Crm\Controllers\ConversationController;
+use App\Modules\Crm\Controllers\ConversationDraftController;
+use App\Modules\Crm\Controllers\ConversationLeadController;
+use App\Modules\Crm\Controllers\ConversationMessageResolutionController;
+use App\Modules\Crm\Controllers\ConversationReplyController;
 use App\Modules\Crm\Controllers\DashboardController;
 use App\Modules\Crm\Controllers\DeliveryMonitorController;
 use App\Modules\Crm\Controllers\EmailController;
@@ -26,6 +32,7 @@ use App\Modules\Crm\Controllers\DiscoveryConfigController;
 use App\Modules\Crm\Controllers\DiscoveryKnownPlacesController;
 use App\Modules\Crm\Controllers\DiscoveryRunController;
 use App\Modules\Crm\Controllers\GmailOAuthController;
+use App\Modules\Crm\Controllers\MetaConnectController;
 use App\Modules\Crm\Controllers\NerbyProviderSettingController;
 use App\Modules\Crm\Controllers\LeadAttachmentController;
 use App\Modules\Crm\Controllers\LeadController;
@@ -47,6 +54,7 @@ use App\Modules\Crm\Controllers\WebsiteEvidenceController;
 use App\Modules\Crm\Http\Middleware\EnsureCrmAccessIsActive;
 use App\Modules\Crm\Http\Middleware\EnsureNerbyServiceCaller;
 use App\Modules\Crm\Http\Middleware\ThrottleDiscoveryCallbacks;
+use App\Modules\Crm\Http\Middleware\EnsureCrmIntegrationAccount;
 use App\Modules\Crm\Http\Middleware\EnsurePerformanceManagement;
 use App\Modules\Crm\Models\Lead;
 use App\Modules\Crm\Models\PlannerEvent;
@@ -443,6 +451,147 @@ Route::middleware(['auth:sanctum', 'set-current-org', 'subscription-active', 'fe
         Route::post('/automation/leads/{lead}/emails', [AutomationEmailController::class, 'store'])
             ->middleware('permission:crm.outreach.automation.send');
 
+        // Phase 3E — the read-only conversation inbox: the first surface where an inbound
+        // Messenger or Instagram message becomes visible to a person. Both routes READ only; there
+        // is no reply, no status change and no lead linking here, and no Meta API call anywhere in
+        // the module.
+        //
+        // Gated by its own ability rather than crm.leads.view. A conversation from an unknown
+        // sender has NO lead — both of the first real production threads are unlinked — so a
+        // lead permission would hide exactly the messages this screen exists to show. Message
+        // bodies are the most sensitive data the module holds and deserve their own grant.
+        //
+        // Tenancy is not enforced here: Conversation uses BelongsToOrg, so the route-model binding
+        // below resolves another tenant's id to a 404 rather than to a filtered row.
+        Route::get('/conversations', [ConversationController::class, 'index'])
+            ->middleware('permission:crm.conversations.view');
+        Route::get('/conversations/{conversation}', [ConversationController::class, 'show'])
+            ->middleware('permission:crm.conversations.view');
+
+        /*
+         * Phase 3H.1 — replying in a thread. The FIRST write this module has ever exposed.
+         *
+         * A SEPARATE ABILITY FROM VIEWING, and the separation is the point: reading what a customer
+         * wrote and speaking to that customer AS THE BUSINESS are different powers. The second one
+         * reaches a real person's phone under the company's name and cannot be taken back, so
+         * `crm.conversations.view` deliberately does not imply it. The middleware here is defence
+         * in depth — OutboundMessageService re-checks the same ability, because a future queued job
+         * will have no middleware at all.
+         *
+         * `throttle:10,1` matches the module's existing convention for mutating endpoints (the Meta
+         * authorization and Nerby provider-test routes use the same). Ten replies a minute is far
+         * above human typing speed and far below anything that could be used to hammer Meta.
+         *
+         * Tenancy is not enforced here either: Conversation uses BelongsToOrg, so another tenant's
+         * id is a 404 at binding time, before the controller exists.
+         */
+        Route::post('/conversations/{conversation}/reply', [ConversationReplyController::class, 'store'])
+            ->middleware(['permission:crm.conversations.reply', 'throttle:10,1']);
+
+        /*
+         * Phase 3H.5A — an operator's verdict on an outbound message whose delivery nobody could
+         * confirm: `{"outcome": "sent" | "not_sent"}`. It never calls a provider and never re-sends.
+         *
+         * Reply authority, because confirming what the business said to a customer belongs to the
+         * people allowed to say it — plus conversation view, because the response carries the
+         * message, and reply authority alone must not become a way to read threads.
+         *
+         * `scopeBindings()` resolves `{message}` through the conversation's own `messages()`, so a
+         * message from another thread is a 404 at binding time.
+         */
+        Route::post('/conversations/{conversation}/messages/{message}/resolution', [ConversationMessageResolutionController::class, 'store'])
+            ->middleware(['permission:crm.conversations.view', 'permission:crm.conversations.reply', 'throttle:10,1'])
+            ->scopeBindings();
+
+        /*
+         * Phase 4A-lite — an AI-written DRAFT reply for the agent to review, edit and send through
+         * the reply route above. It NEVER sends: no provider call, no message row, no credential.
+         *
+         * View + reply, the same pair as the resolution route: the model reads the thread, and the
+         * draft is text meant to be spoken for the business.
+         *
+         * `throttle:5,1` with its OWN key prefix. A bare numeric throttle keys on the user alone, so
+         * without a prefix drafting and replying would share one counter and five drafts would lock
+         * the agent out of sending.
+         */
+        Route::post('/conversations/{conversation}/draft', [ConversationDraftController::class, 'store'])
+            ->middleware([
+                'permission:crm.conversations.view',
+                'permission:crm.conversations.reply',
+                'throttle:5,1,crm-conversation-draft:',
+            ]);
+
+        /*
+         * Phase 3H.3A — attaching a thread to a CRM lead by hand. LINK ONLY: NULL → lead. Relinking
+         * to a different lead is refused with a 409, and unlinking is not implemented.
+         *
+         * WHY A HUMAN HAS TO DO THIS AT ALL. ConversationLeadMatcher identifies a sender by exact
+         * email or exact phone, and Messenger and Instagram DM supply neither — a PSID and an IGSID
+         * are opaque. So every inbound chat thread in production matches `none` and stays unlinked
+         * forever unless a person says who it is.
+         *
+         * BOTH PARTICIPANTS ARE IN THE URL, WHICH IS THE SECURITY DESIGN, not a REST preference.
+         * Route-model binding resolves each through BelongsToOrg — and the lead through SoftDeletes
+         * as well — so a cross-org thread, a cross-org lead, a nonexistent lead and an ARCHIVED lead
+         * are one indistinguishable 404 before the controller exists. Taking a lead id in the body
+         * would have meant an `exists:crm_leads,id` rule, which ignores both the org scope and the
+         * soft-delete filter: a foreign id would validate and then 404 while a nonexistent one
+         * would 422, and the difference in answer tells a caller whether another tenant's lead
+         * exists.
+         *
+         * THREE INDEPENDENT AUTHORIZATIONS, and each removes a real hole:
+         *   - crm.conversations.view      — you may read this inbox at all. Load-bearing: in
+         *                                   production crm_bd holds crm.leads.edit but NOT this, so
+         *                                   without it a BD could attach threads they cannot see.
+         *   - crm.conversations.link_lead — you may link. Named separately from `reply` because
+         *                                   speaking to a customer and filing a thread are
+         *                                   different powers, and from crm.leads.edit so a re-seed
+         *                                   cannot silently widen who may do it.
+         *   - can:update,lead             — LeadPolicy@update: the crm.leads.edit ability AND the
+         *                                   per-BD ownership boundary, so a BD can only link to
+         *                                   leads that are actually theirs.
+         *
+         * PROSPECTS ARE VALID TARGETS. There is deliberately no `active()` constraint: an inbound
+         * enquiry from an unknown business is exactly the case most likely to already exist as an
+         * unqualified prospect in the Nearby pool, and refusing those would defeat the feature.
+         * Phase 3H.4's picker must be able to find them, which the leads list cannot do today.
+         *
+         * `throttle:10,1` matches the module's convention for mutating endpoints.
+         */
+        Route::post('/conversations/{conversation}/lead/{lead}', [ConversationLeadController::class, 'store'])
+            ->middleware([
+                'permission:crm.conversations.view',
+                'permission:crm.conversations.link_lead',
+                'throttle:10,1',
+            ])
+            ->can('update', 'lead');
+
+        // Phase 3B — the trusted inbound conversation boundary. NOT a Meta webhook: it takes an
+        // ALREADY NORMALIZED turn (no provider payload shape, no hub.challenge handshake) and hands
+        // it to InboundConversationService. Authorized by `crm.conversations.ingest` alone — held by
+        // no human role, only by the per-org, per-provider accounts `crm:integration-account`
+        // provisions — and deliberately not by can:view,lead, exactly as the automation send above.
+        //
+        // TWO WINDOWS, BOTH PREFIXED. A per-minute limit alone permits 119 requests a minute
+        // forever; the hourly limit bounds the grind. The prefixes are required: an authenticated
+        // request is keyed on the user, so an unprefixed limiter would share one counter with every
+        // other unprefixed `throttle:` this account touches (see the Accounting note).
+        //
+        // WHY THE ABILITY CHECK IS NOT THE BOUNDARY. `permission:` authorizes through can(), and
+        // the CRM's global Gate::before answers true for any ability a super_admin is asked about
+        // — so that middleware alone would let the most privileged human credential in the system
+        // reach a machine-only endpoint. EnsureCrmIntegrationAccount reads the permission and role
+        // pivots directly (no gate, no role inheritance) and is what actually holds the line; the
+        // ability check stays because it is the project's convention and answers first for the
+        // ordinary "wrong account" case.
+        Route::post('/automation/conversations/ingest', [AutomationConversationController::class, 'ingest'])
+            ->middleware([
+                'permission:crm.conversations.ingest',
+                EnsureCrmIntegrationAccount::class,
+                'throttle:120,1,crm-conversations-ingest:',
+                'throttle:3000,60,crm-conversations-ingest-hourly:',
+            ]);
+
         // Internal notes on a lead (Lead Internal Notes Module). Read/create reuse LeadPolicy@view
         // (ownership); create also needs lead.notes.create. Edit/delete authorize via NotePolicy
         // (author/Admin/SA); scopeBindings ties {note} to its {lead}. Each write logs a note.* Activity.
@@ -769,6 +918,40 @@ Route::middleware(['auth:sanctum', 'set-current-org', 'subscription-active', 'fe
             Route::delete('/settings/integrations/calling/credentials', [CallSettingsController::class, 'destroyCredentials']);
             Route::post('/settings/integrations/calling/test', [CallSettingsController::class, 'test'])
                 ->middleware('throttle:10,1');
+
+            /*
+             * Settings → Integrations → Meta. Same role gate as Gmail above, and for the same
+             * reason: connecting a tenant's Facebook Pages is an administrative act, not a
+             * business-development one, so crm_bd is refused at the route rather than by a UI
+             * that hides the button.
+             *
+             * GET    status — configured / connected / how many connections. No secret.
+             * POST   authorization — issue a single-use consent URL. Creates NO connection row.
+             * DELETE — disconnect every live connection. Deletes nothing.
+             *
+             * The public half of this flow is /auth/meta/callback in Routes/oauth.php, which Meta
+             * reaches with no bearer token.
+             */
+            Route::get('/settings/integrations/meta', [MetaConnectController::class, 'show']);
+            Route::delete('/settings/integrations/meta', [MetaConnectController::class, 'destroy']);
+            Route::post('/settings/integrations/meta/authorization', [MetaConnectController::class, 'store'])
+                ->middleware('throttle:10,1');
+
+            /*
+             * Flow A — platform bootstrap. Connects the CRM's OWN Meta business with a System User
+             * token, because Meta will not let the Business Portfolio that owns an app onboard
+             * itself through Facebook Login for Business.
+             *
+             * GATED TO super_admin ALONE, one level tighter than the rest of this group. The other
+             * three endpoints let a crm_admin connect their own tenant through a consent screen
+             * they control; this one accepts a long-lived credential typed in by hand and attaches
+             * live messaging assets, which is a platform-operator act rather than a tenant one.
+             *
+             * Throttled hard: a correct bootstrap happens once, and a loop against it is either a
+             * mistake or someone testing tokens.
+             */
+            Route::post('/settings/integrations/meta/bootstrap', [MetaConnectController::class, 'bootstrap'])
+                ->middleware(['role:super_admin', 'throttle:5,1']);
 
             // Settings → Integrations → Nearby Lead Generation: which engine fills the discovered-
             // business pool. A Business Development Manager is refused here at the route, so the UI
