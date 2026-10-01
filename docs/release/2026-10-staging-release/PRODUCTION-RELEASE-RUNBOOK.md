@@ -3,6 +3,9 @@
 **Status: NOT APPROVED. Production stays on hold until every gate in §0 is green.** Nothing here has been run.
 Written 2026-10-01 against: staging `796eda8c` (+ the `release/staging-readiness` merge), main `2c445ea6`,
 production release9 @ `f70ae1aa` (detached), DB `teamora` 350 migrations / batch 17.
+**Scope update 2026-10-01:** staging moved to `10270d6c` (Copilot Phase 2, §7) before this branch was merged. The
+**final staging / main SHA is decided only after the readiness PR merges** — always deploy the reviewed `MAIN_SHA`
+from §1.1, never a SHA written in this file. Copilot Phase 2 added no migration, so the 28-migration plan stands.
 
 Companion documents (same folder): [LEAD-DATA-ROLLBACK-RUNBOOK](LEAD-DATA-ROLLBACK-RUNBOOK.md) ·
 [HR-PAYROLL-SIGNOFF](HR-PAYROLL-SIGNOFF.md) · [SUPER-ADMIN-SPOT-CHECK](SUPER-ADMIN-SPOT-CHECK.md) ·
@@ -39,6 +42,7 @@ REPO=git@github.com:ViteSEO-OPC/viteseo-platform.git
 | Super-admin automated suite green on `MAIN_SHA`; manual spot-check done on demo | SUPER-ADMIN-SPOT-CHECK |
 | Decision recorded for each optional activation (discovery worker, scraper cutover, enrichment) — default: **not today** | §2.6 |
 | Maintenance window announced (≈20 min; inbox/webhooks paused) | |
+| Copilot AI ships **OFF** (§7). Enabling it later needs its own approval incl. the processor/privacy decision | §7 |
 
 ## 1. Pre-deploy (read-only except the backup dirs)
 1. **SHAs** — fetch with the read-only deploy key and pin the exact commit:
@@ -60,6 +64,8 @@ REPO=git@github.com:ViteSEO-OPC/viteseo-platform.git
 5. **Config / env**: no new key is REQUIRED; every new feature defaults OFF/manual:
    `DISCOVERY_WORKER_ENABLED` / `DISCOVERY_ENRICHMENT_ENABLED` (off), `CALL_PROVIDER` (manual), `COPILOT_AI_ENABLED`
    (off), `GOTENBERG_URL` (unset = download-only). **Do not add any of them in this release** unless §2.6 says so.
+   **Copilot:** `COPILOT_AI_ENABLED` must stay **absent** (it is today). Only `true`/`1` enable it, but beware: Laravel
+   reads `off`, `no`, `disabled` as **true** — never write those; to switch it off delete the line (or write `false`).
    Frontend: no new required key. `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` is optional (unset = the Nearby board draws the
    OpenStreetMap map — a supported state); `frontend/.env.production` stays as is.
    Confirm: `grep -cE '^(DISCOVERY_|NERBY_|COPILOT_|CALL_PROVIDER=|CALLING_|TWILIO_|GOTENBERG_|OFFICE_PREVIEW_)' $B/.env` → `0`;
@@ -131,6 +137,8 @@ REPO=git@github.com:ViteSEO-OPC/viteseo-platform.git
 | 11 | Scraper auth | if cut over: `scraper-token-rotate.sh --check` → OK + probe 200; if NOT: the 18:30 cron line is paused (`crontab -l`) | as decided |
 | 12 | HR spot-check | open run 9 + 3 payslips (incl. run 5) and compare with pre-deploy; **do not re-run any run** | identical |
 | 13 | Super-admin / org | SUPER-ADMIN-SPOT-CHECK rows 1–7, 10 | all ✔ |
+| 15 | Copilot OFF | `A config:show copilot.ai.enabled` → `false`; `SELECT COUNT(*) FROM teamora.crm_copilot_settings` → 0 (no row = AI off) ; `SELECT COUNT(*) FROM teamora.crm_copilot_ai_logs` → 0 | off; 0; 0 |
+| 16 | Copilot smoke (rule-based only) | super_admin: open the Zerem Copilot panel, ask "how many leads do I have?" and one lead question → deterministic answers, no error; devtools: `GET /api/v1/crm/copilot/config` returns AI unavailable; no `POST /copilot/ask` reaches a provider (logs count stays 0) | as described |
 | 14 | Logs | `tail -n +$(( $(cat $W/log-lines-before) + 1 )) $B/storage/logs/laravel.log \| grep -c 'production.ERROR'` | 0 |
 
 **Rollback triggers**: any of #1–#8, #12, #13 ✘; error rate visibly up; data looks wrong to the HR owner; an
@@ -167,6 +175,34 @@ Order: freeze → save post-release DB → restore DB → code → build → ser
 Worker rollback alone (keep the release): delete `DISCOVERY_WORKER_ENABLED` from `.env` → runs refused again;
 `systemctl disable --now vss-discovery` (SIGTERM lets the current job finish ≤ 960 s).
 Enrichment alone: delete `DISCOVERY_ENRICHMENT_ENABLED` (next tick skipped).
+
+## 7. Copilot (Phase 1 + Phase 2) — in scope, shipped OFF
+**New to production as a whole:** production `f70ae1aa` has no Copilot AI backend; this release adds Phase 1 (global
+aggregates/knowledge) and Phase 2 (lead-scoped answers, commits `4f7cd82d`, `29f3a00a`, merge `10270d6c`), plus the two
+pending migrations `2026_09_29_000000_create_crm_copilot_settings_table` / `…000100_create_crm_copilot_ai_logs_table`
+(already among the 28).
+- **Off by default, two locks:** env `COPILOT_AI_ENABLED` (absent = off) AND a Super Admin setting row
+  `crm_copilot_settings.ai_enabled` (no row = off) AND a usable stored OpenAI/OpenRouter key. With the env lock off,
+  nothing reads the setting or the key and no AI call can happen (single gate in `CopilotAiService::answer`). No job,
+  listener or schedule entry; no new route/middleware; no new env key.
+- **Frontend when off:** the panel uses the existing rule-based answers; the AI path is hidden; no error.
+- **Data flow if ever enabled (decision required first):** for an open-ended question about ONE lead the user may see,
+  the provider (OpenRouter if the stored NERBY key is `sk-or-…`, else `OPENAI_BASE_URL`, default OpenAI; model from the
+  stored setting) receives: the business name (emails/URLs/phone shapes scrubbed, ≤120 chars), status, priority,
+  website status, stored score, last-activity date, owner as you/a teammate/unassigned, and follow-up COUNTS; plus the
+  question text as typed (not scrubbed). Never sent: contact name, email, phone, address, coordinates, website/social
+  links, notes, message/conversation bodies, ids. No Messenger/Instagram content → no Meta/App Review change.
+  **Privacy/processor impact:** identifiable lead data to a third-party AI provider; the setting is GLOBAL (all tenant
+  orgs). Needs a DPA/processor + privacy-notice decision and an org-scope decision before anyone turns it on.
+- **Authorization (tested):** route `role:super_admin|crm_admin|crm_bd`, `throttle:20,1`; lead resolved in the caller's
+  org only, active (non-prospect), not deleted, BD = own assigned leads only, plus `LeadPolicy@view`; every refusal is
+  the same "not answered" (no existence leak). Audit rows store a question hash, counts, model, timings, outcome — no
+  prompt, answer or lead data; 90-day retention.
+- **Rollback:** part of the normal DB restore (its tables are in the 28 migrations). To switch AI off at any time:
+  delete `COPILOT_AI_ENABLED` from `.env` (PHP-FPM reads it on the next request; no cache) and/or turn the Super Admin
+  setting off.
+- **Known follow-ups (not blockers while off):** make the env flag strict (`filter_var(..., FILTER_VALIDATE_BOOL)`);
+  scrub the question text; count `lead_denied` against the daily cap.
 
 ## 6. Afterwards
 Record `MAIN_SHA`, timings, check results and the backup path in `/root/docs/vsp/`; update memory notes; keep `$W`

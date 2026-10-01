@@ -11,5 +11,7 @@ backup/restore tool, host files to install AT release time, and the guard/tests 
 | D. Super-admin / org-selection order | `tests/Feature/Platform/TheTenantIsPinnedBeforeBindingTest.php` + [SUPER-ADMIN-SPOT-CHECK.md](SUPER-ADMIN-SPOT-CHECK.md) | 11 tests green; ordering regression caught (mutation-verified); manual checklist ready |
 
 The deploy itself: [PRODUCTION-RELEASE-RUNBOOK.md](PRODUCTION-RELEASE-RUNBOOK.md).
+Scope note (2026-10-01): staging also gained Copilot Phase 2 (`10270d6c`); it ships OFF — see runbook §7. The final
+release SHA is fixed only after the readiness PR merges.
 Host files (install only during the release, only if the matching step is approved):
 [host/vss-discovery.service](host/vss-discovery.service), [host/scraper-token-rotate.sh](host/scraper-token-rotate.sh).
