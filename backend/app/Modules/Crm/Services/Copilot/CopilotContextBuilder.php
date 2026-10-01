@@ -44,9 +44,19 @@ class CopilotContextBuilder
         $text = '';
         $recordCounts = [];
         $viewerScope = null;
+        $hasLead = false;
+        $leadNames = [];
         foreach ($sources as $source) {
             $recordCounts[$source['source']] = 0;
             $text .= ' '.$source['describes'];
+            if ($source['scope'] === FactScope::LEAD) {
+                $hasLead = true;
+                foreach ($source['facts'] as $fact) {
+                    if ($fact['name'] === 'business_name' && is_string($fact['value']) && trim($fact['value']) !== '') {
+                        $leadNames[] = mb_strtolower(trim($fact['value']));
+                    }
+                }
+            }
             // A lead source describes one lead, not whose view the other figures are.
             if ($source['scope'] !== FactScope::REFERENCE && $source['scope'] !== FactScope::LEAD) {
                 $viewerScope = $source['scope'];
@@ -82,6 +92,8 @@ class CopilotContextBuilder
             $viewerScope,
             mb_strtolower($text),
             strlen((string) json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)),
+            $hasLead,
+            array_values(array_unique($leadNames)),
         );
     }
 
@@ -198,6 +210,18 @@ class CopilotContextBuilder
             }
             if ($unit === RetrievedFacts::PHP) {
                 $pesos[$n] = true;
+            }
+
+            return;
+        }
+        // A date is a CRM value, not prose: its year, month and day are bound to the fact that
+        // supplied it, so "September 23, 2026" is grounded and "September 24" is not.
+        if ($unit === RetrievedFacts::DATE && is_string($value) && preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $value, $date) === 1) {
+            $text .= ' '.$value;
+            foreach ([$date[1], $date[2], $date[3]] as $part) {
+                $n = self::canonical($part);
+                $numbers[$n] = true;
+                $figures[$n][] = $origin;
             }
 
             return;

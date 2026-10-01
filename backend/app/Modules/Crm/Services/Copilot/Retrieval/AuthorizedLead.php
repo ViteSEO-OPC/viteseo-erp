@@ -21,14 +21,23 @@ use LogicException;
  *
  * The lookup selects only the allowlisted columns and the policy's inputs, and this object keeps
  * copies of the SENDABLE values alone — never the Lead model — so it cannot serialise one, and
- * {@see value()} refuses any column that is not sendable.
+ * {@see value()} refuses any column that is not sendable. The owner survives only as a label relative
+ * to the viewer ({@see ownerLabel()}); `assigned_to` itself never leaves this class.
  */
 final class AuthorizedLead implements JsonSerializable
 {
+    /** Who holds the lead, relative to the viewer. The only form ownership ever takes (PO decision D4). */
+    public const OWNER_YOU = 'you';
+
+    public const OWNER_TEAMMATE = 'a teammate';
+
+    public const OWNER_UNASSIGNED = 'unassigned';
+
     /** @param  array<string, mixed>  $values  SENDABLE columns only */
     private function __construct(
         private readonly int $id,
         private readonly array $values,
+        private readonly string $owner,
     ) {}
 
     public static function resolve(User $user, int $leadId): ?self
@@ -48,7 +57,19 @@ final class AuthorizedLead implements JsonSerializable
             $values[$column] = $lead->getAttribute($column);
         }
 
-        return new self((int) $lead->getKey(), $values);
+        $owner = match (true) {
+            $lead->assigned_to === null => self::OWNER_UNASSIGNED,
+            (int) $lead->assigned_to === (int) $user->getKey() => self::OWNER_YOU,
+            default => self::OWNER_TEAMMATE,
+        };
+
+        return new self((int) $lead->getKey(), $values, $owner);
+    }
+
+    /** `you`, `a teammate` or `unassigned` — never the owner's name, id or role. */
+    public function ownerLabel(): string
+    {
+        return $this->owner;
     }
 
     /** For server-side queries scoped to this lead. Never supplied to the model. */

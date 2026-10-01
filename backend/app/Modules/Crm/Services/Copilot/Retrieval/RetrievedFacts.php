@@ -23,6 +23,9 @@ final readonly class RetrievedFacts
 
     public const LABEL = 'label';
 
+    /** A calendar date, `YYYY-MM-DD` in Asia/Manila, or null when none is recorded. */
+    public const DATE = 'date';
+
     /** Curated reference text (knowledge articles). */
     public const TEXT = 'text';
 

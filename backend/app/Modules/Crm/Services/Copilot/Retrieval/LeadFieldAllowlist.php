@@ -16,7 +16,11 @@ namespace App\Modules\Crm\Services\Copilot\Retrieval;
  */
 final class LeadFieldAllowlist
 {
-    public const SENDABLE = ['business_name'];
+    /**
+     * Slice 1: the business name. Slice 2 (PO decision D2): status, priority and website status
+     * (always normalised to LeadVocabulary), the STORED score, and the last-activity date.
+     */
+    public const SENDABLE = ['business_name', 'status', 'priority', 'website_status', 'score', 'last_activity'];
 
     public const AUTHORIZATION_ONLY = ['id', 'assigned_to'];
 
@@ -29,8 +33,7 @@ final class LeadFieldAllowlist
     ];
 
     public const NOT_YET_REVIEWED = [
-        'industry', 'website_status', 'priority', 'email_outreach', 'cold_calling', 'status',
-        'last_activity', 'score', 'amount',
+        'industry', 'email_outreach', 'cold_calling', 'amount',
         'region', 'province', 'city',
         'source', 'discovery_ai_assisted', 'acquisition_channel', 'qualified_at',
         'created_at', 'updated_at',

@@ -49,6 +49,14 @@ final class FactVocabulary
         'upcoming' => '\bupcoming\b|\bcoming\b|darating|susunod',
         'completed_outreach_emails' => '\boutreach\b|\bemails?\b|\bsent\b|\boutbound\b|padala',
 
+        // One authorised lead's profile (Phase 2 Slice 2). Same words as the caller's totals on purpose:
+        // which one a figure is gets decided by the lead-subject rule in CopilotAnswerValidator.
+        'lead_score' => '\bscores?\b|\bpoints?\b|puntos|iskor',
+        'last_activity' => '\blast\b|\bactivity\b|\bactive\b|huling|aktibidad',
+        'lead_overdue_follow_ups' => '\boverdue\b|\blate\b|lagpas|lampas|atrasado|delayed',
+        'lead_follow_ups_due_today' => '\btoday\b|ngayong araw|\bngayon\b',
+        'lead_upcoming_follow_ups' => '\bupcoming\b|\bcoming\b|darating|susunod',
+
         // Performance.
         'assigned_leads' => '\bassign|naka-?assign',
         'active_leads' => '\bactive\b|aktibo',

@@ -80,7 +80,12 @@ class LeadScopedDataTest extends TestCase
         foreach ($locked as $column) {
             $this->assertNotContains($column, LeadFieldAllowlist::SENDABLE, "{$column} must never be sendable");
         }
-        $this->assertSame(['business_name'], LeadFieldAllowlist::SENDABLE, 'Slice 1 sends the business name only.');
+        // Slice 1: the business name. Slice 2 (PO decision D2, 2026-09-30): the profile columns.
+        $this->assertSame(
+            ['business_name', 'status', 'priority', 'website_status', 'score', 'last_activity'],
+            LeadFieldAllowlist::SENDABLE,
+            'Only the PO-approved lead columns may be sendable.',
+        );
     }
 
     /** The authorisation lookup reads the allowlist and the policy's inputs — never `*`. */
@@ -305,7 +310,7 @@ class LeadScopedDataTest extends TestCase
 
     public function test_the_lead_capability_set_is_closed_and_separate_from_phase_1(): void
     {
-        $this->assertSame(['lead_subject'], app(LeadCapabilityRegistry::class)->keys());
+        $this->assertSame(['lead_subject', 'lead_profile'], app(LeadCapabilityRegistry::class)->keys());
         $this->assertNotContains('lead_subject', app(CapabilityRegistry::class)->keys());
         $this->assertCount(7, app(CapabilityRegistry::class)->keys());
 

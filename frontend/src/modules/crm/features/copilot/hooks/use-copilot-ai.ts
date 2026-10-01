@@ -33,12 +33,15 @@ type CopilotAnswer = { answered: boolean; text: string | null };
 /**
  * Ask the AI about a question the rule-based Copilot could not answer. Resolves to the
  * answer text, or null for "not answered" — declined, out of scope, switched off, or failed.
- * Only the question is sent; the server builds the CRM context for the signed-in user.
+ * Only the question is sent — plus, for a question about one lead, the id of the single lead the
+ * policy-scoped lookup resolved. The server re-authorises that lead and builds the CRM context for
+ * the signed-in user; nothing else about the lead leaves the browser.
  */
 export function useCopilotAi() {
-  return useCallback(async (question: string): Promise<string | null> => {
+  return useCallback(async (question: string, leadId?: number): Promise<string | null> => {
     try {
-      const response = await apiClient.post("/copilot/ask", { question });
+      const body = typeof leadId === "number" ? { question, lead_id: leadId } : { question };
+      const response = await apiClient.post("/copilot/ask", body);
       const answer = response.data?.data as CopilotAnswer | undefined;
       const text = answer?.answered === true && typeof answer.text === "string" ? answer.text.trim() : "";
       return text === "" ? null : text;

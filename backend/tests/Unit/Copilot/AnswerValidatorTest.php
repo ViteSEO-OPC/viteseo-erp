@@ -115,6 +115,15 @@ class AnswerValidatorTest extends TestCase
         $this->assertSame($reason, $this->check($answer));
     }
 
+    /**
+     * The relative-date rule (`ungrounded_relative_date`) belongs to answers that were supplied a
+     * date. These facts hold none, so the same wording is left to the other rules, as before.
+     */
+    public function test_relative_date_wording_is_not_judged_when_no_date_was_supplied(): void
+    {
+        $this->assertSame('ok', $this->check('You have 6 overdue follow-ups, so their due times have already passed.', false, ['follow_ups']));
+    }
+
     // ── 1. A number is grounded only with its metric and its subject ───────────────────────────────
 
     /**
@@ -221,6 +230,187 @@ class AnswerValidatorTest extends TestCase
     public function test_the_supplied_estimated_pipeline_value_may_be_quoted(): void
     {
         $this->assertSame('ok', $this->check('Your estimated pipeline value is ₱2,796,111.', true, ['performance']));
+    }
+
+    /** One authorised lead (score 8) beside the scoring article that defines "opportunity". */
+    private function checkWithLead(string $answer): string
+    {
+        $context = (new CopilotContextBuilder)->build('q', [
+            new RetrievedFacts('lead_subject', 'The one lead this question is about.', [
+                RetrievedFacts::fact('business_name', 'Kopi Roasters', RetrievedFacts::LABEL),
+            ], 1, FactScope::LEAD),
+            new RetrievedFacts('lead_profile', 'The profile of the one lead this question is about.', [
+                RetrievedFacts::fact('status', 'new', RetrievedFacts::LABEL),
+                RetrievedFacts::fact('lead_score', 8, RetrievedFacts::POINTS),
+            ], 1, FactScope::LEAD),
+            new RetrievedFacts('knowledge', 'Curated CRM help articles.', [
+                RetrievedFacts::fact('How lead scoring works', 'Lead score: how strong an opportunity a lead is, from 0 to 100.', RetrievedFacts::TEXT),
+            ], 1, FactScope::REFERENCE),
+        ]);
+        $content = json_encode(['answerable' => true, 'answer' => $answer, 'sources' => ['lead_subject', 'lead_profile', 'knowledge']]);
+
+        return (new CopilotAnswerValidator)->validate($content, $context, 'tell me about this lead')[0];
+    }
+
+    /** @return array<string, array{0: string}> */
+    public static function gradedLeadOpportunity(): array
+    {
+        return [
+            // Manual QA 2026-09-30, verbatim: accepted because the score-tied allowance only barred lead GROUPS.
+            'qa: the lead, weak' => ['The lead has a score of 8 points, indicating a relatively weak opportunity.'],
+            'named, weak' => ['Kopi Roasters, with a lead score of 8, is a weak opportunity.'],
+            'named, strong' => ['Kopi Roasters is a strong opportunity based on its lead score.'],
+            'this lead' => ['Going by its score, this lead is not a strong opportunity.'],
+            'its score, with the figure' => ['Its score of 8 points makes it a weak opportunity.'],
+            'its score, no figure' => ['Its lead score suggests a weak opportunity.'],
+            'the figure alone' => ['At 8 points, that is a weak opportunity.'],
+            'taglish' => ['Mahinang pagkakataon ang lead na ito batay sa score nito.'],
+        ];
+    }
+
+    /**
+     * The scoring article says a higher score means a stronger opportunity; it gives no point at
+     * which one becomes weak or strong. So the score may be stated, and what a score measures may be
+     * explained, but the one supplied lead is never graded.
+     */
+    #[DataProvider('gradedLeadOpportunity')]
+    public function test_the_supplied_leads_score_is_never_graded_as_an_opportunity(string $answer): void
+    {
+        $this->assertSame('unsupported_opportunity', $this->checkWithLead($answer));
+    }
+
+    public function test_with_a_lead_attached_the_score_is_stated_and_opportunity_is_still_explained_in_general(): void
+    {
+        $this->assertSame('ok', $this->checkWithLead('Kopi Roasters has a lead score of 8 points. A higher score means a stronger opportunity, so you could sort the Leads table by score to see the strongest opportunities.'));
+        $this->assertSame('ok', $this->checkWithLead('Kopi Roasters is a new lead with a lead score of 8 points.'));
+    }
+
+    // ── 2b. The lead profile: no relative time, no grading (browser QA 2026-10-01) ───────────────────
+
+    /**
+     * A lead profile as Slice 2 supplies it — a last-activity DATE, the three follow-up counts and
+     * the stored score — beside a help article that quotes its own window ("the last 30 days").
+     */
+    private function checkWithLeadProfile(string $answer): string
+    {
+        $context = (new CopilotContextBuilder)->build('q', [
+            new RetrievedFacts('lead_subject', 'The one lead this question is about.', [
+                RetrievedFacts::fact('business_name', 'Casa Verde Bistro', RetrievedFacts::LABEL),
+            ], 1, FactScope::LEAD),
+            new RetrievedFacts('lead_profile', 'The profile of the one lead this question is about.', [
+                RetrievedFacts::fact('status', 'declined', RetrievedFacts::LABEL),
+                RetrievedFacts::fact('priority', 'medium', RetrievedFacts::LABEL),
+                RetrievedFacts::fact('lead_score', 45, RetrievedFacts::POINTS),
+                RetrievedFacts::fact('last_activity', '2026-02-07', RetrievedFacts::DATE),
+                RetrievedFacts::fact('lead_overdue_follow_ups', 1, RetrievedFacts::COUNT),
+                RetrievedFacts::fact('lead_follow_ups_due_today', 0, RetrievedFacts::COUNT),
+                RetrievedFacts::fact('lead_upcoming_follow_ups', 0, RetrievedFacts::COUNT),
+            ], 1, FactScope::LEAD),
+            new RetrievedFacts('knowledge', 'Curated CRM help articles.', [
+                RetrievedFacts::fact('Activity Rate', 'The share of leads with an activity in the last 30 days.', RetrievedFacts::TEXT),
+                RetrievedFacts::fact('New leads', 'How many leads were created this month.', RetrievedFacts::TEXT),
+                RetrievedFacts::fact('How lead scoring works', 'Lead score: how strong an opportunity a lead is, from 0 to 100.', RetrievedFacts::TEXT),
+            ], 1, FactScope::REFERENCE),
+        ]);
+        $content = json_encode(['answerable' => true, 'answer' => $answer, 'sources' => ['lead_subject', 'lead_profile', 'knowledge']]);
+
+        return (new CopilotAnswerValidator)->validate($content, $context, 'tell me about Casa Verde Bistro')[0];
+    }
+
+    /** @return array<string, array{0: string}> */
+    public static function relativeTimeLeadClaims(): array
+    {
+        return [
+            // Accepted before 2026-10-01 (offline replay of the browser QA).
+            'qa: activity this week' => ['Casa Verde Bistro had activity this week.'],
+            'qa: follow-up next week, named' => ['Casa Verde Bistro has a follow-up scheduled for next week.'],
+            'follow-up next week, unnamed' => ['A follow-up is scheduled for next week.'],
+            'last week' => ['It was last contacted last week.'],
+            'this month' => ['There was activity on this lead this month.'],
+            'next month' => ['Its next follow-up is next month.'],
+            'for 1 month, a supplied figure' => ['Casa Verde Bistro has had no activity for 1 month.'],
+            'for over 30 days, about the lead' => ['This lead has had no activity for over 30 days.'],
+            'the last 30 days, about the lead' => ['Casa Verde Bistro had no activity in the last 30 days.'],
+            'for months' => ['It has been quiet for months.'],
+            'within 2 weeks' => ['You should hear back within 2 weeks.'],
+            'in a few days' => ['Its overdue follow-up should be done in a few days.'],
+            '1 month without, a supplied figure' => ['Casa Verde Bistro has gone 1 month without a reply.'],
+            'activity today' => ['Casa Verde Bistro had activity today.'],
+            'this morning' => ['It was updated this morning.'],
+            'taglish: ngayong linggo' => ['May activity ang lead na ito ngayong linggo.'],
+            'taglish: sa susunod na linggo' => ['May follow-up si Casa Verde Bistro sa susunod na linggo.'],
+            'taglish: ilang buwan na' => ['Ilang buwan na walang activity ang lead na ito.'],
+            // Already refused before; kept so the new rule never loosens them.
+            'yesterday' => ['Casa Verde Bistro had its last activity yesterday.'],
+            'last month' => ['Casa Verde Bistro was last active last month.'],
+            'recently' => ['Casa Verde Bistro was recently active.'],
+        ];
+    }
+
+    #[DataProvider('relativeTimeLeadClaims')]
+    public function test_a_relative_period_or_span_the_facts_do_not_establish_is_refused(string $answer): void
+    {
+        $this->assertSame('ungrounded_relative_date', $this->checkWithLeadProfile($answer));
+    }
+
+    /** @return array<string, array{0: string}> */
+    public static function gradedLead(): array
+    {
+        return [
+            // Live browser QA 2026-10-01, verbatim sentence: accepted then.
+            'qa: moderate level of interest' => ['Its lead score is 45 points, indicating a moderate level of interest.'],
+            // Offline replay 2026-10-01: accepted then.
+            'qa: letter grade' => ['Casa Verde Bistro earns a B grade as a lead.'],
+            'qa: one of your best leads' => ['Casa Verde Bistro is one of your best leads.'],
+            // Refused before only by accident (as pipeline_value, via "worth").
+            'qa: good lead worth prioritising' => ['With a lead score of 45 points, Casa Verde Bistro is a good lead worth prioritising.'],
+            'its score is moderate' => ['Its score of 45 points is moderate.'],
+            'a decent score' => ['Casa Verde Bistro has a decent score of 45 points.'],
+            'promising' => ['This lead looks promising.'],
+            'hot lead' => ['Casa Verde Bistro is a hot lead.'],
+            'top prospect' => ['It is a top prospect for you.'],
+            'high interest' => ['Casa Verde Bistro shows high interest.'],
+            'very engaged' => ['This lead is very engaged.'],
+            'has potential' => ['Casa Verde Bistro has real potential.'],
+            'tier' => ['Casa Verde Bistro is a tier 2 lead.'],
+            'scores well' => ['Casa Verde Bistro scores well.'],
+            'taglish' => ['Magandang lead si Casa Verde Bistro.'],
+        ];
+    }
+
+    #[DataProvider('gradedLead')]
+    public function test_the_supplied_lead_is_never_graded_ranked_or_judged(string $answer): void
+    {
+        $this->assertSame('unsupported_lead_grade', $this->checkWithLeadProfile($answer));
+    }
+
+    public function test_likely_to_convert_stays_refused_as_probability(): void
+    {
+        $this->assertSame('unsupported_probability', $this->checkWithLeadProfile('Casa Verde Bistro is likely to convert soon.'));
+    }
+
+    /** @return array<string, array{0: string}> */
+    public static function safeLeadProfileAnswers(): array
+    {
+        return [
+            'the facts as supplied' => ['Casa Verde Bistro is a declined lead with medium priority and a lead score of 45 points. Its last recorded activity was on 2026-02-07.'],
+            'the date spelled out' => ['Its last recorded activity was on February 7, 2026.'],
+            'cannot tell how long ago' => ['Its last recorded activity was on 2026-02-07; the available data cannot tell how long ago that was.'],
+            'cannot tell this week' => ['The available data cannot tell whether there was any activity this week; the last recorded activity was on 2026-02-07.'],
+            'the due-today count' => ['This lead has 1 overdue follow-up, none due today and none upcoming.'],
+            'due today, taglish' => ['May 1 overdue na follow-up ang lead na ito at walang nakatakda ngayong araw.'],
+            'live qa 1 without the grade' => ["Casa Verde Bistro currently has a status of 'declined' and a medium priority. Its lead score is 45 points. There is 1 overdue follow-up for this lead, with no follow-ups due today or upcoming. You could start by addressing the overdue follow-up."],
+            'scoring explained in general' => ['Casa Verde Bistro has a lead score of 45 points. In general, a higher lead score means a stronger opportunity, so you could sort the Leads table by score.'],
+            'a supplied window, not about the lead' => ['Casa Verde Bistro has a lead score of 45 points. The New leads article counts how many leads were created this month.'],
+            'a priority label is a fact, not a grade' => ['Casa Verde Bistro is a medium priority lead with a lead score of 45 points.'],
+            'cannot tell if it is a good lead' => ['The available data cannot tell whether Casa Verde Bistro is a good lead; its stored lead score is 45 points.'],
+        ];
+    }
+
+    #[DataProvider('safeLeadProfileAnswers')]
+    public function test_grounded_lead_profile_answers_stay_accepted(string $answer): void
+    {
+        $this->assertSame('ok', $this->checkWithLeadProfile($answer));
     }
 
     // ── 3. A ranking states the figures in order ───────────────────────────────────────────────────

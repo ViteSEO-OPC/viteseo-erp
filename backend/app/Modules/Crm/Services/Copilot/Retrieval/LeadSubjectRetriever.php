@@ -29,7 +29,7 @@ class LeadSubjectRetriever implements LeadScopedCapability
     {
         return new RetrievedFacts(
             self::KEY,
-            'The one lead this question is about, which this user may view. Only its business name is supplied; nothing else about this lead is known.',
+            'The one lead this question is about, which this user may view. This source gives its business name; the lead_profile source, when supplied, gives its status, priority, website status, stored lead score, last-activity date, owner label and follow-up counts. Nothing else about this lead is known.',
             [RetrievedFacts::fact('business_name', LeadFieldAllowlist::scrub((string) $lead->value('business_name')), RetrievedFacts::LABEL)],
             1,
             FactScope::LEAD,
