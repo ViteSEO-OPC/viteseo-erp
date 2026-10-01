@@ -3,9 +3,12 @@
 namespace App\Modules\Crm\Services\Copilot;
 
 use App\Modules\Crm\Services\Copilot\Knowledge\FactVocabulary;
+use App\Modules\Crm\Services\Copilot\Knowledge\LeadActivityLabels;
 use App\Modules\Crm\Services\Copilot\Knowledge\LeadVocabulary;
 use App\Modules\Crm\Services\Copilot\Prompts\CopilotInstruction;
 use App\Modules\Crm\Services\Copilot\Retrieval\FactScope;
+use App\Modules\Crm\Services\Copilot\Retrieval\LeadActivityRetriever;
+use App\Modules\Crm\Services\Copilot\Retrieval\LeadProfileRetriever;
 use App\Modules\Crm\Services\Copilot\Retrieval\RetrievedFacts;
 
 /**
@@ -29,7 +32,11 @@ use App\Modules\Crm\Services\Copilot\Retrieval\RetrievedFacts;
  *     the model is never told today's date;
  *   - a figure attached to the wrong subject ("your" for the whole CRM's figure, another role), a
  *     ranking out of order or mixing breakdowns, a scoring figure with the wrong sign;
- *   - an answer that ignores a premise the data cannot support ("leads that are not moving").
+ *   - an answer that ignores a premise the data cannot support ("leads that are not moving");
+ *   - about one lead's logged activities: a kind of activity its counts do not support, an activity
+ *     credited to someone other than the supplied "by" label, anything a note, email, call or
+ *     meeting said or contained, a date's day passed off as a count, or the lead record's Last
+ *     Activity field presented as its latest activity.
  *
  * TWO PHASES. Every security, safety and grounding check runs first; only an answer that passes all
  * of them can fail on a FIXABLE reason — a wording fault the model can correct from the same facts.
@@ -50,6 +57,7 @@ class CopilotAnswerValidator
         'unsupported_opportunity',
         'unsupported_expected_value',
         'premise_unaddressed',
+        'unlabelled_last_activity_field',
     ];
 
     /** Words stating the data cannot answer — the only sentences where an unsupported concept may appear. */
@@ -219,6 +227,116 @@ class CopilotAnswerValidator
     /** The supplied lead's own score, spoken of by pronoun ("its score", "its 8 points", "score nito"). */
     private const LEAD_OWN_SCORE = '/\bits\s+(?:[\p{L}\p{N}-]+\s+){0,2}(?:scores?|points?)\b|\b(?:score|puntos|iskor)\s+nito\b/iu';
 
+    /** A month, English or Tagalog, as a date writes it. */
+    private const MONTH = '(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?|enero|pebrero|marso|abril|mayo|hunyo|hulyo|agosto|setyembre|oktubre|nobyembre|disyembre)\.?';
+
+    /** Each month by number, for finding one supplied date in a sentence. */
+    private const MONTHS = [
+        1 => 'jan(?:uary)?|enero', 2 => 'feb(?:ruary)?|pebrero', 3 => 'mar(?:ch)?|marso', 4 => 'apr(?:il)?|abril',
+        5 => 'may|mayo', 6 => 'june?|hunyo', 7 => 'july?|hulyo', 8 => 'aug(?:ust)?|agosto',
+        9 => 'sep(?:t(?:ember)?)?|setyembre', 10 => 'oct(?:ober)?|oktubre', 11 => 'nov(?:ember)?|nobyembre', 12 => 'dec(?:ember)?|disyembre',
+    ];
+
+    /**
+     * Each KIND of logged lead activity an answer can claim, the lead_activity facts that support it
+     * (a list of counts, supported when any is above zero, or the lead_outcome it needs), and the more
+     * specific kinds that take precedence over a generic one in the same segment — "has not replied
+     * to any email" denies a reply, not an email.
+     *
+     * @var array<string, array{0: string, 1: list<string>|array{lead_outcome: string}, 2?: list<string>}>
+     */
+    private const LEAD_ACTIVITY_KINDS = [
+        'connected_call' => ['/\bconnected\b|\bspoke\b|\btalked\b|\bnakausap\b/iu', ['lead_connected_calls']],
+        'unconnected_call' => ['/\bunanswered\b|\bcall attempts?\b|\bvoicemails?\b|\bbusy\b/iu', ['lead_unconnected_calls']],
+        'call' => ['/\bcall(?:s|ed)?\b|\btinawagan\b|\btumawag\b/iu', ['lead_connected_calls', 'lead_unconnected_calls'], ['connected_call', 'unconnected_call']],
+        'email_sent' => ['/\be-?mails?\s+(?:(?:was|were|been)\s+)?sent\b|\bsent\s+(?:\w+\s+){0,2}e-?mails?\b|\be-?mailed\b/iu', ['lead_emails_sent']],
+        'reply' => ['/\brepl(?:y|ies|ied)\b|\bresponded\b|\bsumagot\b/iu', ['lead_email_replies']],
+        'email' => ['/\be-?mails?\b/iu', ['lead_emails_sent', 'lead_email_replies'], ['email_sent', 'reply']],
+        'note' => ['/\b(?:a|an|one|the|its|your|their|this|that|any|no|internal|latest|last|new|two|three|\d+)\s+notes?\b|\bnotes?\s+(?:was|were|has|have|had|added|logged)\b/iu', ['lead_notes_added']],
+        'follow_up_done' => ['/\b(?:completed|finished|done|closed)\s+(?:\w+\s+){0,2}follow[\s-]?ups?\b|\bfollow[\s-]?ups?\s+(?:\w+\s+){0,2}(?:completed|finished|done)\b/iu', ['lead_follow_ups_completed']],
+        'meeting' => ['/\bmeetings?\b|\bmet with\b|\bpulong\b/iu', ['lead_meetings_completed']],
+        'consultation' => ['/\bconsultations?\b/iu', ['lead_consultations_completed']],
+        'task' => ['/\btasks?\b/iu', ['lead_tasks_completed']],
+        'won' => ['/\b(?:marked|closed)\s+(?:as\s+)?won\b|\b(?:was|been|is)\s+won\b|\bclosed[\s-]won\b/iu', ['lead_outcome' => 'won']],
+        'lost' => ['/\b(?:marked|closed)\s+(?:as\s+)?lost\b|\b(?:was|been|is)\s+lost\b|\bclosed[\s-]lost\b/iu', ['lead_outcome' => 'lost']],
+    ];
+
+    /** Phrases that name a status, a label or advice rather than claim an activity happened. */
+    private const ACTIVITY_NOT_A_CLAIM = '/\bcall[\s-]?backs?(?:\s+requested)?\b|\bawaiting\s+(?:a\s+)?repl\w*|\(\s*no answer\s*\)|\bno answer\b/iu';
+
+    /** A clause suggesting what the user could do, not reporting what happened. */
+    private const SUGGESTION = '/\b(?:could|should|might|may want|consider|try|recommend|suggest|want to|plan(?:ning)? to|next step|next|reach out|you can|pwede|maaari|subukan)\b|^\s*(?:call|email|send|add|schedule|book|log|follow up|reach|open|check|review)\b/iu';
+
+    private const NEGATION = '/\b(?:no|not|never|none|zero|without|wala|walang|hindi)\b|n[\'’]t\b/iu';
+
+    /**
+     * Where a negation stops reaching: a contrast or a new claim ("…, and a connected call was
+     * logged"), never a comma inside a list ("No meetings, consultations or tasks").
+     */
+    private const NEGATION_SEGMENTS = '/;\s*|\s+(?:but|however|while|whereas|although|though|yet|so|pero|habang)\s+|,\s+(?:and|but|so|while|which|then)\s+|\s+and\s+(?=(?:a|an|the|it|its|they|you|one|\d+)\b)/iu';
+
+    /** What a note, email, call or meeting said or contained — never supplied (Slice 4). */
+    private const ACTIVITY_CONTENT = [
+        '/\b(?:note|notes|e-?mail|e-?mails|reply|replies|message|messages|call|meeting|consultation)\s+(?:says|said|mentions?|mentioned|states?|stated|reads?|asks?|asked|requests?|requested|explains?|explained|indicates?|indicated|confirms?|confirmed|noted|contains?|contained|includes?|included|discussed|covered|talks? about|talked about|is about|was about)\b/iu',
+        '/\b(?:they|the lead|the client|the customer|the owner|the business|the contact|he|she)\s+(?:said|replied that|responded that|wrote|asked|mentioned|told|agreed|confirmed|requested|expressed|declined|promised|wants?|wanted|needs?|needed|is interested|was interested)\b/iu',
+        '/\b(?:in|during|from)\s+(?:the|that|this|their|your|its)\s+(?:latest\s+|last\s+)?(?:call|meeting|e-?mail|reply|note|consultation)\s*,?\s+(?:they|he|she|the\s+\w+|it)\s+\w+/iu',
+        '/\b(?:subject|title|body|contents?)\s+(?:of|line)\b/iu',
+    ];
+
+    /**
+     * Who an answer says logged an activity, as the lead_activity `by` labels name them. "You" counts
+     * only as the one who did it ("you logged", "by you", "your note"), never "you have 1 overdue".
+     */
+    private const ACTIVITY_ACTORS = [
+        'you' => '/\bby you\b|\byou(?:[\'’]ve)?(?:\s+(?:have|has|had|\'ve|’ve|just|already|personally|not|never|(?:have|has|had|did|do|does)n[\'’]t))*\s+(?:logged|added|made|sent|completed|called|emailed|wrote|recorded|held|had|marked|did|placed|left|finished|replied)\b|\byou(?:\s+(?:did|do|does|not|never|(?:did|do|does)n[\'’]t))+\s+(?:log|add|make|send|complete|call|email|write|record|hold|mark|place|leave|finish|reply)\b|\byour\s+(?:own\s+)?(?:latest\s+|last\s+|recent\s+)?(?:connected\s+)?(?:calls?|notes?|e-?mails?|meetings?|consultations?|tasks?|follow[\s-]?ups?)\b/iu',
+        'a teammate' => '/\b(?:a|your|another|one of your)\s+(?:teammates?|team\s?mates?|colleagues?|team members?|co-?workers?)\b|\bteammate(?:\'s|’s)\b/iu',
+        'system' => '/\b(?:by|from)\s+(?:the\s+)?(?:system|crm)\b|\bthe\s+(?:system|crm)\s+(?:logged|recorded|added)\b|\bsystem[\s-](?:logged|recorded|generated)\b|\bautomatically\b/iu',
+    ];
+
+    /**
+     * Which supplied entry labels each activity kind ({@see LEAD_ACTIVITY_KINDS}) refers to —
+     * mirrors {@see LeadActivityLabels}; AnswerValidatorTest pins the two together.
+     */
+    private const KIND_LABELS = [
+        'connected_call' => ['Connected call'],
+        'unconnected_call' => ['Call attempt (no answer)', 'Call attempt (busy)', 'Call attempt (voicemail)'],
+        'call' => ['Connected call', 'Call attempt (no answer)', 'Call attempt (busy)', 'Call attempt (voicemail)'],
+        'email_sent' => ['Email sent'],
+        'reply' => ['Email reply received'],
+        'email' => ['Email sent', 'Email reply received'],
+        'note' => ['Note added'],
+        'follow_up_done' => ['Follow-up completed'],
+        'meeting' => ['Meeting completed'],
+        'consultation' => ['Consultation completed'],
+        'task' => ['Task completed'],
+        'won' => ['Marked won'],
+        'lost' => ['Marked lost'],
+    ];
+
+    /**
+     * Where one actor's claim ends: a contrast, a semicolon or ", and" — never a bare "and", which
+     * joins the things one actor did ("A teammate added a note and the connected call").
+     */
+    private const ACTOR_SEGMENTS = '/;\s*|\s+(?:but|however|while|whereas|although|though|yet|so|pero|habang)\s+|,\s+(?:and|but|so|while|which|then)\s+/iu';
+
+    /**
+     * An actor ruled out ("…, not by you", "rather than a teammate"): a claim about WHO did an
+     * activity, never about WHETHER it happened. Groups: 1 you, 2 a teammate, 3 system.
+     */
+    private const RULED_OUT_ACTOR = '/\b(?:not|never|rather than|instead of)\s+(?:by\s+|from\s+)?(?:(you)\b|((?:a|your|another)\s+(?:teammates?|team\s?mates?|colleagues?|team members?|co-?workers?))\b|((?:the\s+)?(?:system|crm))\b)/iu';
+
+    /**
+     * A leading yes/no answering the question ("No, a teammate added the note"): it denies the premise,
+     * not an activity. A bare hyphen must follow a space, so "No-one has called" stays a denial.
+     */
+    private const ANSWER_WORD = '/^\s*(?:no|nope|yes|yep|yeah|hindi(?:\s+po)?|oo|opo)(?:\s*[,.!:;—–]+|\s+-+)\s*/iu';
+
+    /** A segment that continues the previous one's subject ("…, and added a note"): it inherits its actor. */
+    private const ELIDED_SUBJECT = '/^\s*(?:also\s+|then\s+)?(?:logged|added|made|sent|completed|called|emailed|wrote|recorded|held|had|marked|placed|left|finished)\b/iu';
+
+    /** Words that present a date as the lead record's Last Activity FIELD, not its latest activity. */
+    private const FIELD_LABEL = '/\bfield\b|\blead record\b|\btalaan\b/iu';
+
     private const SENTENCES = '/(?<=[.!?;])\s+|\n+/u';
 
     private const CLAUSES = '/,\s+|;\s*|:\s+|\s+[—–-]\s+|\s+(?:and|but|pero|while|habang|whereas|followed by|sinundan ng|kasunod ang)\s+/iu';
@@ -277,6 +395,13 @@ class CopilotAnswerValidator
         if ($this->gradesLead($answer, $context)) {
             return ['unsupported_lead_grade', null];
         }
+        $activity = $this->leadActivityClaim($answer, $context);
+        if ($activity !== null) {
+            return [$activity, null];
+        }
+        if ($this->misattributesLeadActivity($answer, $context)) {
+            return ['misattributed_lead_activity', null];
+        }
         $concept = $this->unsupportedConcept($answer, $context, self::GROUNDING_CONCEPTS);
         if ($concept !== null) {
             return ['unsupported_'.$concept, null];
@@ -302,6 +427,9 @@ class CopilotAnswerValidator
         }
         if ($this->premiseUnaddressed($answer, $question)) {
             return ['premise_unaddressed', null];
+        }
+        if ($this->unlabelledLastActivityField($answer, $context)) {
+            return ['unlabelled_last_activity_field', null];
         }
 
         return [self::OK, $answer];
@@ -448,6 +576,342 @@ class CopilotAnswerValidator
     {
         return $context->hasLead
             && ($this->gradesSuppliedLead($sentence, $context) || preg_match(self::LEAD_PRONOUN, $sentence) === 1);
+    }
+
+    /**
+     * About one lead's logged activities (Slice 4), checked only when the lead_activity source was
+     * supplied:
+     *   - `lead_activity_content`: anything a note, email, call or meeting said or contained — no
+     *     content is ever supplied — in any sentence;
+     *   - `unsupported_lead_activity`: in a sentence about the lead (or carrying its activity figures,
+     *     or no other CRM figure), a kind of activity claimed while its counts are all zero, or denied
+     *     while one is not. A clause saying the data cannot tell, or suggesting what to do, claims
+     *     nothing.
+     */
+    private function leadActivityClaim(string $answer, CopilotContext $context): ?string
+    {
+        $facts = $this->suppliedFacts($context, LeadActivityRetriever::KEY);
+        if ($facts === null) {
+            return null;
+        }
+
+        foreach (preg_split(self::SENTENCES, $answer) ?: [$answer] as $sentence) {
+            $checkKinds = $this->aboutSuppliedLead($sentence, $context)
+                || $this->mentionsLead($sentence, $context)
+                || $this->hasFigureFrom($sentence, $context, array_keys($facts))
+                || ! $this->hasOtherCrmFigure($sentence, $context);
+
+            foreach (preg_split(self::CLAUSES, $sentence) ?: [$sentence] as $clause) {
+                if (preg_match(self::LIMITATION, $clause) === 1 || preg_match(self::SUGGESTION, $clause) === 1) {
+                    continue;
+                }
+                foreach (self::ACTIVITY_CONTENT as $pattern) {
+                    if (preg_match($pattern, $clause) === 1) {
+                        return 'lead_activity_content';
+                    }
+                }
+            }
+            if (! $checkKinds) {
+                continue;
+            }
+            $sentence = preg_replace(self::ANSWER_WORD, '', $sentence) ?? $sentence;
+            foreach (preg_split(self::NEGATION_SEGMENTS, $sentence) ?: [$sentence] as $segment) {
+                if (preg_match(self::LIMITATION, $segment) === 1 || preg_match(self::SUGGESTION, $segment) === 1) {
+                    continue;
+                }
+                $text = preg_replace(self::ACTIVITY_NOT_A_CLAIM, ' ', $segment) ?? $segment;
+                [$text] = $this->ruledOutActors($text);
+                $negated = preg_match(self::NEGATION, $text) === 1;
+                if ($negated && $this->namedActors($text) !== []) {
+                    continue; // "You did not add the note" denies who, not whether: misattributesLeadActivity() holds it
+                }
+                foreach (array_keys($this->activityKinds($text)) as $kind) {
+                    $supports = self::LEAD_ACTIVITY_KINDS[$kind][1];
+                    $supplied = isset($supports['lead_outcome'])
+                        ? ($facts['lead_outcome'] ?? null) === $supports['lead_outcome']
+                        : array_sum(array_map(static fn (string $name): int => (int) ($facts[$name] ?? 0), $supports)) > 0;
+                    if ($negated ? $supplied : ! $supplied) {
+                        return 'unsupported_lead_activity';
+                    }
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * The activity kinds a text names, at the byte offset of their first mention, with a generic
+     * kind dropped when a more specific one is also named ("has not replied to any email" names a
+     * reply, not an email).
+     *
+     * @return array<string, int> kind => offset
+     */
+    private function activityKinds(string $text): array
+    {
+        $matched = [];
+        foreach (self::LEAD_ACTIVITY_KINDS as $kind => $spec) {
+            if (preg_match($spec[0], $text, $m, PREG_OFFSET_CAPTURE) === 1) {
+                $matched[$kind] = $m[0][1];
+            }
+        }
+        foreach (array_keys($matched) as $kind) {
+            if (array_intersect(self::LEAD_ACTIVITY_KINDS[$kind][2] ?? [], array_keys($matched)) !== []) {
+                unset($matched[$kind]);
+            }
+        }
+
+        return $matched;
+    }
+
+    /**
+     * An activity credited to someone the supplied `by` label does not name (Slice 4). Who logged an
+     * activity is known only for the newest entries, each as `you`, `a teammate` or `system`; a kind
+     * supplied only as a count has no known actor at all. In each segment that reports activity, the
+     * one actor named is held to EVERY kind named beside it ("You logged a call and added a note"
+     * needs both entries to be yours); with several actors, each is held to its nearest kind. A
+     * clause saying the data cannot tell, or suggesting what to do, credits no one.
+     *
+     * An actor can also be ruled out — "not by you", or a negated segment that names them ("You did
+     * not add the note"). That denies who, not whether, and holds only when every logged entry of
+     * that kind is listed and none is theirs: a kind known only as a count can't rule anyone out.
+     */
+    private function misattributesLeadActivity(string $answer, CopilotContext $context): bool
+    {
+        $facts = $this->suppliedFacts($context, LeadActivityRetriever::KEY);
+        if ($facts === null) {
+            return false;
+        }
+        $entries = [];
+        foreach (LeadActivityRetriever::RECENT_FACTS as $name) {
+            if (is_string($facts[$name] ?? null) && is_string($facts[$name.'_by'] ?? null)) {
+                $entries[] = [$facts[$name], $facts[$name.'_by']];
+            }
+        }
+
+        foreach (preg_split(self::SENTENCES, $answer) ?: [$answer] as $sentence) {
+            $sentence = preg_replace(self::ANSWER_WORD, '', $sentence) ?? $sentence;
+            $previous = [];
+            foreach (preg_split(self::ACTOR_SEGMENTS, $sentence) ?: [$sentence] as $segment) {
+                $text = preg_replace(self::ACTIVITY_NOT_A_CLAIM, ' ', $segment) ?? $segment;
+                [$text, $ruledOut] = $this->ruledOutActors($text);
+                $actors = $this->namedActors($text);
+                if ($actors === [] && preg_match(self::ELIDED_SUBJECT, $text) === 1) {
+                    $actors = array_map(static fn (array $a): array => [$a[0], 0], $previous);
+                }
+                $previous = $actors;
+                if (preg_match(self::LIMITATION, $segment) === 1 || preg_match(self::SUGGESTION, $segment) === 1) {
+                    continue;
+                }
+                $kinds = $this->activityKinds($text);
+                if ($kinds === []) {
+                    continue;
+                }
+                if ($actors !== [] && preg_match(self::NEGATION, $text) === 1) {
+                    $ruledOut = [...$ruledOut, ...array_column($actors, 0)];
+                    $actors = [];
+                }
+                foreach (array_unique($ruledOut) as $actor) {
+                    foreach (array_keys($kinds) as $kind) {
+                        if (! $this->ruledOutHolds($actor, $kind, $facts, $entries)) {
+                            return true;
+                        }
+                    }
+                }
+                $single = count(array_unique(array_column($actors, 0))) === 1;
+                foreach ($actors as [$actor, $at]) {
+                    $claimed = array_keys($kinds);
+                    if (! $single) {
+                        uasort($kinds, static fn (int $a, int $b): int => abs($a - $at) <=> abs($b - $at));
+                        $claimed = [array_key_first($kinds)];
+                    }
+                    foreach ($claimed as $kind) {
+                        $labels = self::KIND_LABELS[$kind];
+                        $backed = array_filter($entries, static fn (array $e): bool => in_array($e[0], $labels, true) && $e[1] === $actor);
+                        if ($backed === []) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * The actors a text names as having done something, at the byte offset of each mention.
+     *
+     * @return list<array{0: string, 1: int}> [actor, offset]
+     */
+    private function namedActors(string $text): array
+    {
+        $actors = [];
+        foreach (self::ACTIVITY_ACTORS as $actor => $pattern) {
+            preg_match_all($pattern, $text, $m, PREG_OFFSET_CAPTURE);
+            foreach ($m[0] as [, $at]) {
+                $actors[] = [$actor, $at];
+            }
+        }
+
+        return $actors;
+    }
+
+    /**
+     * The text with its ruled-out actors ("not by you") blanked, and those actors.
+     *
+     * @return array{0: string, 1: list<string>}
+     */
+    private function ruledOutActors(string $text): array
+    {
+        $ruledOut = [];
+        $text = preg_replace_callback(self::RULED_OUT_ACTOR, static function (array $m) use (&$ruledOut): string {
+            $ruledOut[] = match (true) {
+                ($m[1] ?? '') !== '' => 'you',
+                ($m[2] ?? '') !== '' => 'a teammate',
+                default => 'system',
+            };
+
+            return ' ';
+        }, $text) ?? $text;
+
+        return [$text, $ruledOut];
+    }
+
+    /**
+     * Whether `$actor` is rightly ruled out of a kind: every logged entry of that kind is among the
+     * listed newest ones (so who logged each is known), and none of them is theirs.
+     *
+     * @param  array<string, mixed>  $facts
+     * @param  list<array{0: string, 1: string}>  $entries
+     */
+    private function ruledOutHolds(string $actor, string $kind, array $facts, array $entries): bool
+    {
+        $listed = array_filter($entries, static fn (array $e): bool => in_array($e[0], self::KIND_LABELS[$kind], true));
+        if (in_array($actor, array_column($listed, 1), true)) {
+            return false;
+        }
+        $supports = self::LEAD_ACTIVITY_KINDS[$kind][1];
+        $logged = isset($supports['lead_outcome'])
+            ? (int) (($facts['lead_outcome'] ?? null) === $supports['lead_outcome'])
+            : array_sum(array_map(static fn (string $name): int => (int) ($facts[$name] ?? 0), $supports));
+
+        return count($listed) >= $logged;
+    }
+
+    /**
+     * The lead record's Last Activity field written as if it were the lead's latest activity
+     * ("its last activity was on August 20") — the timeline can hold newer entries (Slice 4, Option
+     * A). A sentence giving the field's date must call it the field, unless a logged activity has the
+     * very same date.
+     */
+    private function unlabelledLastActivityField(string $answer, CopilotContext $context): bool
+    {
+        $field = ($this->suppliedFacts($context, LeadProfileRetriever::KEY) ?? [])['last_activity_field'] ?? null;
+        if (! is_string($field) || preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $field, $date) !== 1) {
+            return false;
+        }
+        $activity = $this->suppliedFacts($context, LeadActivityRetriever::KEY) ?? [];
+        foreach (LeadActivityRetriever::RECENT_FACTS as $name) {
+            if (($activity[$name.'_date'] ?? null) === $field) {
+                return false;
+            }
+        }
+
+        $month = self::MONTHS[(int) $date[2]];
+        $day = (int) $date[3];
+        $names = '/'.preg_quote($field, '/').'|\b(?:'.$month.')\.?\s+0?'.$day.'\b|\b0?'.$day.'(?:st|nd|rd|th)?\s+(?:of\s+|ng\s+)?(?:'.$month.')\b/iu';
+        foreach (preg_split(self::SENTENCES, $answer) ?: [$answer] as $sentence) {
+            if (preg_match($names, $sentence) === 1 && preg_match(self::FIELD_LABEL, $sentence) !== 1) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * The facts one supplied source carried, by name, or null when it was not supplied.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function suppliedFacts(CopilotContext $context, string $source): ?array
+    {
+        foreach ($context->payload['data']['facts'] ?? [] as $supplied) {
+            if (($supplied['source'] ?? null) === $source) {
+                return array_column($supplied['facts'] ?? [], 'value', 'name');
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Every supplied fact with unit `date`: its year, month and day are bound to it as figures.
+     *
+     * @return list<string>
+     */
+    private function datePaths(CopilotContext $context): array
+    {
+        $paths = [];
+        foreach ($context->payload['data']['facts'] ?? [] as $supplied) {
+            foreach ($supplied['facts'] ?? [] as $fact) {
+                if (($fact['unit'] ?? null) === RetrievedFacts::DATE) {
+                    $paths[] = (string) $fact['name'];
+                }
+            }
+        }
+
+        return $paths;
+    }
+
+    /**
+     * Whether the number at a byte offset of the SENTENCE stands inside a written date: a month beside
+     * it, or YYYY-MM-DD. Read on the sentence, since clauses split "February 7, 2026" at the comma.
+     */
+    private function inDate(string $sentence, int $offset, int $length): bool
+    {
+        preg_match_all('/\d{4}-\d{1,2}-\d{1,2}|\d{1,2}\/\d{1,2}(?:\/\d{2,4})?/u', $sentence, $m, PREG_OFFSET_CAPTURE);
+        foreach ($m[0] as [$token, $at]) {
+            if ($offset >= $at && $offset < $at + strlen($token)) {
+                return true;
+            }
+        }
+        $before = substr($sentence, max(0, $offset - 24), min($offset, 24));
+        $after = substr($sentence, $offset + $length, 24);
+
+        return preg_match('/\b'.self::MONTH.'\s+(?:\d{1,2}(?:st|nd|rd|th)?,?\s+)?$/iu', $before) === 1
+            || preg_match('/^(?:st|nd|rd|th)?,?\s+(?:of\s+|ng\s+)?'.self::MONTH.'(?![\p{L}])/iu', $after) === 1;
+    }
+
+    /** @param  list<string>  $paths */
+    private function hasFigureFrom(string $sentence, CopilotContext $context, array $paths): bool
+    {
+        preg_match_all(self::NUMBER, $sentence, $m);
+        foreach ($m[0] as $raw) {
+            foreach ($context->figures[CopilotContextBuilder::canonical($raw)] ?? [] as $origin) {
+                if ($origin['scope'] === FactScope::LEAD && in_array($origin['path'], $paths, true)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /** A CRM figure of this user's or the whole CRM's — a sentence about the portfolio, not the lead. */
+    private function hasOtherCrmFigure(string $sentence, CopilotContext $context): bool
+    {
+        preg_match_all(self::NUMBER, $sentence, $m);
+        foreach ($m[0] as $raw) {
+            foreach ($context->figures[CopilotContextBuilder::canonical($raw)] ?? [] as $origin) {
+                if ($origin['kind'] === 'value' && in_array($origin['scope'], [FactScope::OWN, FactScope::ORGANIZATION], true)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     /** @param  list<string>  $concepts */
@@ -627,6 +1091,7 @@ class CopilotAnswerValidator
             return $hits;
         };
 
+        $datePaths = $this->datePaths($context);
         $wording = null;
         $body = $this->withoutListMarkers($answer);
 
@@ -677,6 +1142,11 @@ class CopilotAnswerValidator
                         $proseOnly = true; // 2. checked once the whole sentence is read
 
                         continue;
+                    }
+                    // A date's year, month or day may stand only inside a date ("September 9, 2026"):
+                    // never as a count ("9 overdue follow-ups") that a date's day happens to equal.
+                    if ($datePaths !== [] && array_diff(array_column($bound, 'path'), $datePaths) === [] && ! $this->inDate($sentence, $clauseAt + $offset, strlen($raw))) {
+                        return ['misbound_number', null];
                     }
 
                     $crm = array_values(array_filter($bound, static fn (array $o): bool => $o['kind'] === 'value' && $o['scope'] !== FactScope::REFERENCE));

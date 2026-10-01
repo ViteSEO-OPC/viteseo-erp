@@ -8,18 +8,18 @@ use InvalidArgumentException;
  * THE CLOSED SET of capabilities about one authorised lead — kept apart from
  * {@see CapabilityRegistry} so that Phase 1's aggregates-only capabilities stay provably free of
  * per-lead data. Listed here and nowhere else; they run only when the request carried a lead that
- * {@see AuthorizedLead::resolve()} accepted: the lead's business name (Slice 1) and its profile
- * (Slice 2).
+ * {@see AuthorizedLead::resolve()} accepted: the lead's business name (Slice 1), its profile
+ * (Slice 2) and its logged sales activities (Slice 4).
  */
 class LeadCapabilityRegistry
 {
     /** @var array<string, LeadScopedCapability> */
     private readonly array $capabilities;
 
-    public function __construct(LeadSubjectRetriever $subject, LeadProfileRetriever $profile)
+    public function __construct(LeadSubjectRetriever $subject, LeadProfileRetriever $profile, LeadActivityRetriever $activity)
     {
         $all = [];
-        foreach ([$subject, $profile] as $capability) {
+        foreach ([$subject, $profile, $activity] as $capability) {
             $all[$capability->key()] = $capability;
         }
         $this->capabilities = $all;

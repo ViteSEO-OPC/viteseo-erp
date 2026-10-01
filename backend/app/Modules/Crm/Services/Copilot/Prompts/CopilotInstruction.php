@@ -14,7 +14,7 @@ namespace App\Modules\Crm\Services\Copilot\Prompts;
  */
 final class CopilotInstruction
 {
-    public const VERSION = '2026-10-01.1';
+    public const VERSION = '2026-10-01.2';
 
     /**
      * Strings that appear only in this instruction. An answer containing any of them is repeating the
@@ -44,6 +44,7 @@ final class CopilotInstruction
         'unsupported_opportunity' => 'It judged or compared "opportunity" without a basis. Use "opportunity" only as the help article does, tied to the lead score (a higher score means a stronger opportunity), and never call a status, priority or website group a better, bigger, significant or good opportunity.',
         'unsupported_expected_value' => 'It claimed expected revenue or value that no fact supplies. Do not say what leads will or could earn, bring or be worth.',
         'premise_unaddressed' => 'The question assumes something the facts cannot show (for example leads that are "not moving", chances to close, or expected revenue). Your first sentence must say plainly that the available data cannot determine that; then explain what the data does show.',
+        'unlabelled_last_activity_field' => 'It wrote the date in last_activity_field as if it were the lead\'s latest activity. That date is only the lead record\'s Last Activity field: call it that ("its Last Activity field shows ..."). For the lead\'s logged activities use only the lead_activity facts.',
     ];
 
     /** Wraps a correction: the second, final attempt. */
@@ -75,6 +76,11 @@ final class CopilotInstruction
       are; word those by their own scope. Its "owner" is "you", "a teammate" or "unassigned" and
       nothing more: never name or describe the teammate. In a sentence about this lead, use only
       its own figures (for example its follow-up counts), never this user's totals.
+      Its "last_activity_field" is only the date in the lead record's Last Activity field, which
+      calls, notes and sent emails do not update: always call it "the Last Activity field", never
+      the lead's last or latest activity. A "lead_activity" source lists the lead's logged sales
+      activities: counts, and its newest entries as a fixed label, a date and who logged them ("you",
+      "a teammate" or "system"). Its last_logged_activity is the newest of those activities.
 
     WORDING FOR "organization" FIGURES (N stands for a figure from the facts)
     In any sentence that contains an "organization" figure, do not use "you have", "your", "yours",
@@ -126,10 +132,14 @@ final class CopilotInstruction
       never say or imply that a date is in the past or the future, recent or long ago, and never
       compute how long ago it was. If asked, give the date and say the available data cannot tell
       how long ago that was. Never judge from a date that a lead is inactive, stale, stuck or
-      neglected; say only when its last activity was recorded. Never place the lead's activity or
+      neglected; say only on which date an activity was logged. Never place the lead's activity or
       follow-ups in a period or span ("today", "this week", "last week", "next week", "this month",
       "for 3 months", "within 2 weeks"); only the follow-up counts the facts supply may be called
       overdue, due today or upcoming.
+    - Describe the lead's activities only by their supplied labels, dates and counts. Never say what a
+      note, email, reply, call or meeting said, asked or contained: no content is supplied. Never
+      say a kind of activity happened when its count is 0, and never say one did not happen when its
+      count is above 0.
     - Never grade, rank or judge the one lead in a "lead" source: no letter grades, no "good",
       "strong", "weak", "hot" or "promising" lead, no "one of your best leads", no level of interest
       or engagement, and no "high", "low" or "moderate" score. State its score as supplied; you may

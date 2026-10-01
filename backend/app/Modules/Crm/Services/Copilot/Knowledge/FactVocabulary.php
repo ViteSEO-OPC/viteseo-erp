@@ -15,6 +15,9 @@ namespace App\Modules\Crm\Services\Copilot\Knowledge;
  */
 final class FactVocabulary
 {
+    /** The words that name a logged activity's date: any activity kind, or "logged"/"latest" activity. */
+    private const ACTIVITY_DATE = '\bactivit(?:y|ies)\b|\blogged\b|\blatest\b|\bmost recent\b|\blast\b|\bcalls?\b|\bcalled\b|\be-?mail(?:s|ed)?\b|\brepl(?:y|ies|ied)\b|\bnotes?\b|\bmeetings?\b|\bconsultations?\b|\btasks?\b|\bfollow[\s-]?ups?\b|\bwon\b|\blost\b|\bmarked\b|huling|aktibidad|tawag';
+
     /** Scalar facts and breakdown buckets, by name or bucket key. */
     private const WORDS = [
         // Lead totals: generic.
@@ -52,10 +55,27 @@ final class FactVocabulary
         // One authorised lead's profile (Phase 2 Slice 2). Same words as the caller's totals on purpose:
         // which one a figure is gets decided by the lead-subject rule in CopilotAnswerValidator.
         'lead_score' => '\bscores?\b|\bpoints?\b|puntos|iskor',
-        'last_activity' => '\blast\b|\bactivity\b|\bactive\b|huling|aktibidad',
+        // The lead record's Last Activity field (Slice 4 renamed it from last_activity, PO Option A).
+        'last_activity_field' => '\blast\b|\bactivity\b|\bactive\b|\bfield\b|huling|aktibidad',
         'lead_overdue_follow_ups' => '\boverdue\b|\blate\b|lagpas|lampas|atrasado|delayed',
         'lead_follow_ups_due_today' => '\btoday\b|ngayong araw|\bngayon\b',
         'lead_upcoming_follow_ups' => '\bupcoming\b|\bcoming\b|darating|susunod',
+
+        // One authorised lead's logged sales activities (Phase 2 Slice 4). A count names its kind; an
+        // entry's date is named by any activity word, and may only appear inside a date (see
+        // CopilotAnswerValidator::checkFigures), so its day can never pass as a count.
+        'lead_connected_calls' => '\bconnected\b|\bcalls?\b|nakausap|tawag',
+        'lead_unconnected_calls' => '\bcalls?\b|\bcall attempts?\b|\bunanswered\b|\bno answer\b|\bbusy\b|\bvoicemails?\b|tawag',
+        'lead_emails_sent' => '\be-?mails?\b|\bsent\b|padala',
+        'lead_email_replies' => '\brepl(?:y|ies)\b|sagot',
+        'lead_notes_added' => '\bnotes?\b',
+        'lead_follow_ups_completed' => '\bfollow[\s-]?ups?\b|\bcompleted\b',
+        'lead_meetings_completed' => '\bmeetings?\b|pulong',
+        'lead_consultations_completed' => '\bconsultations?\b',
+        'lead_tasks_completed' => '\btasks?\b',
+        'last_logged_activity_date' => self::ACTIVITY_DATE,
+        'second_last_logged_activity_date' => self::ACTIVITY_DATE,
+        'third_last_logged_activity_date' => self::ACTIVITY_DATE,
 
         // Performance.
         'assigned_leads' => '\bassign|naka-?assign',

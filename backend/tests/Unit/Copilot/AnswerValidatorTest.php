@@ -5,6 +5,7 @@ namespace Tests\Unit\Copilot;
 use App\Modules\Crm\Services\Copilot\CopilotAnswerValidator;
 use App\Modules\Crm\Services\Copilot\CopilotContext;
 use App\Modules\Crm\Services\Copilot\CopilotContextBuilder;
+use App\Modules\Crm\Services\Copilot\Knowledge\LeadActivityLabels;
 use App\Modules\Crm\Services\Copilot\Retrieval\FactScope;
 use App\Modules\Crm\Services\Copilot\Retrieval\RetrievedFacts;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -288,7 +289,7 @@ class AnswerValidatorTest extends TestCase
     // ── 2b. The lead profile: no relative time, no grading (browser QA 2026-10-01) ───────────────────
 
     /**
-     * A lead profile as Slice 2 supplies it — a last-activity DATE, the three follow-up counts and
+     * A lead profile as Slice 2 supplies it — the Last Activity field's DATE, the three follow-up counts and
      * the stored score — beside a help article that quotes its own window ("the last 30 days").
      */
     private function checkWithLeadProfile(string $answer): string
@@ -301,7 +302,7 @@ class AnswerValidatorTest extends TestCase
                 RetrievedFacts::fact('status', 'declined', RetrievedFacts::LABEL),
                 RetrievedFacts::fact('priority', 'medium', RetrievedFacts::LABEL),
                 RetrievedFacts::fact('lead_score', 45, RetrievedFacts::POINTS),
-                RetrievedFacts::fact('last_activity', '2026-02-07', RetrievedFacts::DATE),
+                RetrievedFacts::fact('last_activity_field', '2026-02-07', RetrievedFacts::DATE),
                 RetrievedFacts::fact('lead_overdue_follow_ups', 1, RetrievedFacts::COUNT),
                 RetrievedFacts::fact('lead_follow_ups_due_today', 0, RetrievedFacts::COUNT),
                 RetrievedFacts::fact('lead_upcoming_follow_ups', 0, RetrievedFacts::COUNT),
@@ -393,10 +394,10 @@ class AnswerValidatorTest extends TestCase
     public static function safeLeadProfileAnswers(): array
     {
         return [
-            'the facts as supplied' => ['Casa Verde Bistro is a declined lead with medium priority and a lead score of 45 points. Its last recorded activity was on 2026-02-07.'],
-            'the date spelled out' => ['Its last recorded activity was on February 7, 2026.'],
-            'cannot tell how long ago' => ['Its last recorded activity was on 2026-02-07; the available data cannot tell how long ago that was.'],
-            'cannot tell this week' => ['The available data cannot tell whether there was any activity this week; the last recorded activity was on 2026-02-07.'],
+            'the facts as supplied' => ['Casa Verde Bistro is a declined lead with medium priority and a lead score of 45 points. Its Last Activity field shows 2026-02-07.'],
+            'the date spelled out' => ['Its Last Activity field shows February 7, 2026.'],
+            'cannot tell how long ago' => ['Its Last Activity field shows 2026-02-07; the available data cannot tell how long ago that was.'],
+            'cannot tell this week' => ['The available data cannot tell whether there was any activity this week; its Last Activity field shows 2026-02-07.'],
             'the due-today count' => ['This lead has 1 overdue follow-up, none due today and none upcoming.'],
             'due today, taglish' => ['May 1 overdue na follow-up ang lead na ito at walang nakatakda ngayong araw.'],
             'live qa 1 without the grade' => ["Casa Verde Bistro currently has a status of 'declined' and a medium priority. Its lead score is 45 points. There is 1 overdue follow-up for this lead, with no follow-ups due today or upcoming. You could start by addressing the overdue follow-up."],
@@ -411,6 +412,297 @@ class AnswerValidatorTest extends TestCase
     public function test_grounded_lead_profile_answers_stay_accepted(string $answer): void
     {
         $this->assertSame('ok', $this->checkWithLeadProfile($answer));
+    }
+
+    // ── 2c. Logged lead activities (Phase 2 Slice 4) ──────────────────────────────────────────────
+
+    /**
+     * Lead 48's QA shape: a connected call (Sep 10), an email (Sep 9) and a note (Sep 9); no
+     * meetings, replies, tasks or outcome; a Last Activity field of Aug 13 that none of them moved;
+     * and the user's own portfolio figures beside it.
+     */
+    private function checkWithLeadActivity(string $answer, ?string $field = '2026-08-13'): string
+    {
+        $context = (new CopilotContextBuilder)->build('q', [
+            new RetrievedFacts('lead_subject', 'The one lead this question is about.', [
+                RetrievedFacts::fact('business_name', 'Casa Verde Bistro', RetrievedFacts::LABEL),
+            ], 1, FactScope::LEAD),
+            new RetrievedFacts('lead_profile', 'The profile of the one lead.', [
+                RetrievedFacts::fact('status', 'call-back-req', RetrievedFacts::LABEL),
+                RetrievedFacts::fact('lead_score', 45, RetrievedFacts::POINTS),
+                RetrievedFacts::fact('last_activity_field', $field, RetrievedFacts::DATE),
+                RetrievedFacts::fact('lead_overdue_follow_ups', 0, RetrievedFacts::COUNT),
+            ], 1, FactScope::LEAD),
+            new RetrievedFacts('lead_activity', 'Logged sales activities.', [
+                RetrievedFacts::fact('lead_connected_calls', 1, RetrievedFacts::COUNT),
+                RetrievedFacts::fact('lead_unconnected_calls', 0, RetrievedFacts::COUNT),
+                RetrievedFacts::fact('lead_emails_sent', 1, RetrievedFacts::COUNT),
+                RetrievedFacts::fact('lead_email_replies', 0, RetrievedFacts::COUNT),
+                RetrievedFacts::fact('lead_notes_added', 1, RetrievedFacts::COUNT),
+                RetrievedFacts::fact('lead_follow_ups_completed', 0, RetrievedFacts::COUNT),
+                RetrievedFacts::fact('lead_meetings_completed', 0, RetrievedFacts::COUNT),
+                RetrievedFacts::fact('lead_consultations_completed', 0, RetrievedFacts::COUNT),
+                RetrievedFacts::fact('lead_tasks_completed', 0, RetrievedFacts::COUNT),
+                RetrievedFacts::fact('lead_outcome', 'none', RetrievedFacts::LABEL),
+                RetrievedFacts::fact('last_logged_activity', 'Connected call', RetrievedFacts::LABEL),
+                RetrievedFacts::fact('last_logged_activity_date', '2026-09-10', RetrievedFacts::DATE),
+                RetrievedFacts::fact('last_logged_activity_by', 'you', RetrievedFacts::LABEL),
+                RetrievedFacts::fact('second_last_logged_activity', 'Email sent', RetrievedFacts::LABEL),
+                RetrievedFacts::fact('second_last_logged_activity_date', '2026-09-09', RetrievedFacts::DATE),
+                RetrievedFacts::fact('second_last_logged_activity_by', 'you', RetrievedFacts::LABEL),
+                RetrievedFacts::fact('third_last_logged_activity', 'Note added', RetrievedFacts::LABEL),
+                RetrievedFacts::fact('third_last_logged_activity_date', '2026-09-09', RetrievedFacts::DATE),
+                RetrievedFacts::fact('third_last_logged_activity_by', 'a teammate', RetrievedFacts::LABEL),
+            ], 3, FactScope::LEAD),
+            new RetrievedFacts('follow_ups', 'Your follow-ups.', [
+                RetrievedFacts::fact('overdue', 18, RetrievedFacts::COUNT),
+                RetrievedFacts::fact('missed_calls', 3, RetrievedFacts::COUNT),
+            ], 1, FactScope::OWN),
+        ]);
+        $content = json_encode(['answerable' => true, 'answer' => $answer, 'sources' => ['lead_subject', 'lead_profile', 'lead_activity', 'follow_ups']]);
+
+        return (new CopilotAnswerValidator)->validate($content, $context, 'tell me about Casa Verde Bistro')[0];
+    }
+
+    /** @return array<string, array{0: string}> */
+    public static function groundedLeadActivityAnswers(): array
+    {
+        return [
+            'labels and dates' => ['The latest logged activity on Casa Verde Bistro is a Connected call on September 10, 2026, logged by you. Before that, an Email sent and a Note added, both on September 9, 2026.'],
+            'counts' => ['Casa Verde Bistro has 1 connected call, 1 email sent and 1 note logged.'],
+            'iso date' => ['Its last logged activity was a Connected call on 2026-09-10.'],
+            'a zero denied' => ['No meetings, consultations or tasks have been logged for this lead.'],
+            'no replies yet' => ['Casa Verde Bistro has not replied to any email so far.'],
+            'not won or lost' => ['This lead has not been marked won or lost.'],
+            'a suggestion with zero meetings' => ['You could schedule a meeting with Casa Verde Bistro.'],
+            'status call back is not a call claim' => ['Casa Verde Bistro has a call-back requested status.'],
+            'field labelled' => ['Its Last Activity field shows August 13, 2026, while the latest logged activity is a Connected call on September 10, 2026.'],
+            'content unknown, said plainly' => ['The available data cannot tell what the note said.'],
+            'portfolio sentence untouched' => ['Across your leads you have 18 overdue follow-ups and 3 missed calls.'],
+            'no call attempts' => ['There were no unanswered call attempts on this lead.'],
+        ];
+    }
+
+    #[DataProvider('groundedLeadActivityAnswers')]
+    public function test_grounded_lead_activity_answers_are_accepted(string $answer): void
+    {
+        $this->assertSame('ok', $this->checkWithLeadActivity($answer));
+    }
+
+    /** @return array<string, array{0: string, 1: string}> */
+    public static function ungroundedLeadActivityAnswers(): array
+    {
+        return [
+            'invented meeting' => ['You met with Casa Verde Bistro on September 10, 2026.', 'unsupported_lead_activity'],
+            'invented meeting, pronoun' => ['It had a meeting on September 9, 2026.', 'unsupported_lead_activity'],
+            'invented reply' => ['Casa Verde Bistro replied on September 10, 2026.', 'unsupported_lead_activity'],
+            'invented task' => ['A task was completed for this lead.', 'unsupported_lead_activity'],
+            'invented completed follow-up' => ['Casa Verde Bistro had a completed follow-up.', 'unsupported_lead_activity'],
+            'invented win' => ['Casa Verde Bistro was marked won.', 'unsupported_lead_activity'],
+            'denied call' => ['Casa Verde Bistro has never been called.', 'unsupported_lead_activity'],
+            'denied note' => ['There are no notes on this lead.', 'unsupported_lead_activity'],
+            'note content' => ['The note says they want a redesign.', 'lead_activity_content'],
+            'email content' => ['The email mentioned a quote for a new website.', 'lead_activity_content'],
+            'what the lead said' => ['On the call, the client said they are ready to proceed.', 'lead_activity_content'],
+            'subject line' => ['The subject line of the email was about pricing.', 'lead_activity_content'],
+            'a date day as a count' => ['Casa Verde Bistro has 10 notes.', 'misbound_number'],
+            'a date day as an overdue count' => ['This lead has 9 overdue follow-ups.', 'misbound_number'],
+            'field as latest activity' => ['Its last recorded activity was on August 13, 2026.', 'unlabelled_last_activity_field'],
+            'field as last contact' => ['Casa Verde Bistro was last active on 13 August 2026.', 'unlabelled_last_activity_field'],
+        ];
+    }
+
+    #[DataProvider('ungroundedLeadActivityAnswers')]
+    public function test_ungrounded_lead_activity_answers_are_refused(string $answer, string $reason): void
+    {
+        $this->assertSame($reason, $this->checkWithLeadActivity($answer));
+    }
+
+    /** When a logged activity carries the field's very date, the field is not misleading unlabelled. */
+    public function test_the_field_date_may_go_unlabelled_when_an_activity_has_the_same_date(): void
+    {
+        $this->assertSame('ok', $this->checkWithLeadActivity('Its last activity was a Connected call on September 10, 2026.', '2026-09-10'));
+    }
+
+    /** Without the lead_activity source (Slice 2 shape, or a failed capability) no kind rule applies. */
+    public function test_activity_kind_rules_apply_only_when_lead_activity_was_supplied(): void
+    {
+        $this->assertNotSame('unsupported_lead_activity', $this->checkWithLeadProfile('Casa Verde Bistro had a meeting.'));
+        $this->assertNotSame('lead_activity_content', $this->checkWithLeadProfile('The note says they want a redesign.'));
+    }
+
+    // ── 2d. Who logged an activity (Slice 4 actor grounding) ────────────────────────────────────────
+
+    /**
+     * Three newest entries, one per actor: a Connected call by you (Sep 10), an Email reply received
+     * logged by the system (Sep 9) and a Note added by a teammate (Sep 8). Two meetings are counted
+     * but not among the newest entries, so nobody is known to have logged them.
+     */
+    private function checkActors(string $answer): string
+    {
+        $context = (new CopilotContextBuilder)->build('q', [
+            new RetrievedFacts('lead_subject', 'The one lead this question is about.', [
+                RetrievedFacts::fact('business_name', 'Casa Verde Bistro', RetrievedFacts::LABEL),
+            ], 1, FactScope::LEAD),
+            new RetrievedFacts('lead_activity', 'Logged sales activities.', [
+                RetrievedFacts::fact('lead_connected_calls', 1, RetrievedFacts::COUNT),
+                RetrievedFacts::fact('lead_unconnected_calls', 0, RetrievedFacts::COUNT),
+                RetrievedFacts::fact('lead_emails_sent', 0, RetrievedFacts::COUNT),
+                RetrievedFacts::fact('lead_email_replies', 1, RetrievedFacts::COUNT),
+                RetrievedFacts::fact('lead_notes_added', 1, RetrievedFacts::COUNT),
+                RetrievedFacts::fact('lead_follow_ups_completed', 0, RetrievedFacts::COUNT),
+                RetrievedFacts::fact('lead_meetings_completed', 2, RetrievedFacts::COUNT),
+                RetrievedFacts::fact('lead_consultations_completed', 0, RetrievedFacts::COUNT),
+                RetrievedFacts::fact('lead_tasks_completed', 0, RetrievedFacts::COUNT),
+                RetrievedFacts::fact('lead_outcome', 'none', RetrievedFacts::LABEL),
+                RetrievedFacts::fact('last_logged_activity', 'Connected call', RetrievedFacts::LABEL),
+                RetrievedFacts::fact('last_logged_activity_date', '2026-09-10', RetrievedFacts::DATE),
+                RetrievedFacts::fact('last_logged_activity_by', 'you', RetrievedFacts::LABEL),
+                RetrievedFacts::fact('second_last_logged_activity', 'Email reply received', RetrievedFacts::LABEL),
+                RetrievedFacts::fact('second_last_logged_activity_date', '2026-09-09', RetrievedFacts::DATE),
+                RetrievedFacts::fact('second_last_logged_activity_by', 'system', RetrievedFacts::LABEL),
+                RetrievedFacts::fact('third_last_logged_activity', 'Note added', RetrievedFacts::LABEL),
+                RetrievedFacts::fact('third_last_logged_activity_date', '2026-09-08', RetrievedFacts::DATE),
+                RetrievedFacts::fact('third_last_logged_activity_by', 'a teammate', RetrievedFacts::LABEL),
+            ], 3, FactScope::LEAD),
+        ]);
+        $content = json_encode(['answerable' => true, 'answer' => $answer, 'sources' => ['lead_subject', 'lead_activity']]);
+
+        return (new CopilotAnswerValidator)->validate($content, $context, 'tell me about Casa Verde Bistro')[0];
+    }
+
+    /** @return array<string, array{0: string}> */
+    public static function correctlyAttributedActivities(): array
+    {
+        return [
+            'you, passive' => ['The latest activity was a Connected call logged by you on September 10, 2026.'],
+            'you, active' => ['You logged a connected call with Casa Verde Bistro on September 10, 2026.'],
+            'you, possessive' => ['Your connected call on September 10, 2026 is the latest activity.'],
+            'teammate, passive' => ['A note was added by a teammate on September 8, 2026.'],
+            'teammate, active' => ['A teammate added a note on September 8, 2026.'],
+            'system, passive' => ['An email reply was received and logged by the system on September 9, 2026.'],
+            'system, automatically' => ['The email reply on September 9, 2026 was logged automatically.'],
+            'mixed, each right' => ['You logged a connected call on September 10, 2026, and a note was added by a teammate on September 8, 2026.'],
+            'three actors, each right' => ['The connected call was logged by you; the email reply was logged by the system; the note was added by a teammate.'],
+            'no actor named' => ['Casa Verde Bistro has 2 completed meetings and 1 connected call.'],
+            'a suggestion names no actor' => ['You could add a note about the connected call.'],
+            'you, not as the doer' => ['You have 1 connected call and 1 note on this lead.'],
+            'cannot tell who' => ['The available data cannot tell who logged the meetings.'],
+        ];
+    }
+
+    #[DataProvider('correctlyAttributedActivities')]
+    public function test_an_activity_credited_to_its_supplied_actor_is_accepted(string $answer): void
+    {
+        $this->assertSame('ok', $this->checkActors($answer));
+    }
+
+    /** @return array<string, array{0: string}> */
+    public static function misattributedActivities(): array
+    {
+        return [
+            // "you" needs an entry supplied as you.
+            'you added the teammate\'s note' => ['You added a note on September 8, 2026.'],
+            'your note' => ['Your note on September 8, 2026 is on file.'],
+            'the reply by you' => ['The email reply on September 9, 2026 was logged by you.'],
+            // "a teammate" needs an entry supplied as a teammate.
+            'teammate made your call' => ['A teammate logged the connected call on September 10, 2026.'],
+            'teammate logged the system reply' => ['The email reply was logged by a teammate.'],
+            // "system" needs an entry supplied as system.
+            'system logged your call' => ['The connected call was logged by the system.'],
+            'note added automatically' => ['A note was added automatically on September 8, 2026.'],
+            // One activity's actor never carries over to another.
+            'you, call right and note wrong' => ['You have logged one connected call and added one note.'],
+            'you, elided second verb' => ['You logged a connected call on September 10, 2026, and added a note on September 8, 2026.'],
+            'teammate, note right and call wrong' => ['A teammate added a note and the connected call.'],
+            // A kind supplied only as a count has no known actor.
+            'counted, not listed' => ['You completed 2 meetings with this lead.'],
+        ];
+    }
+
+    #[DataProvider('misattributedActivities')]
+    public function test_an_activity_credited_to_the_wrong_actor_is_refused(string $answer): void
+    {
+        $this->assertSame('misattributed_lead_activity', $this->checkActors($answer));
+    }
+
+    /**
+     * Live QA 2026-10-01, "Did I add the note on this lead?": a correct answer denies WHO added the
+     * note, not that it exists. Negating the actor, or a leading yes/no, never denies the activity.
+     *
+     * @return array<string, array{0: string}>
+     */
+    public static function correctActorDenials(): array
+    {
+        return [
+            'leading no, then the real actor' => ['No, a teammate added the note on September 8, 2026.'],
+            'you did not; a teammate did' => ['You did not add the note; a teammate did.'],
+            'not by you' => ['The note was added by a teammate, not by you.'],
+            'no as its own sentence' => ['No. The note on this lead was added by a teammate.'],
+            'contracted negation' => ['You haven\'t added any notes on this lead; a teammate added the note on September 8, 2026.'],
+            'actor ruled out mid-sentence' => ['A teammate, not you, added the note.'],
+            'teammate ruled out of your call' => ['You logged the connected call, not a teammate.'],
+            'system ruled out' => ['The note was added by a teammate, not by the system.'],
+            'taglish yes/no' => ['Hindi, a teammate added the note on September 8, 2026.'],
+        ];
+    }
+
+    #[DataProvider('correctActorDenials')]
+    public function test_denying_who_did_an_activity_is_not_denying_the_activity(string $answer): void
+    {
+        $this->assertSame('ok', $this->checkActors($answer));
+    }
+
+    /**
+     * Ruling an actor out is still checked against the supplied `by` labels, and an activity that
+     * exists is still never denied, whatever yes/no or actor wording surrounds it.
+     *
+     * @return array<string, array{0: string, 1: string}>
+     */
+    public static function falseActorDenials(): array
+    {
+        return [
+            // Ruling out the actor who did log it.
+            'you did not log your own call' => ['You did not log the connected call.', 'misattributed_lead_activity'],
+            'no, you have not called' => ['No, you have not logged any connected calls.', 'misattributed_lead_activity'],
+            'teammate ruled out of their note' => ['A teammate did not add the note.', 'misattributed_lead_activity'],
+            'not by you, on your call' => ['The connected call was logged by a teammate, not by you.', 'misattributed_lead_activity'],
+            'only a ruled-out actor, wrongly' => ['The connected call was logged, not by you.', 'misattributed_lead_activity'],
+            'system ruled out of its reply' => ['The email reply was logged by you, not by the system.', 'misattributed_lead_activity'],
+            // Meetings are counted but not listed, so nobody can be ruled out of them.
+            'counted kind, actor unknown' => ['You have not completed any meetings.', 'misattributed_lead_activity'],
+            'yes, you added it' => ['Yes, you added the note on September 8, 2026.', 'misattributed_lead_activity'],
+            // Denying that an activity exists, with or without a yes/no.
+            'no notes at all' => ['There are no notes on this lead.', 'unsupported_lead_activity'],
+            'no, then no notes' => ['No, there are no notes on this lead.', 'unsupported_lead_activity'],
+            'no-one, not a yes/no' => ['No-one has called this lead.', 'unsupported_lead_activity'],
+            'actor in the next segment only' => ['This lead has no connected calls; a teammate added the note.', 'unsupported_lead_activity'],
+        ];
+    }
+
+    #[DataProvider('falseActorDenials')]
+    public function test_a_false_actor_denial_or_a_denied_activity_is_still_refused(string $answer, string $reason): void
+    {
+        $this->assertSame($reason, $this->checkActors($answer));
+    }
+
+    /** The validator's kind→label map covers every label the allowlist can produce, and no other. */
+    public function test_the_actor_check_knows_every_allowlisted_label(): void
+    {
+        $produced = [];
+        foreach (LeadActivityLabels::EVENTS as $event) {
+            foreach (['connected', 'no_answer', 'busy', 'voicemail', 'cancelled', 'failed'] as $outcome) {
+                foreach (['follow-up', 'meeting', 'consultation', 'task', 'call', 'email'] as $type) {
+                    $classified = LeadActivityLabels::classify($event, $outcome, $type);
+                    if ($classified !== null) {
+                        $produced[$classified[1]] = true;
+                    }
+                }
+            }
+        }
+        $mapped = array_merge(...array_values((new \ReflectionClassConstant(CopilotAnswerValidator::class, 'KIND_LABELS'))->getValue()));
+
+        $this->assertEqualsCanonicalizing(array_keys($produced), array_values(array_unique($mapped)));
     }
 
     // ── 3. A ranking states the figures in order ───────────────────────────────────────────────────

@@ -26,7 +26,8 @@ use Tests\TestCase;
 /**
  * Phase 2 Slice 2 — the profile of ONE authorised lead (PO decisions D2–D4, 2026-09-30).
  *
- * Exactly nine facts: status, priority, website status, the STORED score, the last-activity date,
+ * Exactly nine facts: status, priority, website status, the STORED score, the Last Activity field's
+ * date (renamed last_activity_field in Slice 4, PO Option A),
  * an owner label (you / a teammate / unassigned) and the lead's overdue / due-today / upcoming
  * follow-up counts under the Planner's own visibility. No name, id, contact field, location, amount,
  * outreach flag or event title, and the scoring code is never run.
@@ -40,7 +41,7 @@ class LeadProfileTest extends TestCase
     private const NOW = '2026-09-30 04:00:00';
 
     private const FACT_NAMES = [
-        'status', 'priority', 'website_status', 'lead_score', 'last_activity', 'owner',
+        'status', 'priority', 'website_status', 'lead_score', 'last_activity_field', 'owner',
         'lead_overdue_follow_ups', 'lead_follow_ups_due_today', 'lead_upcoming_follow_ups',
     ];
 
@@ -77,7 +78,7 @@ class LeadProfileTest extends TestCase
             'website_status' => ['no-website', RetrievedFacts::LABEL],
             'lead_score' => [72, RetrievedFacts::POINTS],
             // Stored UTC, reported as the Manila calendar date (22 Sep 17:30Z = 23 Sep 01:30 Manila).
-            'last_activity' => ['2026-09-23', RetrievedFacts::DATE],
+            'last_activity_field' => ['2026-09-23', RetrievedFacts::DATE],
             'owner' => ['you', RetrievedFacts::LABEL],
             'lead_overdue_follow_ups' => [0, RetrievedFacts::COUNT],
             'lead_follow_ups_due_today' => [0, RetrievedFacts::COUNT],
@@ -96,7 +97,7 @@ class LeadProfileTest extends TestCase
         $describes = app(LeadSubjectRetriever::class)->retrieve($bd, $authorized, 'q')->describes;
 
         $this->assertStringNotContainsString('Only its business name is supplied', $describes);
-        foreach (['business name', 'lead_profile', 'status', 'priority', 'website status', 'stored lead score', 'last-activity date', 'owner label', 'follow-up counts', 'Nothing else about this lead is known'] as $part) {
+        foreach (['business name', 'lead_profile', 'status', 'priority', 'website status', 'stored lead score', 'Last Activity field', 'owner label', 'follow-up counts', 'lead_activity', 'logged sales activities', 'Nothing else about this lead is known'] as $part) {
             $this->assertStringContainsString($part, $describes);
         }
     }
@@ -107,7 +108,7 @@ class LeadProfileTest extends TestCase
         $lead = $this->lead($bd);
         DB::table('crm_leads')->where('id', $lead->id)->update(['last_activity' => null]);
 
-        $this->assertNull($this->byName($this->profile($bd, $lead))['last_activity'][0]);
+        $this->assertNull($this->byName($this->profile($bd, $lead))['last_activity_field'][0]);
     }
 
     /** Free text in a category column is counted as `other`, exactly as the Phase 1 portfolio does. */
@@ -260,9 +261,9 @@ class LeadProfileTest extends TestCase
         Http::assertNothingSent();
     }
 
-    public function test_the_lead_capability_set_now_holds_subject_and_profile(): void
+    public function test_the_lead_capability_set_now_holds_subject_profile_and_activity(): void
     {
-        $this->assertSame(['lead_subject', 'lead_profile'], app(LeadCapabilityRegistry::class)->keys());
+        $this->assertSame(['lead_subject', 'lead_profile', 'lead_activity'], app(LeadCapabilityRegistry::class)->keys());
     }
 
     // ── What comes back ──────────────────────────────────────────────────────────────────────────
@@ -271,7 +272,7 @@ class LeadProfileTest extends TestCase
     {
         [$bd, $lead] = $this->leadWithFollowUps(['status' => 'interested', 'priority' => 'high']);
         DB::table('crm_leads')->where('id', $lead->id)->update(['score' => 72, 'last_activity' => '2026-09-22 17:30:00']);
-        $reply = 'Kopi Roasters is an Interested lead with high priority and a lead score of 72. Its last recorded activity was on September 23, 2026. It has 1 overdue follow-up and 2 due today, so start with the overdue one.';
+        $reply = 'Kopi Roasters is an Interested lead with high priority and a lead score of 72. Its Last Activity field shows September 23, 2026. It has 1 overdue follow-up and 2 due today, so start with the overdue one.';
         $this->modelReplies(['answerable' => true, 'answer' => $reply, 'sources' => ['lead_subject', 'lead_profile']]);
         Sanctum::actingAs($bd);
 
@@ -352,7 +353,7 @@ class LeadProfileTest extends TestCase
     {
         [$bd, $lead] = $this->leadWithFollowUps();
         DB::table('crm_leads')->where('id', $lead->id)->update(['last_activity' => '2026-07-19 12:03:00']);
-        $reply = "The lead's last activity was recorded on July 19, 2026. The available data cannot tell how many days ago that was, or whether the lead is stale.";
+        $reply = "The lead record's Last Activity field shows July 19, 2026. The available data cannot tell how many days ago that was, or whether the lead is stale.";
         $this->modelReplies(['answerable' => true, 'answer' => $reply, 'sources' => ['lead_profile']]);
         Sanctum::actingAs($bd);
 

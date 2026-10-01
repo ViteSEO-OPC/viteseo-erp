@@ -310,7 +310,7 @@ class LeadScopedDataTest extends TestCase
 
     public function test_the_lead_capability_set_is_closed_and_separate_from_phase_1(): void
     {
-        $this->assertSame(['lead_subject', 'lead_profile'], app(LeadCapabilityRegistry::class)->keys());
+        $this->assertSame(['lead_subject', 'lead_profile', 'lead_activity'], app(LeadCapabilityRegistry::class)->keys());
         $this->assertNotContains('lead_subject', app(CapabilityRegistry::class)->keys());
         $this->assertCount(7, app(CapabilityRegistry::class)->keys());
 

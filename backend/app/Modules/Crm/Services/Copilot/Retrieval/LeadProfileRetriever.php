@@ -14,7 +14,11 @@ use Illuminate\Support\Carbon;
  *   - status, priority, website_status — normalised to {@see LeadVocabulary}, so free text in a
  *     category column is supplied as `other`, never verbatim;
  *   - lead_score — the STORED score. The scoring code is never run here;
- *   - last_activity — the Asia/Manila calendar date of `last_activity`, or null;
+ *   - last_activity_field — the Asia/Manila calendar date of the lead record's Last Activity field
+ *     (`leads.last_activity`, as the lead's page shows it), or null. Inbound replies and manual edits
+ *     set it — calls, notes and outbound email do not — so it is NOT the newest timeline entry and is
+ *     described to the model as the field it is (Slice 4, PO decision Option A); logged activities
+ *     come from {@see LeadActivityRetriever};
  *   - owner — `you`, `a teammate` or `unassigned`, never a person;
  *   - the lead's overdue / due-today / upcoming follow-ups — the dashboard's own pending follow-up
  *     definition and Manila day ({@see DashboardMetricsService}), narrowed to this lead, so a BD
@@ -46,13 +50,13 @@ class LeadProfileRetriever implements LeadScopedCapability
 
         return new RetrievedFacts(
             self::KEY,
-            'The profile of the one lead this question is about. last_activity is the Philippine calendar date of its last recorded activity (null when none is recorded). owner says who holds it relative to this user. The follow-up counts are the pending follow-ups on this lead that this user can see in the Planner.',
+            'The profile of the one lead this question is about. last_activity_field is the Philippine calendar date in the lead record\'s "Last Activity" field, as shown on the lead\'s page (null when the field is empty). Only inbound email replies and manual edits set that field, so it is not the date of the newest activity on the lead\'s timeline; logged activities are in the lead_activity source. owner says who holds the lead relative to this user. The follow-up counts are the pending follow-ups on this lead that this user can see in the Planner.',
             [
                 RetrievedFacts::fact('status', LeadVocabulary::normalize('status', $lead->value('status')), RetrievedFacts::LABEL),
                 RetrievedFacts::fact('priority', LeadVocabulary::normalize('priority', $lead->value('priority')), RetrievedFacts::LABEL),
                 RetrievedFacts::fact('website_status', LeadVocabulary::normalize('website_status', $lead->value('website_status')), RetrievedFacts::LABEL),
                 RetrievedFacts::fact('lead_score', is_numeric($score) ? (int) $score : null, RetrievedFacts::POINTS),
-                RetrievedFacts::fact('last_activity', $lastActivity instanceof DateTimeInterface
+                RetrievedFacts::fact('last_activity_field', $lastActivity instanceof DateTimeInterface
                     ? Carbon::instance($lastActivity)->setTimezone('Asia/Manila')->format('Y-m-d')
                     : null, RetrievedFacts::DATE),
                 RetrievedFacts::fact('owner', $lead->ownerLabel(), RetrievedFacts::LABEL),
