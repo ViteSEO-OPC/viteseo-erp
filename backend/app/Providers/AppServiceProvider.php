@@ -9,6 +9,7 @@ use Spatie\Permission\Events\PermissionAttached;
 use Spatie\Permission\Events\PermissionDetached;
 use Spatie\Permission\Events\RoleAttached;
 use Spatie\Permission\Events\RoleDetached;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Laravel\Sanctum\PersonalAccessToken;
 use Illuminate\Support\Facades\Queue;
@@ -52,6 +53,14 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        /*
+         * migrate:fresh / refresh / reset / rollback and db:wipe refuse on a live system. They drop tables
+         * (data, roles, logins) or roll schema back inexactly; none is ever part of a release — a release
+         * is rolled back by restoring its pre-deploy dump (docs/release). Live hosts run
+         * APP_ENV=production (the demo too). Laravel's own switch; local/testing are unaffected.
+         */
+        DB::prohibitDestructiveCommands($this->app->isProduction());
+
         /*
          * No token without an expiry.
          *
