@@ -2,6 +2,7 @@
 
 namespace Database\Seeders;
 
+use App\Support\ReseedGuard;
 use Illuminate\Database\Seeder;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
@@ -19,6 +20,11 @@ class RolesAndPermissionsSeeder extends Seeder
 {
     public function run(): void
     {
+        // syncPermissions below REPLACES every built-in role's permission set, undoing any grant made
+        // by hand on a live system. Refused outside local/testing unless ALLOW_ROLE_RESEED names this
+        // exact database — see ReseedGuard. A release never runs this seeder.
+        ReseedGuard::assertAllowed('RolesAndPermissionsSeeder', 'ALLOW_ROLE_RESEED');
+
         // Spatie caches permissions; clear it so re-seeding sees a clean slate.
         app(PermissionRegistrar::class)->forgetCachedPermissions();
 

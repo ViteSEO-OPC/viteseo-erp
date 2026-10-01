@@ -13,11 +13,14 @@ use Spatie\Permission\PermissionRegistrar;
  *
  * Idempotent + non-creating: for each email it `syncRoles(...)` to EXACTLY the
  * listed roles and sets `is_management` on the user's linked hr_employees row.
- * It never creates users — a missing email is reported and skipped — so the
- * command is safe to re-run at any time.
+ * It never creates users — a missing email is reported and skipped.
  *
- * Roles referenced here must already exist (run db:seed / RolesAndPermissionsSeeder
- * first). `is_management` is a payroll/attendance attribute on the employee record,
+ * NOT "safe to re-run at any time" on a live system: the matrix is a snapshot, and syncRoles
+ * REMOVES every role a person was given since (hybrid PM roles, accounting roles, extra
+ * super_admins). Outside local/testing a write therefore needs ALLOW_ROLE_RESEED=<database>
+ * (see App\Support\ReseedGuard); `--dry-run` is always allowed. It is never part of a release.
+ *
+ * Roles referenced here must already exist. `is_management` is a payroll/attendance attribute on the employee record,
  * NOT a role.
  */
 class AssignPlatformRoles extends Command
@@ -55,6 +58,16 @@ class AssignPlatformRoles extends Command
     public function handle(): int
     {
         $dryRun = (bool) $this->option('dry-run');
+
+        if (! $dryRun) {
+            try {
+                \App\Support\ReseedGuard::assertAllowed('platform:assign-roles', 'ALLOW_ROLE_RESEED');
+            } catch (\RuntimeException $e) {
+                $this->error($e->getMessage());
+
+                return self::FAILURE;
+            }
+        }
 
         // Roles resolve against the cached permission registrar; clear it so a freshly
         // seeded role set is visible in the same process.

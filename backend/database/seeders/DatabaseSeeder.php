@@ -62,6 +62,11 @@ class DatabaseSeeder extends Seeder
      */
     public function run(): void
     {
+        // Demo data + every @viteseo.ph login reset to `password` + a super_admin with that password.
+        // Never on a live database: refused outside local/testing unless ALLOW_DEMO_SEED names this
+        // exact database (a demo or scratch rebuild) — see ReseedGuard.
+        \App\Support\ReseedGuard::assertAllowed('DatabaseSeeder', 'ALLOW_DEMO_SEED');
+
         /*
          * THE PROVIDER ORG, FIRST AND BEFORE ANYTHING ELSE.
          *
