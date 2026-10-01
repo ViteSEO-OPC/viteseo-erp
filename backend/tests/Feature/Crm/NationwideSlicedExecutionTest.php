@@ -17,6 +17,7 @@ use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Sleep;
 use Laravel\Sanctum\PersonalAccessToken;
 use Laravel\Sanctum\Sanctum;
+use Tests\Concerns\EnablesDiscoveryRuntime;
 use Tests\TestCase;
 
 /**
@@ -35,6 +36,7 @@ use Tests\TestCase;
  */
 class NationwideSlicedExecutionTest extends TestCase
 {
+    use EnablesDiscoveryRuntime;
     use RefreshDatabase;
 
     /** @var list<array<string, mixed>> */

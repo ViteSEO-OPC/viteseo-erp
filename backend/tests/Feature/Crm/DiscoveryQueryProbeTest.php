@@ -16,6 +16,7 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Laravel\Sanctum\Sanctum;
+use Tests\Concerns\EnablesDiscoveryRuntime;
 use Tests\TestCase;
 
 /**
@@ -32,6 +33,7 @@ use Tests\TestCase;
  */
 class DiscoveryQueryProbeTest extends TestCase
 {
+    use EnablesDiscoveryRuntime;
     use RefreshDatabase;
 
     private const STRATEGY = '/api/v1/crm/discovery/strategy';
@@ -388,6 +390,32 @@ class DiscoveryQueryProbeTest extends TestCase
         $this->postJson(self::STRATEGY, ['category' => 'pharmacy', 'scope' => 'Cebu City'])->assertOk();
 
         Queue::assertPushed(ProbeQueryYieldJob::class);
+    }
+
+    /**
+     * Without a dedicated worker the `discovery` queue has no consumer, and the strategy endpoint is
+     * also called by the standalone scraper — so a probe must not be enqueued into silence. The plan
+     * itself is still answered.
+     */
+    public function test_a_fresh_plan_queues_no_measurement_without_a_discovery_worker(): void
+    {
+        config()->set('discovery.worker_enabled', false);
+        Queue::fake();
+        $this->actingAsAdmin();
+        $this->googleConfigured();
+        $this->aiConfigured();
+        Http::fake(['api.openai.com/*' => Http::response([
+            'choices' => [['message' => ['content' => json_encode(
+                ['queries' => ['botika'], 'selectors' => [], 'placeTypes' => [], 'subAreas' => []]
+            )]]],
+            'usage' => [],
+        ])]);
+
+        $this->postJson(self::STRATEGY, ['category' => 'pharmacy', 'scope' => 'Cebu City'])
+            ->assertOk()
+            ->assertJsonPath('data.strategy.queries', ['botika']);
+
+        Queue::assertNotPushed(ProbeQueryYieldJob::class);
     }
 
     /** A cached plan is the same question with the same phrases — there is nothing new to measure. */

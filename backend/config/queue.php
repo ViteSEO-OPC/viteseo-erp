@@ -44,6 +44,33 @@ return [
             'after_commit' => false,
         ],
 
+        /*
+         * THE DEDICATED DISCOVERY WORKER'S CONNECTION — the same `jobs` table as `database`, read only
+         * for the `discovery` queue, with a reservation long enough for the jobs on it.
+         *
+         * Discovery jobs may run for 900 seconds. Under `database`'s 90-second `retry_after` a
+         * reservation would lapse while the job was still running, and any second worker could pick
+         * the same paid run up again. This connection's reservation outlives the longest job, so a
+         * run is only ever re-offered after its worker has genuinely died. The general worker keeps
+         * the short `retry_after` it needs to recover its own crashed jobs quickly.
+         *
+         * Jobs are still dispatched on the default connection with ->onQueue('discovery'); only the
+         * worker names this connection. That REQUIRES QUEUE_CONNECTION=database (as in production): with
+         * redis the jobs would land where this worker never looks, and with sync a 900 s job would run
+         * inside the web request. Do not set DISCOVERY_WORKER_ENABLED on any other queue driver.
+         *
+         *
+         *   php artisan queue:work discovery --queue=discovery --tries=1 --timeout=900 --max-time=3600
+         */
+        'discovery' => [
+            'driver' => 'database',
+            'connection' => env('DB_QUEUE_CONNECTION'),
+            'table' => env('DB_QUEUE_TABLE', 'jobs'),
+            'queue' => 'discovery',
+            'retry_after' => (int) env('DISCOVERY_QUEUE_RETRY_AFTER', 960),
+            'after_commit' => false,
+        ],
+
         'beanstalkd' => [
             'driver' => 'beanstalkd',
             'host' => env('BEANSTALKD_QUEUE_HOST', 'localhost'),

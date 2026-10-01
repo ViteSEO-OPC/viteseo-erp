@@ -9,6 +9,7 @@ use App\Modules\Crm\Console\Commands\CallingDoctorCommand;
 use App\Modules\Crm\Console\Commands\EnrichDiscoveredWebsitesCommand;
 use App\Modules\Crm\Console\Commands\SyncMailboxesCommand;
 use App\Modules\Crm\Console\Commands\N8nTokenCommand;
+use App\Modules\Crm\Console\Commands\NerbyServiceTokenCheckCommand;
 use App\Modules\Crm\Console\Commands\NerbyServiceTokenCommand;
 use App\Modules\Crm\Console\Commands\PruneReadNotifications;
 use App\Modules\Crm\Console\Commands\ProvisionIntegrationAccountCommand;
@@ -374,6 +375,8 @@ class CrmServiceProvider extends ServiceProvider
                 RecomputeLeadScoresCommand::class,
                 N8nTokenCommand::class,
                 NerbyServiceTokenCommand::class,
+                // Read-only: is the scraper's token authorized for its callbacks (not merely valid)?
+                NerbyServiceTokenCheckCommand::class,
                 PruneReadNotifications::class,
                 // One-shot Business Niche registry backfill. Not scheduled — run manually once the
                 // canonical built-in list is approved and NicheSeeder has been run.
@@ -455,8 +458,14 @@ class CrmServiceProvider extends ServiceProvider
             // lock lives 24 hours, so a tick killed mid-run (a deploy, an OOM) would have silenced
             // enrichment for a day with nothing to show why. 45 minutes is longer than any tick the
             // bounds above permit and far shorter than a day.
+            //
+            // OFF UNLESS DISCOVERY_ENRICHMENT_ENABLED IS TRUE. The filter is evaluated when the entry
+            // is due, not when the schedule is built, so the switch takes effect on the next tick
+            // without a restart; the command refuses on its own as well, for callers that start it
+            // by name.
             $schedule->command('crm:enrich-websites')
                 ->everyThirtyMinutes()
+                ->when(fn (): bool => (bool) config('discovery.enrichment.enabled'))
                 ->withoutOverlapping(45);
         });
     }

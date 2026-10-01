@@ -19,9 +19,18 @@ def _load_dotenv() -> None:
     """Minimal .env loader (KEY=VALUE lines) so we take no extra dependency. Existing environment
     variables always win."""
     env_path = Path(__file__).resolve().parent.parent / ".env"
-    if not env_path.exists():
+    # An UNREADABLE .env is skipped, not fatal. On a host the file holds the operator's standing
+    # token and is readable by root only; when the CRM's own worker (another user) starts this engine
+    # it hands over everything it needs — including a short-lived token — through the environment,
+    # and must neither read the operator's credential nor crash on it. Both the stat (a symlink into
+    # a root-only directory) and the read (a root-only file) can raise PermissionError.
+    try:
+        if not env_path.is_file():
+            return
+        text = env_path.read_text()
+    except OSError:
         return
-    for line in env_path.read_text().splitlines():
+    for line in text.splitlines():
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue

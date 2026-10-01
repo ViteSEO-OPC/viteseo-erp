@@ -422,6 +422,14 @@ class DiscoveryConfigController extends Controller
             return;
         }
 
+        // The probe runs on the `discovery` queue. The strategy endpoint is also called by the
+        // operator's standalone scraper, which needs no worker, so on a host without one a probe
+        // would be enqueued where nothing listens. Skip the measurement instead; the plan itself is
+        // unaffected.
+        if (! config('discovery.worker_enabled')) {
+            return;
+        }
+
         // `model: cache` is the strategist's own word for "this answer was replayed".
         if (($result['usage']['model'] ?? null) === 'cache') {
             return;

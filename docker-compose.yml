@@ -61,6 +61,8 @@ services:
       # That uid has no /etc/passwd entry inside the container, so HOME would be
       # unset and composer would fail trying to write its cache to /.
       HOME: /tmp
+      # This stack runs the dedicated `worker` below, so discovery runs may be accepted.
+      DISCOVERY_WORKER_ENABLED: "true"
     volumes:
       - ./backend:/app
       # The discovery engine, READ-ONLY. Mounted so the API container can inspect
@@ -139,7 +141,7 @@ services:
     # re-requested by a human rather than retried automatically.
     # --timeout=900 accommodates a bounded nationwide sweep across several tasks.
     command:
-      ["php", "artisan", "queue:work", "--queue=discovery", "--tries=1", "--timeout=900", "--sleep=1"]
+      ["php", "artisan", "queue:work", "discovery", "--queue=discovery", "--tries=1", "--timeout=900", "--sleep=1"]
 
   # THE TRIGGER FOR WEBSITE INTELLIGENCE — AND ONLY FOR IT.
   #
@@ -176,6 +178,8 @@ services:
     user: "${DOCKER_UID:-1000}:${DOCKER_GID:-1000}"
     environment:
       HOME: /tmp
+      # The command is off by default everywhere; this service exists to run it.
+      DISCOVERY_ENRICHMENT_ENABLED: "true"
     volumes:
       - ./backend:/app
       - ./scraper:/scraper:ro

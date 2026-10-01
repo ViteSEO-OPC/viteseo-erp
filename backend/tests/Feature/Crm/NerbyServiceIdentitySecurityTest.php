@@ -25,6 +25,7 @@ use Illuminate\Support\Facades\Queue;
 use Laravel\Sanctum\PersonalAccessToken;
 use Laravel\Sanctum\Sanctum;
 use Tests\Concerns\ActsAsNerbyService;
+use Tests\Concerns\EnablesDiscoveryRuntime;
 use Tests\TestCase;
 
 /**
@@ -44,6 +45,7 @@ use Tests\TestCase;
 class NerbyServiceIdentitySecurityTest extends TestCase
 {
     use ActsAsNerbyService;
+    use EnablesDiscoveryRuntime;
     use RefreshDatabase;
 
     private const GOOGLE_KEY = 'AIzaSy-test-not-a-real-google-key-00wxyz';
@@ -463,5 +465,220 @@ class NerbyServiceIdentitySecurityTest extends TestCase
         $candidate = LeadWebsiteCandidate::query()->where('lead_id', $lead->id)->firstOrFail();
         $this->assertSame('https://attacker.example', $candidate->url);
         $this->assertNull($candidate->verified, 'a candidate is evidence to verify, never a verdict');
+    }
+
+    // ── The scraper's standing token: authorization, not mere validity ───────────────────────
+
+    /** Run the read-only check with the token on a 0600 file (never argv), capturing exit + output. */
+    private function checkToken(string $plain, array $options = []): array
+    {
+        $file = tempnam(sys_get_temp_dir(), 'nerby-check-');
+        chmod($file, 0600);
+        file_put_contents($file, $plain."\n");
+
+        try {
+            $code = \Illuminate\Support\Facades\Artisan::call('crm:nerby-service-token-check', ['--token-file' => $file, ...$options]);
+
+            return [$code, \Illuminate\Support\Facades\Artisan::output()];
+        } finally {
+            @unlink($file);
+        }
+    }
+
+    /** The shape of the pre-NERBY scraper account on production: a user with a direct import grant and a wildcard token. */
+    private function legacyScraperToken(): string
+    {
+        $legacy = User::factory()->create(['status' => 'active', 'email' => 'scraper-service@crm.local']);
+        $legacy->orgs()->sync([$this->tenant()->id => ['is_default' => true]]);
+        $legacy->givePermissionTo('crm.leads.import');
+
+        return $legacy->createToken('scraper', ['*'], now()->addDays(60))->plainTextToken;
+    }
+
+    public function test_the_old_me_health_check_was_a_false_positive_for_the_legacy_scraper_token(): void
+    {
+        $plain = $this->legacyScraperToken();
+
+        // What the old daily check asked — and it says "fine". So does the config read, which is
+        // shared with humans holding the import permission, so it is no proof either.
+        $this->withToken($plain)->getJson('/api/v1/auth/me')->assertOk();
+        $this->app['auth']->forgetGuards();
+        $this->withToken($plain)->getJson('/api/v1/crm/discovery/config')->assertOk();
+
+        // What the scraper actually needs — the service-only callbacks — refused. The commit of a
+        // nightly discover-all goes through the second one.
+        foreach ([['GET', '/api/v1/crm/website-enrichment/queue?limit=1'], ['POST', '/api/v1/crm/leads/discovered']] as [$method, $uri]) {
+            $this->app['auth']->forgetGuards();
+            $this->withToken($plain)->json($method, $uri, $method === 'POST' ? ['businesses' => [$this->osmRow()]] : [])
+                ->assertForbidden();
+        }
+
+        // The replacement check reports the truth.
+        [$code, $out] = $this->checkToken($plain);
+        $this->assertSame(11, $code);
+        $this->assertStringContainsString('NOT AUTHORIZED (not_the_service_identity)', $out);
+    }
+
+    public function test_a_nerby_operator_token_passes_the_real_probe_and_the_check_but_not_me(): void
+    {
+        $issued = app(NerbyServiceIdentity::class)->issue($this->tenant()->id, 'operator', now()->addDays(30));
+        $plain = $issued->plainTextToken;
+
+        // The probe the daily check now uses: read-only, and reachable ONLY by the service identity.
+        $this->withToken($plain)->getJson('/api/v1/crm/website-enrichment/queue?limit=1')->assertOk();
+        // /me is outside the callbacks, so the old check would have raised a false alarm.
+        $this->app['auth']->forgetGuards();
+        $this->withToken($plain)->getJson('/api/v1/auth/me')->assertForbidden();
+
+        [$code, $out] = $this->checkToken($plain);
+        $this->assertSame(0, $code, $out);
+        $this->assertStringContainsString('nerby token #'.$issued->accessToken->getKey().' org '.$this->tenant()->id, $out);
+        $this->assertStringContainsString(': OK', $out);
+    }
+
+    public function test_the_check_refuses_every_way_a_token_can_be_unfit(): void
+    {
+        $identity = app(NerbyServiceIdentity::class);
+        $org = $this->tenant()->id;
+
+        // Unknown / revoked.
+        [$code, $out] = $this->checkToken('999|'.str_repeat('x', 40));
+        $this->assertSame(11, $code);
+        $this->assertStringContainsString('unknown_or_revoked', $out);
+
+        // Expired: Sanctum still finds it, so the check must look at expiry itself.
+        [$code, $out] = $this->checkToken($identity->issue($org, 'operator', now()->subMinute())->plainTextToken);
+        $this->assertSame(11, $code);
+        $this->assertStringContainsString('(expired)', $out);
+
+        // Wildcard or unbound tokens on the right identity.
+        $user = $identity->user();
+        foreach ([['*'], [ServiceTokens::CALLBACK_ABILITY], [ServiceTokens::CALLBACK_ABILITY, 'org:1', 'org:2']] as $abilities) {
+            [$code, $out] = $this->checkToken($user->createToken('nerby:operator', $abilities, now()->addDays(30))->plainTextToken);
+            $this->assertSame(11, $code);
+            $this->assertStringContainsString('token_not_scoped_to_one_org', $out);
+        }
+
+        // An org that exists but has no CRM.
+        $bare = Org::create(['name' => 'No CRM Here', 'is_active' => true]);
+        [$code, $out] = $this->checkToken($identity->issue($bare->id, 'operator', now()->addDays(30))->plainTextToken);
+        $this->assertSame(11, $code);
+        $this->assertStringContainsString('org_has_no_crm', $out);
+
+        // A PERSON given the service role is still not the service identity.
+        $impostor = $this->human('crm_bd');
+        $impostor->assignRole(NerbyServiceIdentity::ROLE);
+        [$code, $out] = $this->checkToken($impostor->createToken('nerby:operator', [ServiceTokens::CALLBACK_ABILITY, 'org:'.$org], now()->addDays(30))->plainTextToken);
+        $this->assertSame(11, $code);
+        $this->assertStringContainsString('not_the_service_identity', $out);
+
+        // An inactive org, and an org whose subscription has lapsed.
+        $paused = $this->otherOrg('Paused Org');
+        $paused->forceFill(['is_active' => false])->save();
+        [$code, $out] = $this->checkToken($identity->issue($paused->id, 'operator', now()->addDays(30))->plainTextToken);
+        $this->assertSame(11, $code);
+        $this->assertStringContainsString('org_inactive', $out);
+
+        $lapsed = $this->otherOrg('Lapsed Org');
+        Subscription::query()->where('org_id', $lapsed->id)->update(['status' => 'cancelled', 'current_period_end' => now()->subMonth()]);
+        [$code, $out] = $this->checkToken($identity->issue($lapsed->id, 'operator', now()->addDays(30))->plainTextToken);
+        $this->assertSame(11, $code);
+        $this->assertStringContainsString('org_subscription_inactive', $out);
+
+        // Sanctum's global lifetime applies on top of the token's own expiry.
+        config()->set('sanctum.expiration', 60);
+        $aged = $identity->issue($org, 'operator', now()->addDays(30));
+        $aged->accessToken->forceFill(['created_at' => now()->subHours(2)])->save();
+        [$code, $out] = $this->checkToken($aged->plainTextToken);
+        $this->assertSame(11, $code);
+        $this->assertStringContainsString('(expired)', $out);
+        config()->set('sanctum.expiration', null);
+
+        // Drift on the identity itself: an extra role, then a direct grant, then deactivation.
+        $good = $identity->issue($org, 'operator', now()->addDays(30))->plainTextToken;
+        $user->assignRole('crm_admin');
+        [$code, $out] = $this->checkToken($good);
+        $this->assertSame(11, $code);
+        $this->assertStringContainsString('service_identity_roles_not_least_privilege', $out);
+        $user->removeRole('crm_admin');
+
+        $user->givePermissionTo('crm.leads.delete');
+        [$code, $out] = $this->checkToken($good);
+        $this->assertSame(11, $code);
+        $this->assertStringContainsString('service_identity_has_direct_permissions', $out);
+        $user->revokePermissionTo('crm.leads.delete');
+
+        $user->forceFill(['status' => 'inactive'])->save();
+        [$code, $out] = $this->checkToken($good);
+        $this->assertSame(11, $code);
+        $this->assertStringContainsString('service_identity_inactive', $out);
+    }
+
+    public function test_the_check_warns_before_expiry(): void
+    {
+        $plain = app(NerbyServiceIdentity::class)->issue($this->tenant()->id, 'operator', now()->addDays(3))->plainTextToken;
+
+        [$code, $out] = $this->checkToken($plain);
+        $this->assertSame(10, $code);
+        $this->assertStringContainsString('EXPIRING', $out);
+
+        [$code] = $this->checkToken($plain, ['--warn-days' => 2]);
+        $this->assertSame(0, $code);
+    }
+
+    public function test_the_check_is_read_only_and_never_prints_the_token(): void
+    {
+        // No service account yet, and a token that REACHES the identity logic (a person's): the check
+        // must report it without provisioning the account or its role, as user() would.
+        $email = (string) config('discovery.service_account.email');
+        $human = $this->human('crm_admin')->createToken('mine', ['*'], now()->addDay())->plainTextToken;
+        [$code, $out] = $this->checkToken($human);
+        $this->assertSame(11, $code);
+        $this->assertStringContainsString('not_the_service_identity', $out);
+        $this->assertFalse(User::query()->where('email', $email)->exists(), 'a check must not provision the account');
+        $this->assertFalse(\Spatie\Permission\Models\Role::query()->where('name', NerbyServiceIdentity::ROLE)->exists(), 'nor its role');
+
+        $issued = app(NerbyServiceIdentity::class)->issue($this->tenant()->id, 'operator', now()->addDays(30));
+        [$secret] = array_reverse(explode('|', $issued->plainTextToken, 2));
+        $issued->accessToken->forceFill(['last_used_at' => null])->save();
+
+        [, $out] = $this->checkToken($issued->plainTextToken);
+
+        $this->assertStringNotContainsString($secret, $out);
+        $this->assertStringNotContainsString($issued->accessToken->token, $out, 'nor its hash');
+        $this->assertNull($issued->accessToken->fresh()->last_used_at, 'a check is not a use');
+    }
+
+    public function test_rotation_revokes_only_the_other_operator_tokens(): void
+    {
+        $identity = app(NerbyServiceIdentity::class);
+        $org = $this->tenant()->id;
+        $old = $identity->issue($org, 'operator', now()->addDays(2));
+        $new = $identity->issue($org, 'operator', now()->addDays(30));
+        $run = $identity->issue($org, 'run:in-flight', now()->addHour());
+        $tick = $identity->issue($org, 'enrichment', now()->addHour());
+
+        $this->artisan('crm:nerby-service-token', ['--revoke-operator-except' => (string) $new->accessToken->getKey()])
+            ->assertSuccessful();
+
+        $this->assertNull(PersonalAccessToken::find($old->accessToken->getKey()));
+        $this->assertNotNull(PersonalAccessToken::find($new->accessToken->getKey()));
+        // A rotation never cuts off work in flight.
+        $this->assertNotNull(PersonalAccessToken::find($run->accessToken->getKey()));
+        $this->assertNotNull(PersonalAccessToken::find($tick->accessToken->getKey()));
+
+        // A typo cannot wipe every operator token: an id that is not an operator token revokes nothing.
+        $this->artisan('crm:nerby-service-token', ['--revoke-operator-except' => (string) $run->accessToken->getKey()])
+            ->assertFailed();
+        $this->assertNotNull(PersonalAccessToken::find($new->accessToken->getKey()));
+
+        // Nor can it "keep" an expired token, and the incident switch cannot be combined with it.
+        $this->artisan('crm:nerby-service-token', ['--revoke-operator-except' => (string) $old->accessToken->getKey()])->assertFailed();
+        $expired = $identity->issue($org, 'operator', now()->subMinute());
+        $this->artisan('crm:nerby-service-token', ['--revoke-operator-except' => (string) $expired->accessToken->getKey()])->assertFailed();
+        $this->artisan('crm:nerby-service-token', ['--revoke-operator-except' => (string) $new->accessToken->getKey(), '--revoke-all' => true])
+            ->assertExitCode(2);
+        $this->assertNotNull(PersonalAccessToken::find($new->accessToken->getKey()));
+        $this->assertNotNull(PersonalAccessToken::find($run->accessToken->getKey()));
     }
 }

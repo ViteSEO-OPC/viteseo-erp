@@ -9,6 +9,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Process;
 use Laravel\Sanctum\PersonalAccessToken;
+use Tests\Concerns\EnablesDiscoveryRuntime;
 use Tests\TestCase;
 
 /**
@@ -22,6 +23,7 @@ use Tests\TestCase;
  */
 class WebsiteEnrichmentScheduleTest extends TestCase
 {
+    use EnablesDiscoveryRuntime;
     use RefreshDatabase;
 
     private function scheduledEvent(): ?Event

@@ -12,6 +12,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Laravel\Sanctum\Sanctum;
+use Tests\Concerns\EnablesDiscoveryRuntime;
 use Tests\TestCase;
 
 /**
@@ -25,6 +26,7 @@ use Tests\TestCase;
  */
 class NationwideAiCapacityTest extends TestCase
 {
+    use EnablesDiscoveryRuntime;
     use RefreshDatabase;
 
     /** @var list<array<string, mixed>> */

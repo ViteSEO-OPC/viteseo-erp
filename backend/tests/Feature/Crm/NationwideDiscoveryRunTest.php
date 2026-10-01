@@ -16,6 +16,7 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Testing\TestResponse;
 use Laravel\Sanctum\Sanctum;
+use Tests\Concerns\EnablesDiscoveryRuntime;
 use Tests\TestCase;
 
 /**
@@ -48,6 +49,7 @@ use Tests\TestCase;
  */
 class NationwideDiscoveryRunTest extends TestCase
 {
+    use EnablesDiscoveryRuntime;
     use RefreshDatabase;
 
     private const ENDPOINT = '/api/v1/crm/discovery/runs';

@@ -60,6 +60,18 @@ class EnrichDiscoveredWebsitesCommand extends Command
         NerbyServiceIdentity $service,
         SubscriptionService $subscriptions,
     ): int {
+        // THE KILL SWITCH COMES FIRST — before the lock, before the service identity, before any
+        // org is read. The schedule entry checks it too, but the command is also started by name
+        // (the docker `enricher` loop, cron, an operator), so the command must refuse on its own.
+        // Disabled is a normal state, not a failure: exit 0 so nothing watching treats it as one.
+        // A one-off manual run sets the variable for that invocation only:
+        //   DISCOVERY_ENRICHMENT_ENABLED=true php artisan crm:enrich-websites --audit=5 --search=0
+        if (! config('discovery.enrichment.enabled')) {
+            $this->info('enrich-websites: disabled (DISCOVERY_ENRICHMENT_ENABLED is not true); nothing was run.');
+
+            return self::SUCCESS;
+        }
+
         // THE GUARD TRAVELS WITH THE COMMAND, not with one caller.
         //
         // `withoutOverlapping()` protects the SCHEDULE ENTRY, so it protects exactly one trigger. It
