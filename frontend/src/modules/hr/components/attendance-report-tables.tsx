@@ -345,7 +345,7 @@ export function AttendanceDtrTable({
                 <table className="w-full border-collapse text-left">
                   <thead>
                     <tr className="bg-muted/40">
-                      {["Date", "Day", "Time in", "Time out", "Hours", "Status"].map((h) => (
+                      {["Date", "Day", "Time in", "Time out", "Hours", "Late by", "Status"].map((h) => (
                         <th
                           key={h}
                           className="px-3 py-2 text-label font-bold uppercase tracking-wide text-muted-foreground"
@@ -364,6 +364,18 @@ export function AttendanceDtrTable({
                         <td className="px-3 py-2 text-sm text-foreground">{day.time_out ?? "—"}</td>
                         <td className="px-3 py-2 text-sm text-foreground">
                           {day.hours > 0 ? day.hours.toFixed(2) : "—"}
+                        </td>
+                        {/*
+                         * Coloured only when there is something to answer for. A dash reads as
+                         * "nothing to say here", which is the truth for an on-time arrival, an
+                         * early one, and a day whose schedule could not judge the arrival at all.
+                         */}
+                        <td className="px-3 py-2 text-sm whitespace-nowrap">
+                          {day.late_minutes ? (
+                            <span className="font-medium text-warning">{day.late_minutes} min</span>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
                         </td>
                         <td className="px-3 py-2">
                           <span

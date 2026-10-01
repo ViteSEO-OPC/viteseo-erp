@@ -23,6 +23,10 @@ import { queryKeys } from "@/modules/crm/lib/query-keys";
 export type NerbyTestStatus =
   | "ok"
   | "auth_failed"
+  // The credential is genuine but the account behind it cannot pay. Distinct from `auth_failed`
+  // (the key is fine) and from `unreachable` (nothing is down) because it is the only one an
+  // operator fixes with a payment rather than a configuration change.
+  | "insufficient_credit"
   | "rate_limited"
   | "unreachable"
   | "not_configured"
@@ -35,6 +39,41 @@ export type NerbyFallbackReason =
   | "provider_disabled"
   | "provider_not_configured"
   | "unknown_provider";
+
+/**
+ * The spend guardrail's state for a provider that has one. Present only for Google Places.
+ *
+ * REPORTED IN DOLLARS AND REQUESTS TOGETHER, deliberately. The dollar figure is a MODEL — the
+ * configured budget divided by a configured price — so an operator shown only dollars cannot tell a
+ * stale price constant from real spending, because a wrong price is invisible in the very number it
+ * distorts. Showing both makes the translation checkable at a glance.
+ *
+ * `billedUsd` is net of the provider's free monthly allowance, which is why requests can climb while
+ * the charge stays at zero. `limitUsd` null with `unlimited` true is the unconfigured state — today's
+ * behaviour, and the one worth flagging on screen rather than rendering as a blank.
+ */
+export type NerbySpendState = {
+  provider: string;
+  /** The window the budget applies to, e.g. `2026-09`. */
+  period: string;
+  periodEndsAt: string;
+  /** No budget configured: every request is allowed. */
+  unlimited: boolean;
+  /** A stored budget that could not be read as an amount. The gate refuses while this is true. */
+  unreadable: boolean;
+  limitUsd: number | null;
+  /** Charged so far this period, net of the free allowance. */
+  billedUsd: number;
+  remainingUsd: number | null;
+  requestsUsed: number;
+  requestsAllowed: number | null;
+  requestsRemaining: number | null;
+  freeTierRequests: number;
+  /** What the provider charges per 1,000 requests. */
+  listPricePer1000Usd: number | null;
+  /** That price times the safety factor — what the allowance was actually divided by. */
+  effectivePricePer1000Usd: number | null;
+};
 
 export type NerbyProviderConfig = {
   provider: string;
@@ -54,6 +93,8 @@ export type NerbyProviderConfig = {
   /** Whether this provider has ever been configured — distinct from being enabled. */
   configured: boolean;
   updatedAt: string | null;
+  /** The spend guardrail, for the provider that has one. `null` for every other provider. */
+  spend: NerbySpendState | null;
 };
 
 export type NerbyIntegration = {
@@ -212,6 +253,8 @@ export function testStatusLabel(status: NerbyTestStatus | null): string {
       return "Connected";
     case "auth_failed":
       return "The API key was rejected";
+    case "insufficient_credit":
+      return "The account has no credit remaining — add credit to continue";
     case "rate_limited":
       return "Rate limited — try again shortly";
     case "unreachable":

@@ -206,7 +206,10 @@ class ConversationReplyController extends Controller
             OutboundFailureCode::ResourceAmbiguous,
             OutboundFailureCode::ResourceUnavailable,
             OutboundFailureCode::CredentialRejected,
-            OutboundFailureCode::PolicyViolation => Response::HTTP_CONFLICT,
+            OutboundFailureCode::PolicyViolation,
+            // Never produced by the send path — only the manual resolution endpoint writes it — but
+            // the match stays exhaustive so a future caller cannot fall off the end of it.
+            OutboundFailureCode::OperatorConfirmedNotSent => Response::HTTP_CONFLICT,
 
             OutboundFailureCode::ProviderRateLimited => Response::HTTP_TOO_MANY_REQUESTS,
 

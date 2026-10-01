@@ -27,6 +27,7 @@ class DailyOverrideController extends Controller
             $request->validated('date'),
             $request->validated('grace_minutes'),
             $request->validated('min_full_day_minutes'),
+            (bool) $request->validated('acknowledge_repricing', false),
         );
         return response()->json(['data' => DailyOverrideResource::make($override)]);
     }

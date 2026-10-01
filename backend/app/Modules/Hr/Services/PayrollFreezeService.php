@@ -101,6 +101,29 @@ class PayrollFreezeService
     }
 
     /**
+     * Completed runs whose cycle COVERS a date — company-wide, for a rule that bends that one day.
+     *
+     * The per-employee `completedRunsRepricedBy()` above answers a different question: a salary
+     * change is one person's and reaches forward from its date, while a daily rule override is
+     * everyone's and reaches exactly one day. Same purpose, though — name the periods that were
+     * priced under the old rule, so the change can be confirmed rather than applied blind.
+     *
+     * @return \Illuminate\Database\Eloquent\Collection<int, PayrollRun>
+     */
+    public function completedRunsCovering(string $date): \Illuminate\Database\Eloquent\Collection
+    {
+        return PayrollRun::query()
+            ->where('status', 'completed')
+            // Same family the freeze uses: 13th month and off-cycle adjustments are not priced
+            // from attendance, so a grace change cannot move them.
+            ->whereNotIn('type', ['thirteenth_month', 'adjustment'])
+            ->whereDate('cycle_start', '<=', $date)
+            ->whereDate('cycle_end', '>=', $date)
+            ->orderBy('cycle_start')
+            ->get();
+    }
+
+    /**
      * Completed runs for one employee that a change effective from `$from` would reprice
      *
      * @return \Illuminate\Database\Eloquent\Collection<int, PayrollRun>

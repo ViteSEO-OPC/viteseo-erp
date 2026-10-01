@@ -49,6 +49,10 @@ use Illuminate\Support\Carbon;
     'longitude',
     'place_id',
     'source',
+    // Per-lead AI provenance, BESIDE `source` rather than inside it: a lead found through an
+    // AI-phrased Google query is still a Google Places lead. NULL on every lead discovered before
+    // the column existed — see the migration for the tri-state.
+    'discovery_ai_assisted',
     // Lead Acquisition Channel — the business "Source" (Referral, Facebook, Website, Cold Outreach,
     // …). SEPARATE from `source` (discovery provenance); pure metadata, no business computation.
     'acquisition_channel',
@@ -121,6 +125,9 @@ class Lead extends Model
             // fixed-precision strings. Stored only; the coordinate map is a later milestone.
             'latitude' => 'float',
             'longitude' => 'float',
+            // Nullable on purpose — `boolean` preserves NULL, so "never recorded" stays
+            // distinguishable from a recorded false.
+            'discovery_ai_assisted' => 'boolean',
         ];
     }
 
@@ -243,6 +250,28 @@ class Lead extends Model
     public function websiteEnrichment(): HasOne
     {
         return $this->hasOne(LeadWebsiteEnrichment::class);
+    }
+
+    /**
+     * The website SEARCH trail (1:1) — present once `find-websites` has looked for a site this lead
+     * never supplied. Read-only here; written only by WebsiteEvidenceService.
+     *
+     * @return HasOne<LeadWebsiteSearch, $this>
+     */
+    public function websiteSearch(): HasOne
+    {
+        return $this->hasOne(LeadWebsiteSearch::class);
+    }
+
+    /**
+     * Further discovery lanes that found this lead beside its primary `source` (read-only; written
+     * only by DiscoveryLaneRecorder through the query builder).
+     *
+     * @return HasMany<LeadDiscoveryLane, $this>
+     */
+    public function discoveryLanes(): HasMany
+    {
+        return $this->hasMany(LeadDiscoveryLane::class);
     }
 
     /**

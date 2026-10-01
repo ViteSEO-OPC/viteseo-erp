@@ -203,6 +203,8 @@ export interface LeaveRequest {
   days: number;
   reason: string;
   status: "pending" | "approved" | "rejected" | "cancelled";
+  /** An intern's leave, filed for the record: true when it is unpaid. Null for everyone else. */
+  unpaid_for_intern: boolean | null;
   review_note: string | null;
   reviewed_at: string | null;
   reviewed_by: string | null;

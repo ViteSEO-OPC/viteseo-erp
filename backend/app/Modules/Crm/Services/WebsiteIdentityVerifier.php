@@ -3,6 +3,7 @@
 namespace App\Modules\Crm\Services;
 
 use App\Modules\Crm\Models\Lead;
+use App\Modules\Crm\Services\Website\WebsiteUrlClassifier;
 
 /**
  * Decides whether an audited page actually belongs to the lead's business.
@@ -25,6 +26,8 @@ use App\Modules\Crm\Models\Lead;
  */
 class WebsiteIdentityVerifier
 {
+    public function __construct(private readonly WebsiteUrlClassifier $classifier = new WebsiteUrlClassifier) {}
+
     /** Confidence needed to call a page the business's own site. */
     public const THRESHOLD = 50;
 
@@ -52,8 +55,11 @@ class WebsiteIdentityVerifier
 
     /**
      * @param  array<string, mixed>  $findings  the submitted audit payload (see StoreWebsiteEnrichmentRequest)
+     * @param  bool  $domainDerivedFromName  see {@see WebsiteIdentityVerdict} and the block below —
+     *                                       true when the host being judged was CONSTRUCTED from the
+     *                                       business name rather than asserted by anyone.
      */
-    public function verify(Lead $lead, array $findings): WebsiteIdentityVerdict
+    public function verify(Lead $lead, array $findings, bool $domainDerivedFromName = false): WebsiteIdentityVerdict
     {
         // Nothing was fetched — there is no page to attribute to anyone.
         if (! ($findings['website_reachable'] ?? false)) {
@@ -65,14 +71,47 @@ class WebsiteIdentityVerifier
             ?? $this->host((string) ($findings['final_url'] ?? ''))
             ?? $requested;
 
+        // A PLATFORM PAGE CAN NEVER BE THE BUSINESS'S OWN SITE, however well it matches — and it will
+        // match well, which is exactly why this gate sits above the signal weights rather than among
+        // them. A Facebook page for "Cafe Bobs" carries the name in its title (30) and the shop's
+        // phone (35): 65 against a threshold of 50, verified, and the lead is recorded as having a
+        // website. It has a Facebook page. A business whose only web presence is somebody else's
+        // platform is the PROSPECT this CRM exists to find, so calling that a website inverts the
+        // signal it was discovered for.
+        //
+        // Judged on where the request LANDED, so a redirect into a platform is caught too: a domain
+        // that now forwards to a Facebook page is a business that no longer has its own site.
+        $landedKind = $this->classifier->classify($landed);
+        if ($landedKind !== WebsiteUrlClassifier::KIND_OWN) {
+            return new WebsiteIdentityVerdict(
+                verified: false,
+                confidence: 0,
+                // Recorded, not silent: a BD looking at this lead can see the URL was examined and
+                // why it was refused, which is a different thing from never having been checked.
+                signals: ['platform_hosted' => true, 'platform_kind_'.$landedKind => true],
+            );
+        }
+
         $tokens = $this->nameTokens((string) $lead->business_name);
         $text = mb_strtolower(trim(
             ((string) ($findings['website_title'] ?? '')).' '.((string) ($findings['website_description'] ?? ''))
         ));
 
+        // THE BRAND THE DOMAIN MATCHED, when it matched one. A corporate site legitimately titles
+        // itself after the BRAND, never after the branch: "Mercury Drug Corporation" cannot contain
+        // "Ayala Center The Residences", and requiring it to left every chain branch one signal short
+        // of the threshold — measured on live data, Mercury Drug, Southstar Drug and Wilcon Depot all
+        // sat at exactly 40. So once the domain has established WHICH brand this is, the title is
+        // judged against that brand rather than against the branch address bolted onto it. Narrowing
+        // only: a title that matches nothing still matches nothing.
+        $brandTokens = $landed !== null ? $this->matchedBrandTokens($landed, $tokens) : null;
+
         $signals = [
-            'domain_matches_name' => $landed !== null && $this->domainMatchesName($landed, $tokens),
-            'title_matches_name' => $text !== '' && $this->textMatchesName($text, $tokens),
+            'domain_matches_name' => $brandTokens !== null,
+            'title_matches_name' => $text !== '' && (
+                $this->textMatchesName($text, $tokens)
+                || ($brandTokens !== null && $this->textMatchesName($text, $brandTokens))
+            ),
             'phone_match' => $this->phoneMatches($lead->phone, (array) ($findings['phones_found'] ?? [])),
             'email_domain_match' => $landed !== null && $this->emailDomainMatches($lead->email, $landed),
             'city_match' => $text !== '' && $this->cityMatches($lead->city, $text),
@@ -80,9 +119,26 @@ class WebsiteIdentityVerifier
 
         $confidence = 0;
         foreach ($signals as $name => $matched) {
-            if ($matched) {
-                $confidence += self::WEIGHTS[$name];
+            if (! $matched) {
+                continue;
             }
+
+            // A DERIVED DOMAIN IS NOT EVIDENCE ABOUT ITSELF. When a candidate's host was built FROM
+            // the business name — the probe tier spells the name as a domain and keeps whatever
+            // resolves — then "the domain matches the name" is guaranteed true by construction and
+            // proves nothing at all. Counting it let `newyork.com` reach 70 for a bakery in Naga
+            // called "New York Bakery": 40 for a domain the probe had just written, plus 30 for a
+            // title that unsurprisingly says "NewYork.com". The signal is still RECORDED, so the
+            // trail shows what was examined; it simply carries no weight.
+            //
+            // Nothing here changes a weight or the threshold. It changes which evidence is
+            // independent enough to be counted, which is the question the weights assume has already
+            // been answered.
+            if ($name === 'domain_matches_name' && $domainDerivedFromName) {
+                continue;
+            }
+
+            $confidence += self::WEIGHTS[$name];
         }
         $confidence = min(100, $confidence);
 
@@ -137,7 +193,12 @@ class WebsiteIdentityVerifier
     }
 
     /**
-     * The business name, as a domain would spell it, appearing in the host.
+     * WHICH PART OF THE NAME THE HOST SPELLS — the brand tokens that matched, or null for no match.
+     *
+     * Was `domainMatchesName(): bool`. It now returns the tokens rather than a yes/no because the
+     * caller needs to know WHICH brand the domain established, not merely that one did: a corporate
+     * page titles itself after the brand and never after the branch, so the title check is judged
+     * against these tokens (see {@see verify()}). The matching itself is unchanged.
      *
      * Compared against the host with every separator stripped, so `mercurydrug` is found in
      * `mercurydrug.com.ph`. Discovery names often carry a branch suffix ("Mercury Drug Vigan"), which
@@ -145,30 +206,32 @@ class WebsiteIdentityVerifier
      * leading word must be long enough to be distinctive on its own.
      *
      * @param  list<string>  $tokens
+     * @return list<string>|null
      */
-    private function domainMatchesName(string $host, array $tokens): bool
+    private function matchedBrandTokens(string $host, array $tokens): ?array
     {
         if ($tokens === []) {
-            return false;
+            return null;
         }
 
         $haystack = preg_replace('/[^a-z0-9]/', '', $host) ?? '';
 
-        $candidates = [implode('', $tokens)];
+        // Widest first, so the brand reported back is the most specific spelling that matched.
+        $candidates = [[implode('', $tokens), $tokens]];
         if (count($tokens) >= 2) {
-            $candidates[] = $tokens[0].$tokens[1];
+            $candidates[] = [$tokens[0].$tokens[1], [$tokens[0], $tokens[1]]];
         }
         if (mb_strlen($tokens[0]) >= 6) {
-            $candidates[] = $tokens[0];
+            $candidates[] = [$tokens[0], [$tokens[0]]];
         }
 
-        foreach (array_unique($candidates) as $candidate) {
-            if (mb_strlen($candidate) >= 4 && str_contains($haystack, $candidate)) {
-                return true;
+        foreach ($candidates as [$needle, $matched]) {
+            if (mb_strlen($needle) >= 4 && str_contains($haystack, $needle)) {
+                return $matched;
             }
         }
 
-        return false;
+        return null;
     }
 
     /**

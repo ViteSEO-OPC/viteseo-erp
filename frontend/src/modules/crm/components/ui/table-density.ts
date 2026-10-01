@@ -97,8 +97,5 @@ export function useTableDensity(): TableDensityTokens {
   return TOKENS[useContext(TableDensityContext).density];
 }
 
-/** The token table itself, for tests and for the provider. Not for component use. */
-export const TABLE_DENSITY_TOKENS = TOKENS;
-
 /** Zerem-namespaced, matching the theme key's convention so no other app can collide with it. */
 export const TABLE_DENSITY_STORAGE_KEY = "zerem-table-density";

@@ -34,9 +34,13 @@ type Props = {
  * backdrop stacks it above the attachments modal that opened it — the same pattern the niche modals
  * use, since both surfaces must clear the parent dialog's `z-50`.
  *
- * Download stays available inside the viewer: preview covers images, PDFs, plain text, CSV and
- * spreadsheets, and for everything else — or when a browser declines to render what it was given —
- * downloading is still the answer.
+ * Download stays available inside the viewer: preview covers images, PDFs, plain text, CSV,
+ * spreadsheets and — where the server can convert them — Office documents, and for everything else —
+ * or when a browser declines to render what it was given — downloading is still the answer.
+ *
+ * OFFICE DOCUMENTS ARE SHOWN AS THE PDF THE SERVER MADE OF THEM, through the same `<iframe>` as a
+ * PDF attachment. The original DOC/DOCX/PPT/PPTX never reaches the browser for viewing, so nothing in
+ * it is interpreted client-side.
  *
  * The kind is decided ONCE, by the hook, and carried on the preview. This component used to re-derive
  * it from the MIME and filename, which was harmless while both answers came from the same pure
@@ -46,7 +50,8 @@ type Props = {
  * MOBILE PDF, UNCHANGED AND UNRESOLVED. `<iframe>` renders PDFs reliably on desktop Chrome, Edge,
  * Firefox and Safari, but Android Chrome and mobile Safari frequently show a blank frame or offer a
  * download instead. That predates this slice and is deliberately not addressed here — fixing it
- * means pdf.js and a new dependency. Download is the working path on those browsers.
+ * means pdf.js and a new dependency. Download is the working path on those browsers, and the same
+ * limitation now applies to Office documents, which render through that same frame.
  */
 export function LeadAttachmentPreviewDialog({ preview, onClose, onDownload, downloading }: Props) {
   const kind = preview?.kind ?? null;
@@ -76,7 +81,7 @@ export function LeadAttachmentPreviewDialog({ preview, onClose, onDownload, down
               alt={preview.name}
               className="max-h-[60vh] max-w-full object-contain"
             />
-          ) : kind === "pdf" ? (
+          ) : kind === "pdf" || kind === "document" ? (
             <iframe
               src={preview.url ?? ""}
               title={preview.name}

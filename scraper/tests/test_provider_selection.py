@@ -100,17 +100,55 @@ def test_osm_is_the_ergonomic_alias_for_the_canonical_id(monkeypatch):
 def test_an_unknown_provider_still_raises(monkeypatch):
     crm_unavailable(monkeypatch)
 
+    # `google_places` is a real provider now, so a genuinely unknown value keeps this assertion honest.
     with pytest.raises(ValueError, match="Unknown discovery provider"):
-        get_provider(config(discovery_provider="google_places"))
+        get_provider(config(discovery_provider="bing_places"))
 
 
-def test_google_places_is_not_a_runtime_provider(monkeypatch):
-    # It is a roadmap entry in the Settings UI and nothing else. Until it is evaluated and approved
-    # it must not be selectable, from the CRM or from a flag.
+def test_google_places_is_an_optional_runtime_provider(monkeypatch):
+    # PO decision 2026-09-15: Google Places (API New) is an ADDITIONAL, optional provider — selectable
+    # from the CRM or a flag — while OpenStreetMap stays the default and the fallback. It replaces the
+    # earlier roadmap-only assertion that it could not be selected.
+    from scraper.providers.google_places import GooglePlacesProvider
+
     crm_unavailable(monkeypatch)
 
-    with pytest.raises(ValueError):
-        get_provider(config_for(config(), resolve_provider_choice(config(), "google_places")))
+    provider = get_provider(config_for(config(), resolve_provider_choice(config(), "google_places")))
+    try:
+        assert isinstance(provider, GooglePlacesProvider)
+        assert provider.name == "google_places"
+    finally:
+        provider.close()
+
+
+def test_a_crm_selected_google_places_is_buildable_and_needs_no_google_key(monkeypatch):
+    # The Google key lives in the CRM. The scraper's config has no field for it, and needs none.
+    from scraper.providers.google_places import GooglePlacesProvider
+
+    crm_says(monkeypatch, "google_places")
+
+    provider = get_provider(config_for(config(), resolve_provider_choice(config())))
+    try:
+        assert isinstance(provider, GooglePlacesProvider)
+    finally:
+        provider.close()
+    assert not any("google" in field.lower() for field in Config.__dataclass_fields__)
+
+
+def test_selecting_osm_never_imports_the_google_places_module(monkeypatch):
+    crm_unavailable(monkeypatch)
+    sys.modules.pop("scraper.providers.google_places", None)
+
+    get_provider(config()).close()
+
+    assert "scraper.providers.google_places" not in sys.modules
+
+
+def test_google_places_without_a_crm_token_fails_loudly(monkeypatch):
+    crm_unavailable(monkeypatch)
+
+    with pytest.raises(ValueError, match="CRM_TOKEN is required for --provider google_places"):
+        get_provider(config(discovery_provider="google_places", crm_token=""))
 
 
 # --- precedence: cli > crm > env > default --------------------------------------
@@ -264,3 +302,38 @@ def test_osm_provider_ids_keep_their_historical_unprefixed_form():
 
     assert business.provider_id == "node/123"
     assert not business.provider_id.startswith("osm/")
+
+
+def test_a_google_places_run_is_built_with_the_ai_planner_off(monkeypatch):
+    """Provider SELECTION must not smuggle in the AI capability. A Google-only run is factual
+    discovery and makes no model call unless an environment explicitly opts in."""
+    crm_says(monkeypatch, "google_places")
+    monkeypatch.delenv("DISCOVERY_AI_STRATEGY", raising=False)
+
+    provider = get_provider(config_for(config(), resolve_provider_choice(config())))
+    try:
+        assert provider._use_strategy is False
+    finally:
+        provider.close()
+
+
+def test_the_ai_planner_can_still_be_switched_on_for_the_future_phase(monkeypatch):
+    """The capability is dormant, not removed — one environment variable re-enables it."""
+    crm_says(monkeypatch, "google_places")
+
+    provider = get_provider(
+        config_for(config(use_ai_strategy=True), resolve_provider_choice(config()))
+    )
+    try:
+        assert provider._use_strategy is True
+    finally:
+        provider.close()
+
+
+def test_the_ai_strategy_switch_is_off_unless_the_environment_says_otherwise(monkeypatch):
+    for value in ("", "0", "false", "no"):
+        monkeypatch.setenv("DISCOVERY_AI_STRATEGY", value)
+        assert Config.load().use_ai_strategy is False, value
+    for value in ("1", "true", "YES", "on"):
+        monkeypatch.setenv("DISCOVERY_AI_STRATEGY", value)
+        assert Config.load().use_ai_strategy is True, value

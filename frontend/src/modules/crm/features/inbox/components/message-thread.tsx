@@ -1,9 +1,11 @@
 "use client";
 
-import { AlertCircle, Check, CircleHelp, Clock, Paperclip } from "lucide-react";
+import { AlertCircle, Check, CircleHelp, CircleX, Clock, Paperclip, UserCheck } from "lucide-react";
 
-import { UNRESOLVED_FAILURE_CODES } from "@/modules/crm/features/inbox/types/inbox-types";
+import { deliveryState } from "@/modules/crm/features/inbox/lib/outbound-lock";
 import type { InboxMessage } from "@/modules/crm/features/inbox/types/inbox-types";
+
+const NO_UNRESOLVED: ReadonlySet<string> = new Set();
 
 function stamp(message: InboxMessage): string {
     const iso = message.occurredAt ?? message.receivedAt;
@@ -15,42 +17,42 @@ function stamp(message: InboxMessage): string {
 }
 
 /**
- * The delivery state of one OUTBOUND turn, in words.
+ * The delivery state of one OUTBOUND turn, in words. The decision itself is `deliveryState` in
+ * lib/outbound-lock, so it can be tested without React.
  *
- * `deliveryStatus` IS AUTHORITATIVE AND `providerMessageIdPresent` IS NOT. A provider id can exist
- * on a row whose delivery was never confirmed, and it exists on most inbound rows too, so treating
- * it as evidence of delivery would announce a success the server refused to claim. It is not read
- * here at all.
+ * `deliveryStatus` IS AUTHORITATIVE. `providerMessageIdPresent` is read in exactly ONE place: on a
+ * row already `sent`, `false` marks a send an OPERATOR confirmed (Phase 3H.5A never invents a
+ * provider id) as opposed to one the provider acknowledged. It is never evidence of delivery on its
+ * own — it exists on most inbound rows too.
  *
- * THE FIFTH STATE IS THE ONE THAT MATTERS. `pending` CARRYING a failure code is not "in flight" and
- * not "failed" — it means the message may already be with the customer and nobody knows. It reads
- * as "Delivery unconfirmed" so that an operator does not do the one thing that would make it worse,
- * which is send it again. The codes come from UNRESOLVED_FAILURE_CODES rather than a second copy of
- * the list.
+ * THE SERVER'S UNRESOLVED LIST WINS. An id in `unresolvedOutbound` reads "Delivery unconfirmed" even
+ * when the row is a stranded `pending` with no code, so an operator does not read it as "still
+ * sending" and wait forever — or send it again. A `pending` row carrying one of the unresolved codes
+ * reads the same way even without the list (an older server).
  *
  * NO RAW FAILURE CODE IS EVER RENDERED. An operator sees a state, not `provider_unavailable`.
  */
-function deliveryLabel(message: InboxMessage): { text: string; icon: typeof Check; tone: string } | null {
-    if (message.direction !== "outbound") {
-        return null;
+function deliveryLabel(
+    message: InboxMessage,
+    unresolvedIds: ReadonlySet<string>,
+): { text: string; icon: typeof Check; tone: string } | null {
+    switch (deliveryState(message, unresolvedIds)) {
+        case "unconfirmed":
+            return { text: "Delivery unconfirmed", icon: CircleHelp, tone: "text-amber-600 dark:text-amber-400" };
+        case "not_sent_by_operator":
+            return { text: "Not sent (confirmed by operator)", icon: CircleX, tone: "text-muted-foreground" };
+        case "failed":
+            return { text: "Failed", icon: AlertCircle, tone: "text-destructive" };
+        case "sent_by_operator":
+            return { text: "Sent (confirmed by operator)", icon: UserCheck, tone: "text-muted-foreground" };
+        case "sent":
+            return { text: "Sent", icon: Check, tone: "text-muted-foreground" };
+        case "pending":
+            return { text: "Pending", icon: Clock, tone: "text-muted-foreground" };
+        default:
+            // Inbound, or an outbound row with no status (predates delivery tracking): say nothing.
+            return null;
     }
-
-    if (message.deliveryStatus === "sent") {
-        return { text: "Sent", icon: Check, tone: "text-muted-foreground" };
-    }
-
-    if (message.deliveryStatus === "failed") {
-        return { text: "Failed", icon: AlertCircle, tone: "text-destructive" };
-    }
-
-    if (message.deliveryStatus === "pending") {
-        return message.failureCode !== null && UNRESOLVED_FAILURE_CODES.includes(message.failureCode)
-            ? { text: "Delivery unconfirmed", icon: CircleHelp, tone: "text-amber-600 dark:text-amber-400" }
-            : { text: "Pending", icon: Clock, tone: "text-muted-foreground" };
-    }
-
-    // An outbound row with no status at all predates delivery tracking; say nothing rather than guess.
-    return null;
 }
 
 /**
@@ -59,7 +61,14 @@ function deliveryLabel(message: InboxMessage): { text: string; icon: typeof Chec
  * Inbound and outbound are distinguished by side, colour AND a text label, and outbound turns
  * additionally carry their delivery state — inbound ones never do, because we did not deliver them.
  */
-export function MessageThread({ messages }: { messages: InboxMessage[] }) {
+export function MessageThread({
+    messages,
+    unresolvedIds = NO_UNRESOLVED,
+}: {
+    messages: InboxMessage[];
+    /** Ids from the detail's `unresolvedOutbound`. */
+    unresolvedIds?: ReadonlySet<string>;
+}) {
     if (messages.length === 0) {
         return <p className="py-10 text-center text-sm text-muted-foreground">This conversation has no messages yet.</p>;
     }
@@ -100,7 +109,7 @@ export function MessageThread({ messages }: { messages: InboxMessage[] }) {
                             </p>
 
                             {(() => {
-                                const delivery = deliveryLabel(message);
+                                const delivery = deliveryLabel(message, unresolvedIds);
 
                                 if (delivery === null) {
                                     return null;

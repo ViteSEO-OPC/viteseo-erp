@@ -10,9 +10,9 @@ export async function getReport(
 }
 
 /**
- * Trigger a report export. The backend streams a file (CSV for table reports, PDF
- * for chart reports); we return the bytes + the server-provided filename so the
- * caller can save it.
+ * Trigger a report export. The backend streams a file (a styled XLSX for table
+ * reports, PDF for chart reports); we return the bytes + the server-provided
+ * filename so the caller can save it — the extension comes from the server.
  */
 export async function exportReport(
   key: string,

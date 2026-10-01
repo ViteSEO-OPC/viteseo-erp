@@ -25,6 +25,9 @@ class UpsertDailyOverrideRequest extends FormRequest
             // day at all. Ceiling of 24h so a typo cannot declare an unreachable bar that
             // silently makes every employee undertime.
             'min_full_day_minutes' => ['nullable', 'integer', 'min:1', 'max:1440'],
+            // HR has seen which completed payroll runs this date sits inside. A past date is
+            // allowed on purpose — see DailyOverrideService::upsert() — but not blindly.
+            'acknowledge_repricing' => ['sometimes', 'boolean'],
         ];
     }
 }

@@ -164,6 +164,13 @@ export interface AttendanceReportDay {
   in_minutes: number | null;
   out_minutes: number | null;
   hours: number;
+  /**
+   * Minutes past the start the employee was expected at, or null on a day with no punch to
+   * judge. Zero covers three different days — arrived early, arrived inside the grace window,
+   * or a schedule that cannot say when the day began — which is why it renders as a dash and
+   * the Status column is left to tell them apart.
+   */
+  late_minutes: number | null;
   note: string | null;
 }
 

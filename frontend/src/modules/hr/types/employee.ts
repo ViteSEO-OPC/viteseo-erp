@@ -21,6 +21,15 @@ export interface EmployeeRef {
 }
 
 /** One named sibling on the personal record. */
+/**
+ * A government ID beyond the four named ones — a passport, a driver's licence, a PRC card.
+ * The number arrives MASKED on an employee payload; the full value is behind the reveal endpoint.
+ */
+export interface OtherId {
+  type: string;
+  number: string;
+}
+
 export interface Sibling {
   name: string;
   gender: string | null;
@@ -76,6 +85,12 @@ export interface Employee {
 
   job_title: string;
   employment_status: string;
+  /** Interns only — the practicum hours their school requires. */
+  ojt_required_hours: number | null;
+  /** Interns only — their own allowance, overriding the company default. Null = the default. */
+  allowance_amount?: number | null;
+  /** Set once an intern is converted: the date they became staff. */
+  intern_converted_on: string | null;
   work_location: string | null;
   employee_role: string | null;
   onboarding_status: "pending" | "complete" | null;
@@ -135,6 +150,8 @@ export interface Employee {
   sss_number: string | null;
   philhealth_number: string | null;
   pagibig_number: string | null;
+  /** Further IDs the four above do not name. Each number arrives masked. */
+  other_ids: OtherId[];
   department: DepartmentRef | null;
   manager: ManagerRef | null;
   created_at: string;
@@ -192,6 +209,8 @@ export interface EmployeeInput {
   employment_status: string;
   hire_date: string;
   base_salary: number;
+  /** Interns only — their own allowance in the company's calculation unit. Null = the default. */
+  allowance_amount?: number | null;
   is_management?: boolean; // fixed salary + exempt from attendance
   /** Roles in the other modules, granted at hire. See App\Support\GrantableRoles. */
   grant_roles?: string[];
@@ -241,6 +260,8 @@ export interface EmployeeInput {
   sss_number?: string;
   philhealth_number?: string;
   pagibig_number?: string;
+  /** Both halves of every entry are required by the API. */
+  other_ids?: OtherId[];
   // Audit inputs (only meaningful on update when the value actually changes).
   salary_change_reason?: string;
   salary_change_type?: string;

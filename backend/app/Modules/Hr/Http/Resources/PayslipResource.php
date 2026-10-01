@@ -10,6 +10,7 @@ use App\Modules\Hr\Services\PayScheduleService;
 use App\Modules\Hr\Support\PayslipDocument;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Carbon;
 
 class PayslipResource extends JsonResource
@@ -61,6 +62,10 @@ class PayslipResource extends JsonResource
             // for a final-pay run that string is "final_pay:<employee id>" — an internal key, with an
             // id in it, on a document handed to the employee.
             'run_type_label' => $this->runTypeLabel(),
+            // An intern's payslip — an allowance in the salary's columns — and how that allowance
+            // was reached. Snapshot at run time, so a converted intern's old slips stay intern slips.
+            'is_intern' => (bool) $this->is_intern,
+            'intern_basis' => $this->internBasis($request),
             'period_base' => (float) $this->period_base,
             'base_salary' => (float) $this->base_salary,
             'absence_deduction' => (float) $this->absence_deduction,
@@ -251,6 +256,12 @@ class PayslipResource extends JsonResource
      */
     private function deductionRule(): ?array
     {
+        // An intern's charges follow Company → Intern Allowance, not the attendance policy this
+        // note quotes; the allowance basis explains them instead.
+        if ($this->is_intern) {
+            return null;
+        }
+
         $policy = $this->payrollRun?->policy_snapshot['attendance_policy'] ?? null;
 
         if (! is_array($policy)) {
@@ -388,12 +399,44 @@ class PayslipResource extends JsonResource
     }
 
     /**
+     * How an intern's allowance was reached: the method, the figure and whose it was, and the rates
+     * it works out to. The rules it was priced under and the review flags stay HR-only — company
+     * policy and a review queue, not figures on the employee's own pay.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function internBasis(Request $request): ?array
+    {
+        $basis = $this->intern_basis;
+
+        if (! is_array($basis)) {
+            return null;
+        }
+
+        return $this->isHrViewer($request) ? $basis : Arr::except($basis, ['settings', 'flags']);
+    }
+
+    /**
      * The daily rate said three ways, because the document's header states all three.
      *
      * @return array{daily: float, hourly: float, half_day: float}
      */
     private function rates(): array
     {
+        // An intern's rates are their allowance's own equivalents, from the hours the rules call a
+        // full day — not the company's hours-per-day divisor, which prices a salary.
+        if ($this->is_intern && is_array($this->intern_basis)) {
+            $basis = $this->intern_basis;
+            $daily = round((float) ($basis['daily_equivalent'] ?? 0), 2);
+
+            return [
+                'daily' => $daily,
+                'hourly' => round((float) ($basis['hourly_equivalent'] ?? 0), 2),
+                // Paid by the hour, there is no half-day figure: the hours worked are the pay.
+                'half_day' => ($basis['method'] ?? null) === 'per_hour' ? 0.0 : round($daily / 2, 2),
+            ];
+        }
+
         $daily = (float) $this->daily_rate;
         $hoursPerDay = (int) ($this->payrollRun?->policy_snapshot['attendance_policy']['hours_per_day_divisor'] ?? 8);
 

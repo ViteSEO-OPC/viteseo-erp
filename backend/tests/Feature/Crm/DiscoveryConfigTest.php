@@ -3,13 +3,17 @@
 namespace Tests\Feature\Crm;
 
 use App\Models\User;
+use App\Modules\Crm\Enums\NerbyProvider;
 use App\Modules\Crm\Models\NerbyProviderSetting;
 use App\Modules\Crm\Services\Discovery\Contracts\ProposalGenerator;
 use App\Modules\Crm\Services\Discovery\EffectiveNerbyProvider;
+use App\Modules\Crm\Services\Discovery\NationwideCapability;
 use Database\Seeders\RolesAndPermissionsSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use Laravel\Sanctum\Sanctum;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 /**
@@ -32,7 +36,9 @@ class DiscoveryConfigTest extends TestCase
     use RefreshDatabase;
 
     private const CONFIG = '/api/v1/crm/discovery/config';
+
     private const PROPOSALS = '/api/v1/crm/discovery/proposals';
+
     private const FAKE_KEY = 'sk-test-not-a-real-credential-0000abcd';
 
     protected function setUp(): void
@@ -142,6 +148,77 @@ class DiscoveryConfigTest extends TestCase
         $this->assertStringNotContainsString('abcd', $body);
     }
 
+    // --- config: what a nationwide run may cost here --------------------------
+
+    /**
+     * The block exists so the dialog stops deciding this for itself.
+     *
+     * The frontend used to derive "may I offer nationwide?" from the provider id, and that copy of
+     * the rule outlived the server rule it mirrored. These tests pin the answer at its one source.
+     */
+    public function test_the_config_payload_reports_what_a_nationwide_run_may_cost(): void
+    {
+        $this->actingAsScraper();
+        $this->openAiLive();
+
+        $this->getJson(self::CONFIG)->assertOk()
+            ->assertJsonPath('data.effectiveProvider', 'openai')
+            ->assertJsonPath('data.nationwide.available', true)
+            // The Overpass fence, not a number typed into the frontend.
+            ->assertJsonPath('data.nationwide.maxTasks', (int) config('discovery.nationwide.max_tasks_without_google'))
+            ->assertJsonPath('data.nationwide.reason', 'overpass_fence');
+    }
+
+    public function test_google_places_keeps_its_existing_nationwide_budget(): void
+    {
+        $this->actingAsScraper();
+        NerbyProviderSetting::query()->create([
+            'provider' => 'google_places',
+            'is_active' => true,
+            'enabled' => true,
+            'api_key' => 'AIzaSy-test-not-a-real-google-key-00wxyz',
+            'key_last4' => 'wxyz',
+        ]);
+
+        $this->getJson(self::CONFIG)->assertOk()
+            ->assertJsonPath('data.effectiveProvider', 'google_places')
+            ->assertJsonPath('data.nationwide.available', true)
+            // UNCHANGED: the same default the API applies when no budget is sent.
+            ->assertJsonPath('data.nationwide.maxTasks', (int) config('discovery.nationwide.max_tasks'))
+            ->assertJsonPath('data.nationwide.reason', 'default_budget');
+    }
+
+    public function test_the_openstreetmap_baseline_is_not_offered_nationwide(): void
+    {
+        $this->actingAsScraper();
+
+        // Nothing configured: the baseline, which fills on a schedule rather than on a click.
+        $this->getJson(self::CONFIG)->assertOk()
+            ->assertJsonPath('data.effectiveProvider', 'openstreetmap')
+            ->assertJsonPath('data.nationwide.available', false)
+            // FENCED, NOT ZEROED. The orchestrator still accepts a bounded run here; what the
+            // baseline does not get is a button. Zeroing this would quietly tighten the fence.
+            ->assertJsonPath('data.nationwide.maxTasks', (int) config('discovery.nationwide.max_tasks_without_google'));
+    }
+
+    /** The budget the UI is told to ask for must be one the orchestrator actually accepts. */
+    public function test_the_advertised_budget_is_one_the_orchestrator_would_not_refuse(): void
+    {
+        $openai = NationwideCapability::for(NerbyProvider::OPENAI);
+        $google = NationwideCapability::for(NerbyProvider::GOOGLE_PLACES);
+
+        $this->assertLessThanOrEqual(
+            (int) config('discovery.nationwide.max_tasks_without_google'),
+            $openai->maxTasks,
+            'the AI lane would be advertised a budget its own fence refuses',
+        );
+        $this->assertLessThanOrEqual(
+            (int) config('discovery.nationwide.max_tasks_ceiling'),
+            $google->maxTasks,
+            'Google would be advertised a budget the request validator rejects',
+        );
+    }
+
     // --- proposals: names out, credential never out --------------------------
 
     public function test_proposals_returns_names_and_usage_but_never_the_key(): void
@@ -220,7 +297,7 @@ class DiscoveryConfigTest extends TestCase
         ];
     }
 
-    #[\PHPUnit\Framework\Attributes\DataProvider('upstreamFailures')]
+    #[DataProvider('upstreamFailures')]
     public function test_an_upstream_failure_is_a_502_with_a_status_not_a_200_with_zero_names(
         int $http,
         string $expected,
@@ -258,7 +335,7 @@ class DiscoveryConfigTest extends TestCase
     {
         $this->actingAsScraper();
         $this->openAiLive();
-        Http::fake(fn () => throw new \Illuminate\Http\Client\ConnectionException('timed out'));
+        Http::fake(fn () => throw new ConnectionException('timed out'));
 
         $this->postJson(self::PROPOSALS, ['area' => 'A', 'category' => 'cafe'])
             ->assertStatus(502)

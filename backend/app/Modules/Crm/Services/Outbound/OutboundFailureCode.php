@@ -106,6 +106,21 @@ enum OutboundFailureCode: string
     case DeliveryUnknown = 'delivery_unknown';
 
     /**
+     * Phase 3H.5A — an operator looked at the real thread (in Meta's inbox) and confirmed that an
+     * unresolved message never reached the customer.
+     *
+     * A HUMAN JUDGEMENT, NOT A PROVIDER ANSWER, and named so it can never be mistaken for one. No
+     * provider code fits: every other code here was derived from something Meta returned, and
+     * reusing one would claim evidence we do not have. Written only by the manual resolution
+     * endpoint, never by the send path, and it turns the row `failed` — which is the honest
+     * statement of "not delivered" and keeps the existing semantics that a definitively failed row
+     * may be deliberately attempted again.
+     *
+     * 27 characters, inside `failure_code`'s varchar(32).
+     */
+    case OperatorConfirmedNotSent = 'operator_confirmed_not_sent';
+
+    /**
      * Whether this outcome leaves it genuinely unknown whether the customer got the message.
      *
      * THE DIVIDING LINE OF THIS WHOLE PATH, and it is about EVIDENCE, not about severity. A 4xx

@@ -15,7 +15,6 @@ export const KNOWN_ROUTES = [
   "/zerem/reports",
   "/zerem/activity-logs",
   "/zerem/settings",
-  "/zerem/email-drafts",
 ] as const;
 
 /** Injected navigator — keeps the engine decoupled from Next's router (the hook wires it up). */

@@ -22,9 +22,20 @@ from datetime import datetime, timezone
 from scraper import run_metrics
 from scraper.config import Config
 from scraper.ingest import CrmIngestClient
-from scraper.normalizer import normalize
-from scraper.providers import config_for, get_provider, resolve_provider_choice
+from scraper.normalizer import normalize, normalize_provenance
+from scraper.partition import (
+    BBox,
+    DiscoveryTask,
+    clamp_cells,
+    format_bbox,
+    parse_bbox,
+    plan_tasks,
+)
+from scraper.providers import build_openstreetmap, config_for, get_provider, resolve_provider_choice
+from scraper.providers.ai_assisted import LANE_AI
+from scraper.target_sources import resolve_source
 from scraper.targets import (
+    DEFAULT_TARGETS_FILE,
     MAX_LIMIT,
     TargetsError,
     advance,
@@ -36,9 +47,146 @@ from scraper.targets import (
     select,
     targets_per_run,
 )
+from scraper.density import run_density
 from scraper.safety import describe_target, refuse_remote_commit
 from scraper.website_discovery.runner import run_website_discovery
 from scraper.website_intelligence.runner import run_audit
+
+
+def _planned_sub_areas(config: Config, *, area: str, category: str) -> list[str] | None:
+    """Sub-areas the optional AI planner suggests for this scope. ``None`` when it is unavailable.
+
+    Proposals only. Every name still has to survive the geocoder in ``plan_tasks`` before it can
+    become a search, which is the same discipline the name lane uses for businesses: the model
+    proposes, a deterministic source disposes. Nothing here is trusted as geography.
+
+    OFF UNLESS THE RUN ASKED FOR AI, checked HERE rather than only at the provider. Google Places is
+    a factual provider and a Google-only run must reach no model at all — but this planner is invoked
+    by the PARTITIONER, which sits upstream of every provider and used to consult it unconditionally.
+    A partitioned Google run therefore still opened the strategy channel, and the only thing stopping
+    a model call was the CRM refusing at the other end. That is a remote fence, not a local one: it
+    depends on a setting in another process staying switched off, and it spends a request to find
+    out. ``use_ai_strategy`` is the same flag the provider factory already honours, so "no AI this
+    phase" is now one answer given in both places.
+    """
+    if not config.use_ai_strategy:
+        return None
+
+    from scraper.strategy import fetch_strategy
+
+    plan = fetch_strategy(
+        crm_base_url=config.crm_base_url,
+        crm_token=config.crm_token,
+        category=category,
+        scope=area,
+        timeout=config.openai_timeout,
+    )
+    return plan.sub_areas if plan is not None else None
+
+
+def _plan_discovery_tasks(
+    config: Config,
+    *,
+    area: str,
+    category: str,
+    limit: int,
+    partition: int | None,
+    bbox: BBox | None = None,
+) -> list[DiscoveryTask]:
+    """Turn one scope into the bounded tasks this run will execute.
+
+    Unpartitioned is the default and costs NOTHING extra — no geocode, no strategy call, no change
+    of any kind. Only an explicit partition opens the geocoder, and it is opened once and shared
+    between resolving the scope and validating any proposed sub-area.
+
+    A CALLER-SUPPLIED ``bbox`` REPLACES THE GEOCODER OUTRIGHT. When the box is already known — the
+    nationwide planner computes it from the national polygon and clips it before this process is even
+    started — resolving ``area`` through Nominatim would be worse than redundant: the geocoder would
+    answer with the bounding box of a PLACE NAME, which is a different shape from the cell that was
+    planned, and the search would quietly drift off the cell it was supposed to cover. So a supplied
+    box is authoritative, ``area`` stays a label, and no geocode is performed.
+    """
+    cells = clamp_cells(partition)
+    if cells <= 1:
+        return [DiscoveryTask(area=area, category=category, limit=limit, bbox=bbox)]
+
+    # Already bounded: split the box that was given, and still never geocode or ask for a plan.
+    if bbox is not None:
+        return plan_tasks(area=area, category=category, limit=limit, cells=cells, bbox=bbox)
+
+    geocoder = build_openstreetmap(config)
+    try:
+        try:
+            bbox = geocoder.geocode_area(area)
+        except Exception as exc:  # noqa: BLE001 - an unresolvable scope simply cannot be partitioned.
+            print(
+                f"  scope could not be resolved for partitioning ({type(exc).__name__}) — "
+                f"running it as a single search.",
+                file=sys.stderr,
+            )
+            bbox = None
+
+        return plan_tasks(
+            area=area,
+            category=category,
+            limit=limit,
+            cells=cells,
+            bbox=bbox,
+            sub_areas=_planned_sub_areas(config, area=area, category=category),
+            geocode=geocoder.geocode_area,
+        )
+    finally:
+        geocoder.close()
+
+
+def _run_tasks(provider, tasks: list[DiscoveryTask], limit: int, provenance: list | None = None):
+    """Execute the planned tasks and merge their results on the provider's own identity key.
+
+    ONE TASK IS THE UNTOUCHED PATH. It calls the provider exactly as this function's caller always
+    did — no wrapping, no swallowed exception — so an unpartitioned run behaves identically to before
+    partitioning existed, including how it fails.
+
+    ``bbox`` IS PASSED ONLY WHEN THERE IS ONE, which is what keeps that promise literally true: a
+    provider written before the partitioning contract existed — a third-party implementation, or a
+    test double — is still called with exactly the arguments it has always accepted. An optional
+    parameter that is always sent is not optional.
+
+    Several tasks are merged on ``provider_id``, which is the same key the CRM dedups on, so a
+    business found in two adjacent cells is one business here rather than a duplicate sent to ingest.
+    A failing cell costs only itself: losing an entire scope because one cell timed out would make
+    partitioning strictly worse than not partitioning.
+    """
+
+    def run(task: DiscoveryTask):
+        bounded = {"bbox": task.bbox} if task.bbox is not None else {}
+        found = provider.discover(
+            area=task.area, category=task.category, limit=task.limit, **bounded
+        )
+        # AI findings this task's own limit dropped (a composite provider only). Read per task,
+        # because the provider resets them on every search. Collected aside; `found` is untouched.
+        dropped = getattr(provider, "provenance_only", None)
+        if provenance is not None and callable(dropped):
+            provenance.extend(dropped())
+        return found
+
+    if len(tasks) == 1:
+        return run(tasks[0])
+
+    merged = {}
+    for task in tasks:
+        try:
+            found = run(task)
+        except Exception as exc:  # noqa: BLE001 - one cell must not cost the others their turn.
+            print(f"  task failed ({task.described()}): {type(exc).__name__}", file=sys.stderr)
+            continue
+
+        for business in found:
+            merged.setdefault(business.provider_id, business)
+
+        if len(merged) >= limit:
+            break
+
+    return list(merged.values())[:limit]
 
 
 def run_discovery(
@@ -51,6 +199,14 @@ def run_discovery(
     print_only: bool = False,
     out: str | None = None,
     provider_override: str | None = None,
+    partition: int | None = None,
+    bbox: BBox | None = None,
+    country: str | None = None,
+    ai_total_limit: int | None = None,
+    skip_ai_lanes: bool = False,
+    volume: bool = False,
+    volume_raw_cap: int | None = None,
+    volume_task_cap: int | None = None,
 ) -> int:
     """Discover one (area, category) pair and ingest it. The single discovery path.
 
@@ -58,6 +214,29 @@ def run_discovery(
     proven flow — same provider, same normalizer, same ingest client, same ``dry_run = not commit``
     gate — rather than growing a second one that could drift from it.
     """
+    # THE COUNTRY FENCE, applied before any provider exists.
+    #
+    # Carried on the RUN rather than read from this process's environment, because it is a property of
+    # what was asked for, not of where the engine happens to be deployed. It reaches the geocoder
+    # through the config, and the geocoder is what every provider resolves its search area with — so a
+    # location outside the country cannot become a request rather than merely failing to be stored.
+    if country:
+        config = Config(**{**config.__dict__, "discovery_country": country})
+
+    # AI-ASSISTED CAPACITY MODE, also carried on the run. Read only by the combined `openai` provider;
+    # absent — the default — the config is exactly the one every run has always been given.
+    if ai_total_limit is not None or skip_ai_lanes:
+        config = Config(**{**config.__dict__, "ai_total_limit": ai_total_limit, "skip_ai_lanes": skip_ai_lanes})
+
+    # VOLUME MODE, carried on the run like capacity mode. Read only by the combined `openai` provider.
+    if volume:
+        config = Config(**{
+            **config.__dict__,
+            "volume": True,
+            **({"volume_raw_cap": volume_raw_cap} if volume_raw_cap else {}),
+            **({"volume_task_cap": volume_task_cap} if volume_task_cap else {}),
+        })
+
     # THE PROVIDER BOUNDARY. This is the single point where the Settings switch enters the runtime;
     # everything downstream (normalize -> ingest -> prospect -> qualification -> scoring) is identical
     # whichever provider produced the RawBusiness records.
@@ -65,12 +244,27 @@ def run_discovery(
     provider = get_provider(config_for(config, choice))
     print(
         f"Discovering '{category}' in '{area}' via {provider.name} "
-        f"(limit {limit}, provider from {choice.source})...",
+        f"(limit {limit}, provider from {choice.source}"
+        + (f", country {config.discovery_country}" if config.discovery_country else "")
+        + (f", bounded to {format_bbox(bbox)}" if bbox is not None else "")
+        + ")...",
         file=sys.stderr,
     )
     started_at = datetime.now(timezone.utc)
     started = time.monotonic()
-    raw = provider.discover(area=area, category=category, limit=limit)
+    # ONE SCOPE, POSSIBLY SEVERAL BOUNDED SEARCHES. Unpartitioned this is the single call it always
+    # was; partitioned it is the only way past a provider's per-request result ceiling.
+    tasks = _plan_discovery_tasks(
+        config, area=area, category=category, limit=limit, partition=partition, bbox=bbox
+    )
+    if len(tasks) > 1:
+        print(
+            f"  partitioned into {len(tasks)} bounded task(s) "
+            f"({'sub-areas' if tasks[0].label == 'sub-area' else 'grid cells'}).",
+            file=sys.stderr,
+        )
+    provenance_raw: list = []
+    raw = _run_tasks(provider, tasks, limit, provenance_raw)
 
     # Optional per-provider numbers (proposals, resolution rate, token usage). Read the same way
     # `close` is — a provider that has nothing to add simply does not implement it.
@@ -83,6 +277,19 @@ def run_discovery(
 
     businesses = [normalize(r, provider.name) for r in raw]
     print(f"Discovered {len(businesses)} business(es).", file=sys.stderr)
+
+    # PROVENANCE-ONLY: AI-lane findings the per-task limit dropped. Not results — `businesses` above
+    # is exactly what it was — and never able to create a lead: the CRM only records them against a
+    # lead it already holds. Deduplicated on the OSM key; one that is also a kept business is still
+    # sent, and the CRM records the lane once. Absent for any provider without the capability.
+    provenance_capable = callable(getattr(provider, "provenance_only", None))
+    provenance: list = []
+    seen_provenance: set[str] = set()
+    for r in provenance_raw:
+        record = normalize_provenance(r, LANE_AI)
+        if record is not None and record.place_id not in seen_provenance:
+            seen_provenance.add(record.place_id)
+            provenance.append(record)
 
     def record_run(ingest_summary: dict | None = None, imported: int = 0) -> None:
         """Log this run's funnel. Called on EVERY path that finished discovery, including the ones
@@ -103,6 +310,7 @@ def run_discovery(
                 provider_stats=provider_stats,
                 started_at=started_at.isoformat(),
                 choice=choice,
+                provenance_sent=len(provenance) if provenance_capable else None,
             )
         )
 
@@ -147,7 +355,9 @@ def run_discovery(
         base_url=config.crm_base_url, token=config.crm_token, user_agent=config.user_agent
     )
     try:
-        result = client.ingest(businesses, dry_run=not commit)
+        # Passed only when there is some, so an ordinary run makes exactly the call it always made.
+        extra = {"provenance_only": provenance} if provenance else {}
+        result = client.ingest(businesses, dry_run=not commit, **extra)
     finally:
         client.close()
 
@@ -266,6 +476,14 @@ def _discover(args: argparse.Namespace) -> int:
         print_only=args.print_only,
         out=args.out,
         provider_override=args.provider,
+        partition=args.partition,
+        bbox=parse_bbox(args.bbox),
+        country=args.country,
+        ai_total_limit=args.ai_total_limit,
+        skip_ai_lanes=args.skip_ai_lanes,
+        volume=args.volume,
+        volume_raw_cap=args.raw_cap,
+        volume_task_cap=args.task_new_cap,
     )
 
 
@@ -286,15 +504,26 @@ def _discover_all(args: argparse.Namespace) -> int:
     # valid belongs to the active provider, and duplicating its vocabulary in the orchestrator would
     # be a second source of truth that drifts the moment a provider is added. An unknown category
     # still fails loudly, per target, via the provider's own error and the isolation below.
+    # THE PLUGGABLE SOURCE. A configured registry URL replaces the file without this command learning
+    # anything new — validation, grouping and rotation below are unchanged and unaware of the origin.
+    source = resolve_source(
+        path=args.targets_file,
+        url=config.targets_url,
+        token=config.crm_token,
+        user_agent=config.user_agent,
+        timeout=config.request_timeout,
+        fallback_path=DEFAULT_TARGETS_FILE,
+    )
+
     try:
-        targets = load_targets(args.targets_file)
+        targets = load_targets(source=source)
     except TargetsError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
 
     try:
         per_run = targets_per_run(
-            configured_targets_per_run(args.targets_file), override=args.targets
+            configured_targets_per_run(source=source), override=args.targets
         )
     except TargetsError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
@@ -373,7 +602,63 @@ def main(argv: list[str] | None = None) -> int:
     d.add_argument("--commit", action="store_true", help="Persist leads (default is a dry run).")
     d.add_argument("--print-only", action="store_true", help="Print discovered data; skip the CRM.")
     d.add_argument("--provider", help="Override the discovery provider (default from config).")
+    d.add_argument(
+        "--country",
+        default=None,
+        help=(
+            "Restrict discovery to this ISO 3166-1 alpha-2 country (e.g. PH). The geocoder will "
+            "resolve --area only within it, so a location outside the country cannot be searched "
+            "at all — the run reports an unresolved area and makes NO provider request. Without "
+            "this flag the geocoder is unrestricted, which is the behaviour that predates it."
+        ),
+    )
+    d.add_argument(
+        "--bbox",
+        default=None,
+        help=(
+            "Restrict the search to south,west,north,east (decimal degrees, latitude first). "
+            "When given, --area is only a LABEL: the box is authoritative and no geocoding is "
+            "performed. This is how a pre-computed cell — e.g. one clipped to a national "
+            "boundary — is searched exactly as planned."
+        ),
+    )
     d.add_argument("--out", help="Also write the normalized payload to this JSON file.")
+    d.add_argument(
+        "--partition",
+        type=int,
+        default=None,
+        help=(
+            "Split the area into up to N bounded searches (default: 1, no partitioning). Use it when "
+            "an area is too large to answer in one provider request. The limit is DIVIDED across the "
+            "tasks, never multiplied."
+        ),
+    )
+    d.add_argument(
+        "--ai-total-limit",
+        type=int,
+        default=None,
+        help=(
+            "AI-assisted (--provider openai) only: let the AI lanes add businesses until the search "
+            "returns up to this many. The OpenStreetMap sweep stays capped at --limit. Other providers "
+            "ignore it."
+        ),
+    )
+    d.add_argument(
+        "--skip-ai-lanes",
+        action="store_true",
+        help="AI-assisted only: run the OpenStreetMap sweep alone (the run already covered this area and niche).",
+    )
+    d.add_argument(
+        "--volume",
+        action="store_true",
+        help=(
+            "AI-assisted (--provider openai) only: VOLUME MODE. One sweep reads the whole cell (up to "
+            "--raw-cap raw elements), the CRM says which businesses it already holds, and up to "
+            "--task-new-cap NEW businesses are geocoded and returned. The AI name lane does not run."
+        ),
+    )
+    d.add_argument("--raw-cap", type=int, default=None, help="Volume mode: raw OSM elements read per cell (default 400).")
+    d.add_argument("--task-new-cap", type=int, default=None, help="Volume mode: new businesses returned per search (default 100).")
     d.set_defaults(func=_discover)
 
     da = sub.add_parser(
@@ -427,6 +712,7 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Record the evidence in the CRM (default is a dry run that submits nothing).",
     )
+    fw.add_argument("--lead-ids", default=None, help="Only these lead ids (comma-separated) — e.g. one run's new leads.")
     fw.set_defaults(func=_find_websites)
 
     a = sub.add_parser("audit", help="Audit the websites of leads that have a URL (Website Intelligence).")
@@ -436,7 +722,16 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Submit audit findings to the CRM (default is a dry run).",
     )
+    a.add_argument("--lead-ids", default=None, help="Only these lead ids (comma-separated) — e.g. one run's new leads.")
     a.set_defaults(func=_audit)
+
+    dn = sub.add_parser(
+        "density",
+        help="Print where a niche's named OSM businesses are across a country (JSON on stdout). Read-only.",
+    )
+    dn.add_argument("--category", required=True, help='Category word (e.g. "dentist") or "key=value".')
+    dn.add_argument("--country", required=True, help="ISO 3166-1 alpha-2 country, e.g. PH.")
+    dn.set_defaults(func=_density)
 
     args = parser.parse_args(argv)
 
@@ -458,10 +753,22 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
 
+def _density(args: argparse.Namespace) -> int:
+    """National density probe for nationwide ordering. Reads Overpass only; writes nothing."""
+    return run_density(Config.load(), args.category, args.country)
+
+
+def _lead_ids(raw: str | None) -> list[str] | None:
+    """`--lead-ids 12,15,40` -> ["12", "15", "40"]; absent -> None (the whole queue, as always)."""
+    if raw is None:
+        return None
+    return [part.strip() for part in raw.split(",") if part.strip().isdigit()]
+
+
 def _audit(args: argparse.Namespace) -> int:
-    return run_audit(Config.load(), args.limit, commit=args.commit)
+    return run_audit(Config.load(), args.limit, commit=args.commit, lead_ids=_lead_ids(args.lead_ids))
 
 
 def _find_websites(args: argparse.Namespace) -> int:
     """Tier 0 candidate discovery. Proposes and verifies; never concludes absence."""
-    return run_website_discovery(Config.load(), args.limit, commit=args.commit)
+    return run_website_discovery(Config.load(), args.limit, commit=args.commit, lead_ids=_lead_ids(args.lead_ids))

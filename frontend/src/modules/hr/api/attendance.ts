@@ -154,16 +154,22 @@ export async function getDailyOverride(date?: string): Promise<DailyOverride | n
 /**
  * PUT, not PATCH: the two rules are one record and one decision, so the dialog always sends
  * both. A null field clears that rule; both null removes the day's row entirely.
+ *
+ * `date` may be in the past — that is the point of the feature, since a typhoon morning is
+ * known only after people have clocked in. A past date inside a completed payroll run is
+ * refused once with the periods named; resend with `acknowledgeRepricing` to go ahead.
  */
 export async function upsertDailyOverride(
   date: string,
   graceMinutes: number | null,
   minFullDayMinutes: number | null,
+  acknowledgeRepricing = false,
 ): Promise<DailyOverride> {
   const res = await apiClient.put("/hr/daily-overrides", {
     date,
     grace_minutes: graceMinutes,
     min_full_day_minutes: minFullDayMinutes,
+    ...(acknowledgeRepricing ? { acknowledge_repricing: true } : {}),
   });
   return res.data.data;
 }

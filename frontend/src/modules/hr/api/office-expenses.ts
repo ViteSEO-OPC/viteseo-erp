@@ -10,6 +10,12 @@ export interface OfficeExpenseSummary {
   total: number;
   /** Category → spend, biggest first. */
   by_category: Record<string, number>;
+  /**
+   * The months the ledger has spend in, newest first — the month picker's options. Describes the
+   * WHOLE ledger, not the window the rest of this payload is counted over, so choosing a month
+   * cannot empty the list that offered it.
+   */
+  months: { value: string; label: string }[];
 }
 
 export async function getOfficeExpenseSummary(

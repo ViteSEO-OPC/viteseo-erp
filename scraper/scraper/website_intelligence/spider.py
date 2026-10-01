@@ -22,6 +22,16 @@ class WebsiteAuditSpider(scrapy.Spider):
         "CONCURRENT_REQUESTS": 4,
         "COOKIES_ENABLED": False,
         "REDIRECT_ENABLED": True,
+        # SSRF POLICY (see scraper/net_guard.py). The URLs audited here come from data — a lead's
+        # `website`, provider tags, and wherever a server redirects — so every request, and every
+        # redirect hop (a redirect re-enters this chain as a new Request), is checked before any
+        # connection. The process-level resolver in runner.py closes DNS rebinding.
+        "DOWNLOADER_MIDDLEWARES": {"scraper.net_guard.SafeUrlDownloaderMiddleware": 50},
+        "REDIRECT_MAX_TIMES": 5,
+        "DOWNLOAD_MAXSIZE": 2 * 1024 * 1024,
+        "DOWNLOAD_WARNSIZE": 1024 * 1024,
+        # An HTTP(S)_PROXY in the environment would resolve names on our behalf, past the resolver.
+        "HTTPPROXY_ENABLED": False,
     }
 
     def __init__(self, queue: list[dict] | None = None, user_agent: str = "", **kwargs):
@@ -38,7 +48,24 @@ class WebsiteAuditSpider(scrapy.Spider):
                 callback=self.parse,
                 errback=self.on_error,
                 headers=headers,
-                meta={"lead_id": item["id"], "handle_httpstatus_all": True},
+                meta={
+                    "lead_id": item["id"],
+                    # 4xx/5xx MUST reach parse(), so a broken homepage is recorded as
+                    # reachable-but-broken rather than dropped by HttpErrorMiddleware.
+                    #
+                    # IT MUST NOT BE `handle_httpstatus_all`, AND THAT IS THE WHOLE POINT OF THE
+                    # LIST. That flag is the first condition RedirectMiddleware tests, and it
+                    # returns the 3xx before it ever reads `Location` — so REDIRECT_ENABLED and
+                    # REDIRECT_MAX_TIMES below were dead letters, every `http` -> `https` upgrade
+                    # was audited as its own redirect stub, and the title recorded for the business
+                    # was "301 Moved Permanently". Measured on the live pool at the time of the fix:
+                    # 225 of 469 audits ended on a 3xx and never saw the page they were auditing.
+                    #
+                    # Naming only the error range leaves 3xx to RedirectMiddleware and changes
+                    # nothing else: HttpErrorMiddleware honours a meta `handle_httpstatus_list`
+                    # exactly as it honours the blanket flag.
+                    "handle_httpstatus_list": list(range(400, 600)),
+                },
                 dont_filter=True,
             )
 

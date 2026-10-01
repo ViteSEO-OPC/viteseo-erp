@@ -7,8 +7,12 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "email-templates:gates": "node --experimental-strip-types --import ./scripts/copilot-gates/register.mjs ./scripts/email-template-gates/gates.ts",
+    "email:gates": "node --experimental-strip-types --import ./scripts/copilot-gates/register.mjs ./scripts/email-render-gates/gates.ts",
     "copilot:gates": "node --experimental-strip-types --import ./scripts/copilot-gates/register.mjs ./scripts/copilot-gates/gates.ts",
-    "preview:gates": "node --experimental-strip-types --import ./scripts/copilot-gates/register.mjs ./scripts/attachment-preview-gates/gates.ts"
+    "preview:gates": "node --experimental-strip-types --import ./scripts/copilot-gates/register.mjs ./scripts/attachment-preview-gates/gates.ts",
+    "calling:gates": "node --experimental-strip-types --import ./scripts/copilot-gates/register.mjs ./scripts/calling-gates/gates.ts",
+    "nearby:gates": "node --experimental-strip-types --import ./scripts/copilot-gates/register.mjs ./scripts/nearby-gates/gates.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
@@ -24,11 +28,13 @@
     "@fullcalendar/timegrid": "^6.1.21",
     "@hookform/resolvers": "^5.4.0",
     "@tanstack/react-query": "^5.101.2",
+    "@tanstack/react-virtual": "^3.14.13",
     "@tiptap/extension-highlight": "^3.29.1",
     "@tiptap/extension-list": "^3.29.1",
     "@tiptap/extensions": "^3.29.1",
     "@tiptap/react": "^3.29.1",
     "@tiptap/starter-kit": "^3.29.1",
+    "@twilio/voice-sdk": "^2.18.4",
     "axios": "^1.18.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

@@ -137,10 +137,30 @@ export function NearbyFilters({
             ? `Showing businesses within ${filters.radiusKm} km of ${origin.label}.`
             : "Showing all discovered businesses. Pick a location or use your position to search by radius."}
         </p>
+        {/* One message per REAL cause. Telling someone their permission was denied when the browser
+            never asked — because the page is not on HTTPS — sends them to the wrong setting. */}
         {geoStatus === "denied" && (
-          <p className="text-[11px] text-amber-600">Location permission denied — pick a location instead.</p>
+          <p className="text-[11px] text-amber-600">
+            Location permission denied — allow it in your browser, or pick a location instead.
+          </p>
         )}
         {geoStatus === "unavailable" && (
+          <p className="text-[11px] text-amber-600">
+            Your device couldn’t determine a position — pick a location instead.
+          </p>
+        )}
+        {geoStatus === "timeout" && (
+          <p className="text-[11px] text-amber-600">
+            Locating timed out — try again, or pick a location instead.
+          </p>
+        )}
+        {geoStatus === "insecure" && (
+          <p className="text-[11px] text-amber-600">
+            Browsers only share your location over a secure connection. Open this page on
+            <span className="font-semibold"> localhost</span> or over HTTPS, or pick a location instead.
+          </p>
+        )}
+        {geoStatus === "unsupported" && (
           <p className="text-[11px] text-amber-600">Geolocation isn’t available in this browser.</p>
         )}
       </div>
@@ -174,19 +194,24 @@ export function NearbyFilters({
         </div>
       </div>
 
-      {/* Prospecting priority — derived from Website Intelligence (No website → High, etc.). */}
-      <div className="flex flex-col gap-1.5">
-        <Label>Prospecting priority</Label>
-        <FilterSelect
-          value={filters.priority}
-          onChange={(v) => patch({ priority: v })}
-          allLabel="All priorities"
-          options={options.priorities}
-        />
-      </div>
-
-      {/* Niche + Status */}
-      <div className="grid grid-cols-2 gap-3">
+      {/* THE FOUR CATEGORY SELECTS, TWO ABREAST.
+          They were four full-width rows. In this column that is ~220px of panel spent on four
+          dropdowns — and every pixel here is a pixel of lead card the user does not get, because the
+          filters and the results share one fixed-height panel. Pairing them halves that with no loss:
+          each control keeps its own label, its full-width "All …" default and its exact behaviour.
+          `sm:` rather than `lg:` so the stacked mobile layout, where width is the scarce thing rather
+          than height, is unchanged. */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        {/* Prospecting priority — derived from Website Intelligence (No website → High, etc.). */}
+        <div className="flex flex-col gap-1.5">
+          <Label>Prospecting priority</Label>
+          <FilterSelect
+            value={filters.priority}
+            onChange={(v) => patch({ priority: v })}
+            allLabel="All priorities"
+            options={options.priorities}
+          />
+        </div>
         <div className="flex flex-col gap-1.5">
           <Label>Business niche</Label>
           <FilterSelect value={filters.niche} onChange={(v) => patch({ niche: v })} allLabel="All niches" options={options.niches} />
@@ -195,19 +220,19 @@ export function NearbyFilters({
           <Label>Lead status</Label>
           <FilterSelect value={filters.status} onChange={(v) => patch({ status: v })} allLabel="All statuses" options={options.statuses} />
         </div>
-      </div>
-
-      {/* Which discovery lane found the business — the deterministic OpenStreetMap sweep, or the
-          AI-assisted expansion beside it. "All sources" is the default and leaves the board exactly
-          as it was before this control existed. */}
-      <div className="flex flex-col gap-1.5">
-        <Label>Found by</Label>
-        <FilterSelect
-          value={filters.foundBy}
-          onChange={(v) => patch({ foundBy: v })}
-          allLabel="All sources"
-          options={options.foundBy}
-        />
+        {/* Which discovery lane found the business — the deterministic OpenStreetMap sweep, the
+            AI-assisted lane (an AI-expanded tag sweep or AI-proposed name, confirmed against OSM), or
+            the Google Places search. "All sources" is the default and leaves the board exactly as it
+            was before this control existed. */}
+        <div className="flex flex-col gap-1.5">
+          <Label>Found by</Label>
+          <FilterSelect
+            value={filters.foundBy}
+            onChange={(v) => patch({ foundBy: v })}
+            allLabel="All sources"
+            options={options.foundBy}
+          />
+        </div>
       </div>
     </div>
   );

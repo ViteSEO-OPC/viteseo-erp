@@ -11,6 +11,8 @@ use App\Modules\Crm\Services\Mail\Contracts\EmailProvider;
 use App\Modules\Crm\Services\Mail\EmailDocument;
 use App\Modules\Crm\Services\Mail\EmailMessage;
 use App\Modules\Crm\Services\Mail\SentEmail;
+use App\Modules\Crm\Support\EmailDesign\EmailDesignRenderer;
+use App\Modules\Crm\Support\EmailDesign\EmailDesignValidator;
 use App\Support\Mail\Module;
 use App\Support\Mail\ModuleSender;
 use App\Support\Mail\ModuleSenderResolver;
@@ -31,6 +33,14 @@ class OutreachEmailService
     public function __construct(
         private readonly EmailProvider $provider,
         private readonly ModuleSenderResolver $senders,
+        // The designed-send collaborators. All four are the SAME objects the Settings preview uses —
+        // one renderer, one validator, one token map, one branding source — which is what makes
+        // "what an admin previewed is what a recipient receives" a property of the code rather than
+        // a hope about two implementations staying in step.
+        private readonly EmailTemplateDesignService $designs,
+        private readonly EmailDesignRenderer $designRenderer,
+        private readonly EmailDesignValidator $designValidator,
+        private readonly TemplateRenderer $templates,
     ) {}
 
     /**
@@ -53,8 +63,15 @@ class OutreachEmailService
      *
      * @throws ValidationException when no recipient can be resolved
      */
-    public function sendToLead(Lead $lead, User $sender, string $subject, string $body, ?string $to = null, ?array $bodyDoc = null): Email
-    {
+    public function sendToLead(
+        Lead $lead,
+        User $sender,
+        string $subject,
+        string $body,
+        ?string $to = null,
+        ?array $bodyDoc = null,
+        ?int $emailTemplateId = null,
+    ): Email {
         // Pre-flight recipient validation (422) BEFORE anything is persisted — a missing recipient is a
         // request error, not a delivery failure, so it must never create a history row.
         $toEmail = $this->resolveRecipient($lead, $to);
@@ -76,6 +93,9 @@ class OutreachEmailService
             'subject' => $subject,
             'body' => $body,
             'body_doc' => $bodyDoc,
+            // The designed template this was composed from, when it was. Recorded so the send path can
+            // re-render its design; NULL — the usual case — sends plain text exactly as before.
+            'email_template_id' => $emailTemplateId,
             'status' => 'sending',
             'attempts' => 1,
             // NOTE: queued_at is intentionally NOT set — it means "claimed by the background sender job"
@@ -134,7 +154,7 @@ class OutreachEmailService
 
         $toEmail = $this->resolveRecipient($lead, $email->to_email);
         $subject = (string) $email->subject;
-        $sent = $this->dispatch($lead, $toEmail, $subject, (string) $email->body, $this->htmlFor($email));
+        $sent = $this->dispatch($lead, $toEmail, $subject, (string) $email->body, $this->htmlFor($email, $sender));
 
         $email = DB::transaction(function () use ($email, $lead, $sender, $subject, $toEmail, $sent): Email {
             $email->update([
@@ -168,21 +188,123 @@ class OutreachEmailService
      * database since it was accepted; a row that no longer validates is sent as plain text, never
      * rendered on a best-effort basis.
      */
-    private function htmlFor(Email $email): ?string
+    private function htmlFor(Email $email, User $sender): ?string
     {
         $doc = $email->body_doc;
 
-        if (! is_array($doc)) {
+        // A FORMATTED REPLY STILL WINS, AND ITS BEHAVIOUR IS UNCHANGED — including the invalid case,
+        // which has always meant "send plain text" and must not now mean "try the design instead".
+        // A row carrying a document was written by someone typing in the composer; that is the
+        // message, whatever else the row remembers.
+        if (is_array($doc)) {
+            if (EmailDocument::problem($doc) !== null) {
+                Log::warning('outreach.body_doc.invalid', ['email_id' => $email->id]);
+
+                return null;
+            }
+
+            return EmailDocument::toHtml($doc);
+        }
+
+        return $this->designedHtmlFor($email, $sender);
+    }
+
+    /**
+     * The text/html part for an email composed from a designed template — the design a person previewed.
+     *
+     * THE SENDER IS A PARAMETER, NOT `$email->user`. The Email model has no `user` relation — reading
+     * one silently yields null, the signature's sender name renders blank, and the edit fence below
+     * then sees a mismatch it invented and refuses every designed send. The acting sender is already
+     * in hand at the only call site, and it is also the right answer: the signature should name whoever
+     * is sending this message.
+     *
+     * RENDERED HERE, AT SEND TIME, from the template and design documents, exactly as the formatted-reply
+     * path above renders from its stored document. Nothing is stored pre-rendered, so a draft sent later
+     * renders against the design as it stands then rather than a frozen copy.
+     *
+     * EVERY FAILURE RETURNS NULL, which is the plain-text send this email was always able to fall back to.
+     * There is no best-effort render: half a design is not a smaller version of the design, it is an email
+     * nobody approved. Each reason is logged, because a silent downgrade from a designed email to plain
+     * text is exactly the kind of thing that goes unnoticed for months.
+     */
+    private function designedHtmlFor(Email $email, User $sender): ?string
+    {
+        if ($email->email_template_id === null) {
             return null;
         }
 
-        if (EmailDocument::problem($doc) !== null) {
-            Log::warning('outreach.body_doc.invalid', ['email_id' => $email->id]);
+        $reason = static fn (string $why): string => $why;
+
+        // `nullOnDelete` means the id can simply be gone. A deleted template is not an error; it is an
+        // email that can no longer re-render, and it still has the body it was always going to send.
+        $template = $email->emailTemplate;
+        $lead = $email->lead;
+
+        $problem = match (true) {
+            $template === null => $reason('template_missing'),
+            ! $template->isDesigned() => $reason('template_not_designed'),
+            $template->design === null => $reason('design_missing'),
+            $lead === null => $reason('lead_missing'),
+            default => null,
+        };
+
+        if ($problem !== null) {
+            Log::warning('outreach.designed_html.skipped', ['email_id' => $email->id, 'reason' => $problem]);
 
             return null;
         }
 
-        return EmailDocument::toHtml($doc);
+        // ── THE EDIT FENCE ────────────────────────────────────────────────────────────────────────
+        // The composer hands a BD the template's flattened plain text and lets them change it. If they
+        // did, the blocks no longer say what the message says, and rendering them would send the
+        // recipient an email the sender never wrote — silently, because the HTML part is the one a
+        // person reads. So the server recomputes exactly what the composer was given
+        // (EmailTemplateController::index renders the same two fields the same way) and refuses to
+        // render a design whose text no longer matches. Decided HERE rather than trusting the browser
+        // to have dropped the id: this is a correctness guarantee, not a convenience.
+        // COMPARED TRIMMED AT THE EDGES, because the request pipeline already normalised one side and
+        // not the other: TrimStrings trims `body` on the way in (`body_doc.*` is exempt in
+        // bootstrap/app.php; `body` is not), while a rendered email's plain text ends with a newline.
+        // Comparing raw would make EVERY designed send look edited — the fence would be permanently
+        // closed and nothing would ever render. Interior differences, which are what an edit actually
+        // is, still count.
+        $asOffered = $this->templates->render($template->subject, $template->body, $lead, $sender)['body'];
+
+        if (trim($asOffered) !== trim((string) $email->body)) {
+            Log::info('outreach.designed_html.skipped', ['email_id' => $email->id, 'reason' => 'body_edited']);
+
+            return null;
+        }
+
+        // The documents have been at rest in the database since they were accepted, so they are
+        // re-validated rather than trusted — the same reasoning the body_doc path applies above.
+        $layout = $template->design->layout;
+        $content = $template->content;
+
+        if ($this->designValidator->layoutProblem($layout) !== null || $this->designValidator->contentProblem($content) !== null) {
+            Log::warning('outreach.designed_html.skipped', ['email_id' => $email->id, 'reason' => 'document_invalid']);
+
+            return null;
+        }
+
+        $html = $this->designRenderer->toHtml($layout, $content, $this->designs->sendContext($lead, $sender));
+
+        // THE GMAIL GUARD, RE-RUN WITH THIS LEAD'S REAL VALUES. Settings measures the same email with
+        // sample values, and a real business name is often longer. Gmail clips over ~102 KB and hides
+        // the rest behind "[Message clipped]", so an email that would be truncated is sent as plain
+        // text instead: a complete message a person can read beats a designed one they cannot.
+        if (strlen($html) > EmailTemplateDesignService::MAX_HTML_BYTES) {
+            Log::warning('outreach.designed_html.skipped', [
+                'email_id' => $email->id,
+                'reason' => 'html_too_large',
+                'bytes' => strlen($html),
+                'max' => EmailTemplateDesignService::MAX_HTML_BYTES,
+            ]);
+
+            return null;
+        }
+
+        return $html;
     }
 
     /**

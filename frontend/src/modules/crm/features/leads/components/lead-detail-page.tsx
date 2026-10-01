@@ -138,7 +138,11 @@ export function LeadDetailPage() {
                 natural height, as before. */}
             <div className="grid grid-cols-1 gap-6 xl:grid-cols-[71fr_29fr] xl:items-start">
               <DiscussionNotes leadId={params.id} />
-              <ActiveCallPanel leadId={params.id} />
+              <ActiveCallPanel
+                leadId={params.id}
+                leadName={lead.business || lead.contact}
+                contactName={lead.contact}
+              />
             </div>
             {/* Email Conversation (outbound + inbound) with its reply box, full width of the main
                 column and BELOW the Notes/Call row. Reads GET /leads/{id}/emails and sends through

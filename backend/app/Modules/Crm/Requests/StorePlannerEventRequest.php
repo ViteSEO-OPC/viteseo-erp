@@ -3,6 +3,8 @@
 namespace App\Modules\Crm\Requests;
 
 use App\Modules\Crm\Enums\ConsultationOutcome;
+use App\Modules\Crm\Rules\LinkableDeal;
+use App\Modules\Crm\Rules\LinkableLead;
 use App\Modules\Crm\Rules\MustBeBusinessDeveloper;
 use App\Support\OrgUserRule;
 use Illuminate\Contracts\Validation\Validator;
@@ -50,17 +52,19 @@ class StorePlannerEventRequest extends FormRequest
             // Persisted only; no notification delivery yet.
             'reminder_minutes' => ['nullable', 'integer', 'min:0'],
 
-            // Relationship seams. lead_id/deal_id are validated against existing tables;
-            // company_id/campaign_id are accepted but NOT exists-validated (no table yet).
+            // Relationship seams. lead_id/deal_id must point at a lead the caller may link work to
+            // (LinkableLead/LinkableDeal → LeadPolicy::link, CEO audit crm-04) — a bare `exists` accepted a
+            // teammate's, an archived or another organization's lead. company_id/campaign_id are accepted
+            // but NOT exists-validated (no table yet).
             //
             // `lead_id` is REQUIRED for a consultation (PDR-002 §8 Q3): the Successful Consultations KPI
             // counts DISTINCT leads, so a consultation with no lead could never be counted and would be
             // silently invisible to reporting. Every other event type keeps it optional.
             'lead_id' => [
                 Rule::requiredIf(fn (): bool => $this->input('event_type') === 'consultation'),
-                'nullable', 'integer', 'exists:crm_leads,id',
+                'nullable', 'integer', new LinkableLead($this->user(), $this->input('assigned_to')),
             ],
-            'deal_id' => ['nullable', 'integer', 'exists:crm_deals,id'],
+            'deal_id' => ['nullable', 'integer', new LinkableDeal($this->user(), $this->input('assigned_to'))],
             'company_id' => ['nullable', 'integer'],
             'campaign_id' => ['nullable', 'integer'],
 

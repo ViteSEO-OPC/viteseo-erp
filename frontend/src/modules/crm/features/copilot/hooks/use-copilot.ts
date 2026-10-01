@@ -11,6 +11,15 @@ import type { Intent, IntentConfig, CopilotContext } from "@/modules/crm/feature
 import { matchIntentWithEntity, findIntent, extractEntityPhrase } from "@/modules/crm/features/copilot/engine/matcher";
 import { buildResponse } from "@/modules/crm/features/copilot/engine/response-engine";
 import { runAction } from "@/modules/crm/features/copilot/engine/action-engine";
+import {
+  isAiEligible,
+  isLeadAiEligible,
+  isPageLeadQuestion,
+  leadIdForAi,
+  NO_PAGE_LEAD_REPLY,
+  PAGE_LEAD_FALLBACK,
+  pageLeadId,
+} from "@/modules/crm/features/copilot/engine/ai-fallback";
 import { useCopilotContext } from "@/modules/crm/features/copilot/hooks/use-copilot-context";
 import { useCopilotData } from "@/modules/crm/features/copilot/hooks/use-copilot-data";
 import { usePermissions } from "@/modules/crm/providers/permissions-provider";
@@ -18,6 +27,7 @@ import { useCopilotLeadLookup } from "@/modules/crm/features/copilot/hooks/use-c
 import { useLeadActivityLookup } from "@/modules/crm/features/copilot/hooks/use-copilot-lead-activity";
 import { useOverdueFollowUpLookup } from "@/modules/crm/features/copilot/hooks/use-copilot-followups";
 import { useCopilotActivityFeed } from "@/modules/crm/features/copilot/hooks/use-copilot-activity-feed";
+import { useCopilotAi, useCopilotAiAvailable } from "@/modules/crm/features/copilot/hooks/use-copilot-ai";
 import intentData from "@/modules/crm/features/copilot/data/intents.json";
 import quickActionData from "@/modules/crm/features/copilot/data/quick-actions.json";
 
@@ -106,6 +116,8 @@ export function useCopilot() {
   const lookupLastActivity = useLeadActivityLookup();
   const lookupOverdueFollowUps = useOverdueFollowUpLookup();
   const lookupRecentActivity = useCopilotActivityFeed();
+  const askAi = useCopilotAi();
+  const aiAvailable = useCopilotAiAvailable();
 
   const [messages, setMessages] = useState<Message[]>(seed.messages);
   const idCounter = useRef(seed.messages.length);
@@ -136,7 +148,7 @@ export function useCopilot() {
    * trivially testable. Every other intent takes the same path it always did, with no await.
    */
   const runTurn = useCallback(
-    async (userText: string, intent: Intent, message: string) => {
+    async (userText: string, intent: Intent, message: string, leadAi = false) => {
       let turnCtx = ctx;
 
       // Canonical follow-up figure, fetched only for the question that asks for it.
@@ -153,6 +165,21 @@ export function useCopilot() {
         const term = extractEntityPhrase(message);
         const matches = term ? await lookupLead(term) : [];
         const only = matches.length === 1 ? matches[0] : null;
+
+        // An open-ended question about the ONE lead the policy-scoped lookup resolved may be answered
+        // by the AI, from the server's own re-authorised profile of that lead (PO decision D1). An
+        // exact phrasing, every other lead intent, no match or several, a quick action, and any AI
+        // failure all keep the rule-based reply below. Only free text sets `leadAi`.
+        const leadId = only ? leadIdForAi(only.id) : null;
+        if (leadAi && leadId !== null && isLeadAiEligible(intent, message, matches.length)) {
+          const answer = await askAi(message, leadId);
+          if (answer !== null) {
+            const userMessage = makeMessage("user", [{ type: "text", text: userText }]);
+            const aiMessage: Message = { ...makeMessage("ai", [{ type: "text", text: answer }]), aiAssisted: true };
+            setMessages((prev) => [...prev, userMessage, aiMessage]);
+            return;
+          }
+        }
 
         turnCtx = {
           ...ctx,
@@ -179,7 +206,45 @@ export function useCopilot() {
       setMessages((prev) => [...prev, userMessage, aiMessage]);
       runAction(result.action, (href) => router.push(href));
     },
-    [ctx, makeMessage, router, lookupLead, lookupLastActivity, lookupOverdueFollowUps, lookupRecentActivity],
+    [ctx, makeMessage, router, lookupLead, lookupLastActivity, lookupOverdueFollowUps, lookupRecentActivity, askAi],
+  );
+
+  /**
+   * The OPTIONAL AI turn, reached only when the server reports AI available AND the turn is
+   * AI-eligible (a genuine fallback or a knowledge-article match). A grounded answer is shown as
+   * plain text with the "AI-assisted" footer and no action; anything else — declined, out of scope,
+   * failed — takes the exact deterministic turn for the intent the matcher resolved: the same
+   * article, or the same help.
+   */
+  const runAiFallback = useCallback(
+    async (text: string, intent: Intent) => {
+      const answer = await askAi(text);
+      if (answer === null) {
+        await runTurn(text, intent, text);
+        return;
+      }
+      const userMessage = makeMessage("user", [{ type: "text", text }]);
+      const aiMessage: Message = { ...makeMessage("ai", [{ type: "text", text: answer }]), aiAssisted: true };
+      setMessages((prev) => [...prev, userMessage, aiMessage]);
+    },
+    [askAi, makeMessage, runTurn],
+  );
+
+  /**
+   * A "this lead" question with AI available (Phase 2 Slice 3). On a lead's page, the page's lead id
+   * is sent and the server re-authorises it like any other; an answer that does not come back shows
+   * the fixed lead fallback, never a help article or a second AI request (PO decision D-c). Away from
+   * a lead page there is no lead to point at, so the reply says so, with no AI request (D-b).
+   */
+  const runPageLeadTurn = useCallback(
+    async (text: string, leadId: number | null) => {
+      const answer = leadId === null ? null : await askAi(text, leadId);
+      const reply = answer ?? (leadId === null ? NO_PAGE_LEAD_REPLY : PAGE_LEAD_FALLBACK);
+      const userMessage = makeMessage("user", [{ type: "text", text }]);
+      const aiMessage = makeMessage("ai", [{ type: "text", text: reply }]);
+      setMessages((prev) => [...prev, userMessage, answer === null ? aiMessage : { ...aiMessage, aiAssisted: true }]);
+    },
+    [askAi, makeMessage],
   );
 
   // Free-text entry from the input bar — resolve the intent via the matcher.
@@ -187,10 +252,26 @@ export function useCopilot() {
     (raw: string) => {
       const text = raw.trim();
       if (!text) return;
-      const { intent } = matchIntentWithEntity(text, INTENT_CONFIG);
-      void runTurn(text, intent, text);
+      // "Tell me about this lead": answered about the open lead page's lead, never the portfolio.
+      // With AI off this branch never runs and the turn is exactly the rule-based one below.
+      if (aiAvailable && isPageLeadQuestion(text)) {
+        void runPageLeadTurn(text, pageLeadId(pathname));
+        return;
+      }
+      const match = matchIntentWithEntity(text, INTENT_CONFIG);
+      const { intent } = match;
+      // AI only for a genuine fallback or a knowledge-article match; every real intent and direct
+      // request for help takes the rule-based turn — except an open-ended question about one
+      // resolved lead, which `runTurn` may offer to the AI (see isLeadAiEligible). Unless the server
+      // says AI is available neither branch runs.
+      if (aiAvailable && isAiEligible(match, INTENT_CONFIG)) {
+        void runAiFallback(text, intent);
+        return;
+      }
+      // With AI off `aiAvailable` is false, so a lead question takes exactly the rule-based turn.
+      void runTurn(text, intent, text, aiAvailable);
     },
-    [runTurn],
+    [runTurn, runAiFallback, runPageLeadTurn, aiAvailable, pathname],
   );
 
   // Suggested-prompt chip — bind straight to its intent (deterministic, skips the matcher).

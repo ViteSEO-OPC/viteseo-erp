@@ -116,3 +116,16 @@ def test_the_lane_never_carries_a_website_status_or_any_decision_field():
     for forbidden in ("score", "priority", "assigned_to", "lead_score", "qualified_at"):
         assert forbidden not in payload
 
+
+
+def test_a_plain_record_carries_no_also_found_by():
+    """A plain OpenStreetMap run's payload is byte-identical to before change set D."""
+    payload = normalize(RawBusiness(provider_id="node/1", name="Acme"), source="openstreetmap").to_payload()
+    assert "discovery_also_found_by" not in payload
+
+
+def test_also_found_by_is_sent_deduplicated_and_sorted():
+    raw = RawBusiness(provider_id="node/1", name="Acme", also_found_by=["openai", "openai"])
+    payload = normalize(raw, source="openstreetmap").to_payload()
+    assert payload["discovery_also_found_by"] == ["openai"]
+    assert payload["source"] == "openstreetmap"

@@ -47,7 +47,8 @@ class RecruitmentDemoSeeder extends Seeder
         ]);
         $ojt = Requisition::create([
             'title' => 'Software Engineer Intern (OJT)', 'pipeline' => 'ojt', 'employment_type' => 'ojt',
-            'salary_range' => 'Allowance', 'location' => 'Hybrid', 'department_id' => $dept('ENG'),
+            'allowance_amount' => 650.00, 'allowance_period' => 'per_day',
+            'location' => 'Hybrid', 'department_id' => $dept('ENG'),
             'hiring_manager_id' => $mgr('marco@viteseo.ph'), 'openings' => 2,
             'stage' => 'active', 'opened_at' => '2026-06-10',
         ]);
@@ -80,16 +81,16 @@ class RecruitmentDemoSeeder extends Seeder
 
         // OJT pipeline board (online interview → assignment of roles).
         $ojtCandidates = [
-            ['Kim Reyes', 0, 'jobboard', 'online_interview', null, 'Manila'],
-            ['Ben Cruz', 1, 'referral', 'moa_review', 4.0, 'Remote'],
-            ['Lia Tan', 0, 'direct', 'role_assignment', 4.2, 'Cebu'],
+            ['Kim Reyes', 0, 'jobboard', 'online_interview', null, 'Manila', 'Adamson University', 486],
+            ['Ben Cruz', 1, 'referral', 'moa_review', 4.0, 'Remote', 'Mapua University', 600],
+            ['Lia Tan', 0, 'direct', 'role_assignment', 4.2, 'Cebu', 'University of San Carlos', 400],
         ];
-        foreach ($ojtCandidates as [$name, $exp, $source, $stage, $rating, $loc]) {
+        foreach ($ojtCandidates as [$name, $exp, $source, $stage, $rating, $loc, $school, $hours]) {
             Candidate::create([
                 'requisition_id' => $ojt->id, 'name' => $name, 'source' => $source,
                 'experience_years' => $exp, 'stage' => $stage, 'rating' => $rating,
                 'email' => strtolower(str_replace(' ', '.', $name)) . '@example.com',
-                'location' => $loc,
+                'location' => $loc, 'school' => $school, 'required_hours' => $hours,
             ]);
         }
     }

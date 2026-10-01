@@ -192,6 +192,26 @@ final class OutboundMessageService
             ), $key);
         }
 
+        /*
+         * PHASE 3H.5A — CLAIM THE ROW BEFORE THE PROVIDER, OR DO NOT CALL THE PROVIDER.
+         *
+         * The two guards above cover a row that is already `sent` or already marked unresolved. They
+         * did NOT cover a row that is `pending` with no outcome yet: that is what a first request
+         * still in flight looks like, and also what a request that died after Meta accepted the
+         * message looks like. Before this claim, a replay of the same client request id sent again
+         * in both cases.
+         *
+         * The claim is one atomic conditional UPDATE, so exactly one caller wins it and only that
+         * caller reaches the adapter. The loser refuses as DeliveryUnknown — the honest answer,
+         * because it cannot know whether the winner's message has reached the customer — and a
+         * human resolves it. No lock or transaction is held across the HTTP call below.
+         */
+        if (! $this->persister->claim($persisted)) {
+            return $this->refuse($request, OutboundFailureCode::DeliveryUnknown,
+                'Another attempt with this request id has already been handed to the provider; it will not be sent again automatically.',
+                $key);
+        }
+
         $result = $adapter->send($request, $resource->externalId, $credential);
 
         if ($result->accepted && $result->providerMessageId !== null) {

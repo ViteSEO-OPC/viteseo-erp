@@ -3,12 +3,27 @@
 namespace App\Modules\Crm\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Models\User;
 use App\Modules\Crm\Enums\NerbyProvider;
+use App\Modules\Crm\Jobs\ProbeQueryYieldJob;
+use App\Modules\Crm\Requests\DiscoveryPlacesRequest;
 use App\Modules\Crm\Requests\DiscoveryProposalRequest;
+use App\Modules\Crm\Requests\DiscoveryStrategyRequest;
 use App\Modules\Crm\Requests\DiscoveryTagExpansionRequest;
+use App\Modules\Crm\Services\Discovery\AiChatEndpoint;
+use App\Modules\Crm\Services\Discovery\AiStrategyCapability;
+use App\Modules\Crm\Services\Discovery\Contracts\DiscoveryStrategist;
 use App\Modules\Crm\Services\Discovery\Contracts\ProposalGenerator;
 use App\Modules\Crm\Services\Discovery\Contracts\TagExpander;
+use App\Modules\Crm\Services\Discovery\ExecutedQueryLedger;
+use App\Modules\Crm\Services\Discovery\GooglePlacesAttestation;
+use App\Modules\Crm\Services\Discovery\GooglePlacesTextSearch;
+use App\Modules\Crm\Services\Discovery\NationwideCapability;
 use App\Modules\Crm\Services\Discovery\NerbyProviderSettingService;
+use App\Modules\Crm\Services\Discovery\NerbyServiceIdentity;
+use App\Modules\Crm\Services\Discovery\QueryYieldLog;
+use App\Support\CurrentOrg;
+use App\Support\ServiceTokens;
 use Illuminate\Http\JsonResponse;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -51,7 +66,7 @@ class DiscoveryConfigController extends Controller
      * for any of them now that the CRM makes the outbound call, and the smallest payload that answers
      * the question is the one that cannot leak anything.
      */
-    public function config(): JsonResponse
+    public function config(AiStrategyCapability $ai): JsonResponse
     {
         // Not `resolveQuietly`: a scraper run that silently gets the baseline instead of the selected
         // provider is precisely the condition an operator needs to find in the log.
@@ -64,6 +79,18 @@ class DiscoveryConfigController extends Controller
                 'reason' => $effective->reason,
                 'mode' => $effective->mode,
                 'isFallback' => $effective->isFallback(),
+                // ADDITIVE, AND A STATUS WORD ONLY. Whether a run may ask AI to plan its searches —
+                // no key, no model, no provider option, no balance figure. Existing readers of this
+                // payload ignore the field.
+                'aiStrategy' => [
+                    'status' => $ai->status(),
+                ],
+                // ADDITIVE, AND THE SAME ANSWER THE ORCHESTRATOR ACTS ON. Whether the nationwide
+                // mode may be offered here and what one run may spend — read from
+                // {@see NationwideCapability} rather than restated, because the frontend's own
+                // Google-only copy of this rule is exactly what went stale when the server's rule
+                // changed. No credential, no key, no balance: a flag, a budget and a reason word.
+                'nationwide' => NationwideCapability::for($effective->provider)->toArray(),
             ],
         ]);
     }
@@ -117,7 +144,7 @@ class DiscoveryConfigController extends Controller
             // that only checked the HTTP status would otherwise treat a failed model call as a
             // successful discovery of nothing, which is the exact confusion this endpoint must avoid.
             return response()->json([
-                'message' => 'The discovery provider could not be reached or refused the request.',
+                'message' => $this->upstreamMessage($result['status'], 'The discovery provider could not be reached or refused the request.'),
                 'data' => $payload,
             ], Response::HTTP_BAD_GATEWAY);
         }
@@ -173,11 +200,287 @@ class DiscoveryConfigController extends Controller
             // 502 for the same reason as `proposals`: a scraper that only read the HTTP status must
             // not mistake a failed model call for a category that genuinely has no other tags.
             return response()->json([
-                'message' => 'The discovery provider could not be reached or refused the request.',
+                'message' => $this->upstreamMessage($result['status'], 'The discovery provider could not be reached or refused the request.'),
                 'data' => $payload,
             ], Response::HTTP_BAD_GATEWAY);
         }
 
         return response()->json(['data' => $payload]);
+    }
+
+    /**
+     * Google Places (API New) Text Search, made HERE with the encrypted credential. The scraper sends an
+     * area, a category, an optional Places type and the area's bounding box, and gets business records
+     * back in the provider-neutral discovery shape — never the credential.
+     */
+    public function places(
+        DiscoveryPlacesRequest $request,
+        GooglePlacesTextSearch $places,
+        ExecutedQueryLedger $ledger,
+        QueryYieldLog $yield,
+    ): JsonResponse {
+        $effective = $this->settings->resolveQuietly();
+
+        if ($effective->provider !== NerbyProvider::GOOGLE_PLACES) {
+            return response()->json([
+                'message' => 'Google Places is not the effective provider.',
+                'data' => [
+                    'effectiveProvider' => $effective->provider->value,
+                    'reason' => $effective->reason,
+                    'businesses' => [],
+                ],
+            ], Response::HTTP_CONFLICT);
+        }
+
+        // Allowlisted against Google's own filter vocabulary (DiscoveryPlacesRequest::includedType).
+        $includedType = $request->includedType();
+
+        $result = $places->search(
+            (string) $request->validated('area'),
+            (string) $request->validated('category'),
+            (int) ($request->validated('limit') ?? GooglePlacesTextSearch::PAGE_SIZE),
+            $includedType,
+            $request->boundingBox(),
+            $request->plannedQueries(),
+        );
+
+        $payload = [
+            'effectiveProvider' => $effective->provider->value,
+            'executionStatus' => $result['status'],
+            'errorReason' => $result['error'],
+            'businesses' => $result['places'],
+            'pages' => $result['pages'],
+            // How many planned phrases were actually run. Reported because "AI proposed three
+            // queries" and "three queries were paid for" are different facts, and only the second
+            // one is a cost.
+            'queriesExecuted' => $result['queries_executed'] ?? 1,
+        ];
+
+        // A SPEND REFUSAL IS NOT A PROVIDER FAILURE, and gets its own status so nothing downstream
+        // has to infer the difference from a message. 402 says what happened: the request was
+        // affordable-checked and declined, by us, before it was made. Reporting it as 502 would tell
+        // an operator that Google was unreachable, sending them to check the wrong system entirely.
+        if ($result['status'] === GooglePlacesTextSearch::STATUS_SPEND_LIMITED) {
+            return response()->json([
+                'message' => 'The configured Google Places spend limit for this period has been reached. '
+                    .'No request was made. Anything already discovered has been saved.',
+                'data' => $payload,
+            ], Response::HTTP_PAYMENT_REQUIRED);
+        }
+
+        if ($result['status'] !== GooglePlacesTextSearch::STATUS_OK) {
+            // 502, like `proposals`: a failed Google call must never read as an area with no businesses.
+            return response()->json([
+                'message' => 'The discovery provider could not be reached or refused the request.',
+                'data' => $payload,
+            ], Response::HTTP_BAD_GATEWAY);
+        }
+
+        // REMEMBER WHAT WAS ACTUALLY SEARCHED, so the next plan for this target can add to it rather
+        // than repeat it. Recorded here rather than inside the provider because the provider's own
+        // behaviour is unchanged by this feature: it still runs exactly the phrases it was given.
+        //
+        // ONLY ON SUCCESS, and only the phrases that were reached — a failed search covered nothing,
+        // and a phrase the provider never got to has not been tried. Nothing from the RESPONSE is
+        // recorded; the source is the outgoing request, so no business data can enter this record.
+        $category = (string) $request->validated('category');
+        $area = (string) $request->validated('area');
+        $executedCount = (int) ($result['queries_executed'] ?? 0);
+        $ran = $ledger->executed($request->plannedQueries(), $executedCount);
+
+        $ledger->record($category, $area, $request->plannedQueries(), $executedCount);
+
+        // WHAT THAT SEARCH WAS WORTH, kept so Phase 3 can judge yield over time instead of guessing.
+        // Counts only — the phrases this CRM sent and the SIZE of what came back. Nothing from the
+        // response itself is recorded, and none of this reaches a model: feeding yield into strategy
+        // is adaptive behaviour and belongs to a later slice.
+        $yield->record(
+            $category,
+            $area,
+            $effective->provider->value,
+            $ran,
+            count($result['places']),
+            (int) ($result['pages'] ?? 0),
+        );
+
+        // Remember exactly which places Google returned to THIS service token, so the ingest can
+        // refuse a Google identity the CRM never handed out. Only for the machine caller — it is the
+        // only one that may ingest — and after the response is built, so the answer is unchanged.
+        $caller = $request->user();
+        if ($caller instanceof User && $caller->hasRole(NerbyServiceIdentity::ROLE)
+            && ($token = ServiceTokens::token($caller)) !== null) {
+            app(GooglePlacesAttestation::class)->record((int) $token->getKey(), $result['places']);
+        }
+
+        return response()->json(['data' => $payload]);
+    }
+
+    /**
+     * HOW to search — the provider-neutral AI strategy capability.
+     *
+     * DELIBERATELY NOT GATED ON THE EFFECTIVE PROVIDER, unlike `proposals` and `places`. Those ask a
+     * provider to DO something, so asking one that is not running would be incoherent. This asks how
+     * a search should be SHAPED, and that answer is useful to whichever provider is executing — which
+     * is the entire point of making the capability provider-neutral. Gating it the other way is what
+     * previously meant an AI-assisted Google run received no assistance at all.
+     *
+     * It is still gated on AI being configured AND enabled, because it spends money per call. 409
+     * when it is not: the request is authorized, the optional capability is simply switched off, and
+     * a caller must treat that as "no advice" rather than as an error.
+     */
+    public function strategy(
+        DiscoveryStrategyRequest $request,
+        DiscoveryStrategist $strategist,
+    ): JsonResponse {
+        $ai = $this->settings->for(NerbyProvider::OPENAI);
+        $empty = ['selectors' => [], 'queries' => [], 'placeTypes' => [], 'subAreas' => []];
+
+        if (! $ai->exists || ! $ai->hasApiKey() || ! $ai->enabled) {
+            return response()->json([
+                'message' => 'AI-assisted discovery strategy is not available.',
+                'data' => [
+                    'available' => false,
+                    'reason' => $ai->exists && $ai->hasApiKey() ? 'provider_disabled' : 'provider_not_configured',
+                    'strategy' => $empty,
+                ],
+            ], Response::HTTP_CONFLICT);
+        }
+
+        $known = $request->validated('knownSelectors');
+
+        $limit = $request->validated('limit');
+
+        // WHICH PROVIDER WILL ACTUALLY RUN THE SEARCH, resolved server-side from the same settings
+        // the scraper acts on. The model is then asked only for the dialects that provider can
+        // execute, instead of for all four and discarding the ones nobody can run.
+        //
+        // DERIVED, NEVER ACCEPTED FROM THE CALLER. The CRM already knows this authoritatively, so
+        // taking it from the request would add a client-supplied input for no gain. `resolveQuietly`
+        // rather than `resolve` because a fallback is already logged where it is decided, and this
+        // endpoint can be called per task — logging it again here would be noise, not a signal.
+        $executing = $this->settings->resolveQuietly()->provider;
+
+        $result = $strategist->plan(
+            (string) $request->validated('category'),
+            (string) ($request->validated('scope') ?? ''),
+            is_array($known) ? array_values(array_filter($known, 'is_string')) : [],
+            is_numeric($limit) ? (int) $limit : null,
+            $executing,
+        );
+
+        $payload = [
+            'available' => true,
+            // The provider the strategy was shaped for — the same value the other discovery
+            // endpoints report, so a caller can see WHY a dialect came back empty.
+            'effectiveProvider' => $executing->value,
+            // WHETHER THE CALL WORKED, always — never inferred from an empty strategy. "This category
+            // needs no extra strategy" and "the key was rejected" are both nothing, and a caller that
+            // could only see the plan would report a broken integration as a settled question.
+            'executionStatus' => $result['status'],
+            'errorReason' => $result['error'],
+            // Queries, never records. Nothing here is authoritative and nothing here is a credential.
+            'strategy' => $result['strategy'],
+            'usage' => $result['usage'],
+        ];
+
+        $this->measureFreshPlan($result);
+
+        // A real call refused for lack of credit is recorded where the connection test records it,
+        // so `/discovery/config` stops offering AI Discovery instead of offering a button that
+        // cannot work. Status word only; nothing about the response body is kept.
+        if ($result['status'] === DiscoveryStrategist::STATUS_INSUFFICIENT_CREDIT) {
+            app(AiStrategyCapability::class)->recordInsufficientCredit();
+        }
+
+        if ($result['status'] !== DiscoveryStrategist::STATUS_OK) {
+            // 502, like `proposals`: the CRM is fine, its upstream provider is not.
+            return response()->json([
+                'message' => $this->upstreamMessage($result['status'], 'The discovery strategy provider could not be reached or refused the request.'),
+                'data' => $payload,
+            ], Response::HTTP_BAD_GATEWAY);
+        }
+
+        return response()->json(['data' => $payload]);
+    }
+
+    /**
+     * Queue a measurement of the phrases a FRESH plan proposed.
+     *
+     * ONLY WHEN THE PLAN IS NEW, which is the sampling policy rather than an optimisation. A cached
+     * plan means the question has not changed and neither have its phrases, so there is nothing new
+     * to measure and nothing to spend on. That is what makes probing "once per phrase per strategy
+     * cycle": a cycle is the life of one cached plan.
+     *
+     * Dispatched, never awaited. The strategy endpoint answers exactly as fast as it did before, and
+     * a measurement that fails cannot fail the request that triggered it.
+     *
+     * @param  array{status: string, strategy: array<string, mixed>, usage: array<string, mixed>, error: string|null}  $result
+     */
+    private function measureFreshPlan(array $result): void
+    {
+        if ($result['status'] !== DiscoveryStrategist::STATUS_OK) {
+            return;
+        }
+
+        // The probe runs on the `discovery` queue. The strategy endpoint is also called by the
+        // operator's standalone scraper, which needs no worker, so on a host without one a probe
+        // would be enqueued where nothing listens. Skip the measurement instead; the plan itself is
+        // unaffected.
+        if (! config('discovery.worker_enabled')) {
+            return;
+        }
+
+        // `model: cache` is the strategist's own word for "this answer was replayed".
+        if (($result['usage']['model'] ?? null) === 'cache') {
+            return;
+        }
+
+        $queries = array_values(array_filter((array) ($result['strategy']['queries'] ?? []), 'is_string'));
+        $orgId = CurrentOrg::id();
+
+        if ($queries === [] || $orgId === null) {
+            return;
+        }
+
+        $request = request();
+        $category = (string) $request->input('category', '');
+        $area = (string) ($request->input('scope') ?? '');
+
+        if ($category === '' || $area === '') {
+            // A probe needs a real area: the phrase alone does not describe a search.
+            return;
+        }
+
+        ProbeQueryYieldJob::dispatch(
+            $orgId,
+            $category,
+            $area,
+            $queries,
+            // THE CYCLE'S IDENTITY: the instruction that produced the plan plus the plan itself. It
+            // changes exactly when the plan does, which is when measuring again is worth paying for.
+            substr(sha1(((string) ($result['usage']['prompt_version'] ?? '')).'|'.implode("\n", $queries)), 0, 16),
+        )->onQueue('discovery');
+    }
+
+    /**
+     * The sentence a PERSON reads when an AI capability's upstream refused the request.
+     *
+     * WHY THIS IS NOT ONE FIXED STRING. "Could not be reached" is honest about a timeout, a DNS
+     * failure or a 5xx — and wrong, in the most expensive way, about an account that has simply run
+     * out of credit. That one sends an operator to investigate networking for a problem solved by a
+     * payment, and it is the failure most likely to be met in practice, because unlike the others it
+     * persists until a human acts. The machine-readable `status` already told these apart; this is
+     * the human half catching up.
+     *
+     * EVERY OTHER STATUS KEEPS ITS EXISTING SENTENCE, passed in by the caller. Only the credit case
+     * reads differently than it did, so no existing behaviour or wording moves.
+     *
+     * It names no credential and quotes no upstream body — the same rule the statuses follow.
+     */
+    private function upstreamMessage(string $status, string $generic): string
+    {
+        return $status === AiChatEndpoint::FAILURE_INSUFFICIENT_CREDIT
+            ? 'The AI provider refused the request because the account has no credit remaining. Add credit to the OpenRouter account, then try again.'
+            : $generic;
     }
 }

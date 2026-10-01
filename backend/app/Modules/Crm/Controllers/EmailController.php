@@ -50,10 +50,15 @@ class EmailController extends Controller
         $body = $request->bodyText();
         $bodyDoc = $request->emailDocument();
 
+        // The designed template this was composed from, when the composer named one. Deliberately NOT
+        // passed to the scheduled branch: designed sending is scoped to the immediate send path in this
+        // slice, and a scheduled email keeps today's plain-text behaviour until that is scoped on its own.
+        $emailTemplateId = isset($data['email_template_id']) ? (int) $data['email_template_id'] : null;
+
         // RC3 Send-Later: a future `scheduled_at` schedules the email (no send now); otherwise send now.
         $email = isset($data['scheduled_at'])
             ? $scheduled->schedule($lead, $sender, (string) $data['subject'], $body, Carbon::parse((string) $data['scheduled_at']), $to, $bodyDoc)
-            : $service->sendToLead($lead, $sender, (string) $data['subject'], $body, $to, $bodyDoc);
+            : $service->sendToLead($lead, $sender, (string) $data['subject'], $body, $to, $bodyDoc, $emailTemplateId);
 
         return (new EmailResource($email))->response()->setStatusCode(201);
     }

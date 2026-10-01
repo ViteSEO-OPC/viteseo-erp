@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { AlertTriangle, CheckCircle2, Lock, Radar, Sparkles } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Lock, Radar, Sparkles, Wallet } from "lucide-react";
 import { Card } from "@/modules/crm/components/ui/card";
 import { Button } from "@/modules/crm/components/ui/button";
 import { Badge } from "@/modules/crm/components/ui/badge";
@@ -42,7 +42,7 @@ const cardClass = "border border-border bg-card p-6 shadow-card";
  */
 type ProviderState = {
   label: string;
-  tone: "active" | "ready" | "pending" | "idle";
+  tone: "active" | "ready" | "pending" | "blocked" | "idle";
   hint: string;
 };
 
@@ -51,6 +51,19 @@ function providerState(
   integration: NerbyIntegration,
 ): ProviderState {
   const isRunning = provider.provider === integration.effectiveProvider;
+
+  // CHECKED BEFORE "Active", deliberately. A credential we KNOW cannot pay must never be painted as
+  // healthy, and that holds whether or not it is the provider currently selected — this is the same
+  // rule stated at the top of this file ("a provider that is selected but cannot run is Configured
+  // or Verified, never Active"), applied to the one failure that is certain to persist until a
+  // person acts on it. Every other status keeps its existing precedence.
+  if (provider.lastTestStatus === "insufficient_credit") {
+    return {
+      label: "No credit",
+      tone: "blocked",
+      hint: "The key works, but the account has no credit left. Add credit at the provider, then run Test connection again.",
+    };
+  }
 
   if (isRunning) {
     return {
@@ -102,6 +115,9 @@ const STATE_CLASS: Record<ProviderState["tone"], string> = {
   // using the same amber/teal chip pattern as website-intel-badge.tsx.
   ready: "border-teal-600 bg-teal-100 text-teal-800 dark:border-teal-700 dark:bg-teal-950/50 dark:text-teal-300",
   pending: "border-amber-300 bg-amber-100 text-amber-800 dark:border-amber-800 dark:bg-amber-950/50 dark:text-amber-300",
+  // Same chip pattern as `ready`/`pending`, in the destructive hue: this is a blocker an operator
+  // has to act on, not a step that has yet to happen. rose-800 on rose-100 measures 7.4:1.
+  blocked: "border-rose-300 bg-rose-100 text-rose-800 dark:border-rose-800 dark:bg-rose-950/50 dark:text-rose-300",
   idle: "border-border text-muted-foreground",
 };
 
@@ -169,28 +185,76 @@ export function NerbyIntegrationCard() {
   );
 }
 
+/**
+ * The one provider that is an INTELLIGENCE layer rather than a source of businesses.
+ *
+ * Everything else in the list supplies facts — records, identifiers, coordinates — and belongs in
+ * the factual group automatically, including any provider added later. Only this one is special,
+ * so only this one is named.
+ */
+const INTELLIGENCE_PROVIDER = "openai";
+
+function SectionHeading({ title, detail }: { title: string; detail: string }) {
+  return (
+    <div className="mb-2">
+      <h4 className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+        {title}
+      </h4>
+      <p className="mt-1 text-xs text-muted-foreground">{detail}</p>
+    </div>
+  );
+}
+
+/**
+ * TWO SECTIONS, BECAUSE THERE ARE TWO DECISIONS.
+ *
+ * Presenting all three options as one radio list made them read as rivals, so choosing AI looked
+ * like the way to "turn AI on" — when it actually selects the AI-assisted OpenStreetMap lane, which
+ * is why enabling AI appeared to give an OSM map instead of Google's. Splitting the list says what
+ * the backend has always done: one choice decides where businesses come FROM (and therefore which
+ * map draws them), and a separate switch decides whether AI helps plan the search.
+ *
+ * The radio itself is unchanged — selecting AI still selects the AI-assisted OSM lane, because that
+ * is currently the only way to reach it. Nothing here alters provider resolution.
+ */
 function Body({ integration }: { integration: NerbyIntegration }) {
+  const factual = integration.providers.filter((p) => p.provider !== INTELLIGENCE_PROVIDER);
+  const intelligence = integration.providers.filter((p) => p.provider === INTELLIGENCE_PROVIDER);
+
   return (
     <>
       <EffectiveProviderSummary integration={integration} />
 
-      <div className="flex flex-col gap-3">
-        {integration.providers.map((provider) => (
-          <ProviderOption
-            key={provider.provider}
-            provider={provider}
-            integration={integration}
-          />
-        ))}
-
-        {/* ROADMAP ONLY — deliberately hard-coded rather than driven by the API, because Google
-            Places is not a provider the backend knows about. Rendering it from a real provider list
-            would mean inventing an option that cannot be selected. Disabled, no controls. */}
-        <ComingSoonOption
-          label="Google Places"
-          description="Structured places data with stable Place IDs, coordinates and website fields. Pending an evaluation of Philippine coverage, pricing, quotas and data-persistence licensing."
+      <section>
+        <SectionHeading
+          title="Factual discovery provider"
+          detail="Where discovered businesses actually come from. This choice also decides which map the Nearby board draws — OpenStreetMap results on the OpenStreetMap map, Google Places results on Google's."
         />
-      </div>
+        <div className="flex flex-col gap-3">
+          {factual.map((provider) => (
+            <ProviderOption key={provider.provider} provider={provider} integration={integration} />
+          ))}
+        </div>
+      </section>
+
+      {intelligence.length > 0 ? (
+        <section>
+          <SectionHeading
+            title="AI intelligence"
+            detail="Optional. AI plans HOW to search — query wording, place types, sub-areas — and never supplies a business, identifier or coordinate. Turning it ON assists whichever factual provider is selected, including Google Places. Selecting it below instead makes AI-assisted OpenStreetMap the factual provider."
+          />
+          <div className="flex flex-col gap-3">
+            {intelligence.map((provider) => (
+              <ProviderOption
+                key={provider.provider}
+                provider={provider}
+                integration={integration}
+                isIntelligence
+              />
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       <CapabilityTiers />
     </>
@@ -280,9 +344,12 @@ function fallbackMessage(integration: NerbyIntegration): string {
 function ProviderOption({
   provider,
   integration,
+  isIntelligence = false,
 }: {
   provider: NerbyProviderConfig;
   integration: NerbyIntegration;
+  /** Renders this row as the optional intelligence layer rather than a source of businesses. */
+  isIntelligence?: boolean;
 }) {
   const select = useSelectNerbyProvider();
   const isSelected = provider.provider === integration.activeProvider;
@@ -315,7 +382,13 @@ function ProviderOption({
           />
           <span>
             <span className="flex flex-wrap items-center gap-2">
-              <span className="text-sm font-semibold text-foreground">{provider.label}</span>
+              {/* Named for what SELECTING it does. The server's label ("OpenAI (AI-Powered)") reads
+                  as a peer provider, which is the confusion this card exists to remove; the factual
+                  lane it actually selects is OpenStreetMap. Presentation only — the server's
+                  vocabulary is untouched. */}
+              <span className="text-sm font-semibold text-foreground">
+                {isIntelligence ? "AI-assisted OpenStreetMap" : provider.label}
+              </span>
               {/* ONE state chip, not a pile of overlapping badges. Which lifecycle stage this
                   provider is at, ending at Active only when it is genuinely running. */}
               <Badge
@@ -329,7 +402,10 @@ function ProviderOption({
                   Baseline
                 </Badge>
               ) : null}
-              {provider.requiresCredentials ? (
+              {/* Only the intelligence layer is AI-powered. This was keyed to `requiresCredentials`,
+                  which is also true of Google Places — so a purely factual provider wore an AI badge,
+                  the exact conflation this grouping removes. */}
+              {isIntelligence ? (
                 <Badge variant="outline" className="gap-1">
                   <Sparkles className="size-3" aria-hidden />
                   AI-Powered
@@ -370,6 +446,25 @@ const keySchema = z.object({
 
 const modelSchema = z.object({
   model: z.string().trim().max(120, "Model name is too long."),
+});
+
+/**
+ * The spend limit is optional TEXT, not a number input, because three inputs are meaningful and a
+ * numeric field cannot express all of them: an amount, blank (no limit), and 0 (stop everything).
+ * A `<input type="number">` conflates blank and zero in several browsers, which here is the
+ * difference between "unlimited" and "refuse every request".
+ *
+ * The server re-validates and owns the ceiling; this only stops an obviously wrong value making a
+ * round trip.
+ */
+const spendSchema = z.object({
+  spendLimitUsd: z
+    .string()
+    .trim()
+    .refine(
+      (v) => v === "" || (/^\d+(\.\d{1,2})?$/.test(v) && Number.isFinite(Number(v))),
+      "Enter an amount in USD such as 10 or 49.50, or leave blank for no limit.",
+    ),
 });
 
 /**
@@ -498,6 +593,24 @@ function CredentialPanel({ provider }: { provider: NerbyProviderConfig }) {
         </form>
       ) : null}
 
+      {/* --- Google Places spend limit --- */}
+      {provider.optionKeys.includes("spend_limit_usd") ? (
+        <SpendLimitPanel
+          provider={provider}
+          busy={busy}
+          onSave={(value) =>
+            configure.mutate({
+              provider: provider.provider,
+              // THE WHOLE BAG TRAVELS, NOT JUST THE FIELD THAT CHANGED. The server replaces
+              // `options` with what it receives, so sending only the limit would silently clear this
+              // provider's pricing overrides — a saved budget would quietly start being divided by a
+              // different price than the one an admin configured.
+              options: { ...currentOptions(provider), spend_limit_usd: value },
+            })
+          }
+        />
+      ) : null}
+
       {/* --- Connection status --- */}
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-muted/40 px-3 py-2.5 dark:bg-muted/60">
         <div className="flex flex-col gap-0.5">
@@ -564,30 +677,6 @@ function TestStatusChip({ provider }: { provider: NerbyProviderConfig }) {
   return <Badge variant="outline">{testStatusLabel(status)}</Badge>;
 }
 
-/** A roadmap entry. No controls, cannot be selected, and not backed by any provider. */
-function ComingSoonOption({ label, description }: { label: string; description: string }) {
-  return (
-    <div className="rounded-lg border border-dashed border-border bg-muted/20 p-4 opacity-70">
-      <div className="flex items-start gap-3">
-        <input
-          type="radio"
-          name="nerby-provider"
-          className="mt-1 size-4"
-          disabled
-          checked={false}
-          aria-label={`${label} — not yet available`}
-        />
-        <div>
-          <span className="flex flex-wrap items-center gap-2">
-            <span className="text-sm font-semibold text-muted-foreground">{label}</span>
-            <Badge variant="outline">Coming soon</Badge>
-          </span>
-          <p className="mt-1 text-xs text-muted-foreground">{description}</p>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 /**
  * What the AI provider can do today, what it needs, and what has yet to be proven — as three
@@ -666,5 +755,205 @@ function CapabilityTiers() {
         ))}
       </div>
     </section>
+  );
+}
+
+/**
+ * The provider's stored options as a plain string map, so a save can resend everything it is not
+ * changing. Nulls are dropped: the server treats an absent key and a null one the same way, and
+ * sending null back would be asking it to store an absence.
+ */
+function currentOptions(provider: NerbyProviderConfig): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(provider.options ?? {}).filter(
+      (entry): entry is [string, string] => typeof entry[1] === "string",
+    ),
+  );
+}
+
+/** USD, because this is what Google charges Vite SEO — not platform money, which is pesos. */
+const usd = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  maximumFractionDigits: 2,
+});
+
+const count = new Intl.NumberFormat("en-US");
+
+/**
+ * The Google Places spend guardrail: what the budget is, what it has bought, and how to change it.
+ *
+ * THE NUMBER HERE IS THE ENFORCEMENT, NOT A DISPLAY. Saving this field changes what the server
+ * refuses on the very next request — there is no deploy, no restart and no second place to update.
+ * That is the whole point of the field, so the copy says it rather than leaving an admin to wonder
+ * whether a settings value is wired to anything.
+ *
+ * BOTH UNITS, ALWAYS. Dollars are a model (a budget divided by a configured price per 1,000
+ * requests); requests are what is actually counted. Showing only dollars would hide a stale price
+ * inside the very figure it distorts, so the request allowance sits beside it as a cross-check.
+ *
+ * THREE STATES WORTH DISTINGUISHING, and the card is explicit about each because they look alike
+ * and mean opposite things:
+ *   - no limit  -> every request allowed. Today's behaviour, and the one state worth warning about.
+ *   - a limit   -> enforced; the meter shows how much of it is left.
+ *   - zero      -> every Google Places request refused, including the free ones. A deliberate stop.
+ */
+function SpendLimitPanel({
+  provider,
+  busy,
+  onSave,
+}: {
+  provider: NerbyProviderConfig;
+  busy: boolean;
+  onSave: (value: string) => void;
+}) {
+  const spend = provider.spend;
+
+  const form = useForm<z.infer<typeof spendSchema>>({
+    resolver: zodResolver(spendSchema),
+    defaultValues: { spendLimitUsd: (provider.options?.spend_limit_usd as string | undefined) ?? "" },
+  });
+
+  if (!spend) return null;
+
+  const stopped = spend.limitUsd === 0;
+  const tone = spend.unreadable
+    ? "destructive"
+    : spend.unlimited
+      ? "warning"
+      : stopped
+        ? "destructive"
+        : "ok";
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <label
+          htmlFor={`${provider.provider}-spend-limit`}
+          className="flex items-center gap-1.5 text-sm font-medium text-foreground"
+        >
+          <Wallet className="size-3.5 text-muted-foreground" aria-hidden />
+          Monthly spend limit
+        </label>
+        <Badge
+          variant={tone === "ok" ? "secondary" : "outline"}
+          className={cn(
+            "text-[11px]",
+            tone === "warning" && "border-amber-500/40 text-amber-700 dark:text-amber-400",
+            tone === "destructive" && "border-destructive/40 text-destructive",
+          )}
+        >
+          {spend.unreadable
+            ? "Unreadable — requests refused"
+            : spend.unlimited
+              ? "No limit set"
+              : stopped
+                ? "Stopped"
+                : `Enforced · ${spend.period}`}
+        </Badge>
+      </div>
+
+      {/* --- The meter --- */}
+      <dl className="grid grid-cols-2 gap-x-4 gap-y-2.5 rounded-lg bg-muted/40 px-3 py-3 sm:grid-cols-4 dark:bg-muted/60">
+        <div className="flex flex-col gap-0.5">
+          <dt className="text-[11px] uppercase tracking-wide text-muted-foreground">Limit</dt>
+          <dd className="text-sm font-medium text-foreground">
+            {spend.limitUsd === null ? "None" : usd.format(spend.limitUsd)}
+          </dd>
+        </div>
+        <div className="flex flex-col gap-0.5">
+          <dt className="text-[11px] uppercase tracking-wide text-muted-foreground">Used</dt>
+          <dd className="text-sm font-medium text-foreground">{usd.format(spend.billedUsd)}</dd>
+        </div>
+        <div className="flex flex-col gap-0.5">
+          <dt className="text-[11px] uppercase tracking-wide text-muted-foreground">Remaining</dt>
+          <dd className="text-sm font-medium text-foreground">
+            {spend.remainingUsd === null ? "—" : usd.format(spend.remainingUsd)}
+          </dd>
+        </div>
+        <div className="flex flex-col gap-0.5">
+          <dt className="text-[11px] uppercase tracking-wide text-muted-foreground">Requests</dt>
+          <dd className="text-sm font-medium text-foreground">
+            {spend.requestsAllowed === null
+              ? count.format(spend.requestsUsed)
+              : `${count.format(spend.requestsUsed)} / ${count.format(spend.requestsAllowed)}`}
+          </dd>
+        </div>
+      </dl>
+
+      {/* --- The dial --- */}
+      <form
+        className="flex flex-col gap-2"
+        onSubmit={form.handleSubmit(({ spendLimitUsd }) => onSave(spendLimitUsd.trim()))}
+      >
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative flex-1 sm:max-w-[12rem]">
+            <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-sm text-muted-foreground">
+              $
+            </span>
+            <input
+              id={`${provider.provider}-spend-limit`}
+              inputMode="decimal"
+              className={cn(FIELD, "w-full pl-7")}
+              placeholder="No limit"
+              aria-describedby={`${provider.provider}-spend-help`}
+              {...form.register("spendLimitUsd")}
+            />
+          </div>
+          <Button type="submit" size="sm" variant="outline" disabled={busy}>
+            Save limit
+          </Button>
+          <span className="text-xs text-muted-foreground">USD per calendar month</span>
+        </div>
+
+        {form.formState.errors.spendLimitUsd ? (
+          <p className="text-xs text-destructive">{form.formState.errors.spendLimitUsd.message}</p>
+        ) : null}
+
+        <p id={`${provider.provider}-spend-help`} className="text-xs text-muted-foreground">
+          Enforced on every Google Places request — a change takes effect immediately, with no
+          deployment. Leave blank for no limit; enter <span className="font-medium">0</span> to stop
+          all Google Places requests. OpenStreetMap discovery is free and is never affected.
+        </p>
+
+        {spend.listPricePer1000Usd ? (
+          <p className="text-xs text-muted-foreground">
+            Priced at {usd.format(spend.listPricePer1000Usd)} per 1,000 requests
+            {spend.freeTierRequests > 0
+              ? `, with the first ${count.format(spend.freeTierRequests)} each month free`
+              : ""}
+            .
+            {spend.effectivePricePer1000Usd &&
+            spend.effectivePricePer1000Usd !== spend.listPricePer1000Usd
+              ? ` A safety margin is applied, so the allowance is calculated at ${usd.format(
+                  spend.effectivePricePer1000Usd,
+                )} per 1,000.`
+              : ""}
+          </p>
+        ) : null}
+
+        {spend.unlimited ? (
+          <p className="flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-400">
+            <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+            No spend limit is set, so Google Places requests are not capped by this CRM.
+          </p>
+        ) : null}
+
+        {stopped ? (
+          <p className="flex items-start gap-1.5 text-xs text-destructive">
+            <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+            Every Google Places request is being refused. Raise the limit or clear it to resume.
+          </p>
+        ) : null}
+
+        {spend.unreadable ? (
+          <p className="flex items-start gap-1.5 text-xs text-destructive">
+            <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+            The stored limit is not a readable amount, so requests are being refused. Save a valid
+            amount to resume.
+          </p>
+        ) : null}
+      </form>
+    </div>
   );
 }

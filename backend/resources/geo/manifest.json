@@ -1,0 +1,14 @@
+{
+  "distribution": "https://github.com/nvkelso/natural-earth-vector",
+  "extracted": {
+    "ph-boundary.geojson": "the single ISO_A3=PHL feature from geojson/ne_10m_admin_0_countries.geojson",
+    "ph-cities.json": "features with ISO_A2=PH from geojson/ne_10m_populated_places.geojson"
+  },
+  "license": "Public domain (Natural Earth terms of use)",
+  "sha256": {
+    "ph-boundary.geojson": "e4cc1801ce6b73fe6aa52fbb052ea28239d33583c846c0f92ec8d6b3cf0722ac",
+    "ph-cities.json": "ffb557215ba48357f28017ff700e5adcfcaaa10563605d034069d48061fe6369"
+  },
+  "source": "Natural Earth 1:10m Admin 0 Countries / Populated Places",
+  "tag": "v5.1.2"
+}

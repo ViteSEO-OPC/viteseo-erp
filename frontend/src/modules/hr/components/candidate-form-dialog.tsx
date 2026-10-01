@@ -27,6 +27,7 @@ import {
 import {
   CANDIDATE_SOURCES,
   LOCATIONS,
+  isOjt,
   sourceLabel,
 } from "@/modules/hr/types/recruitment";
 import { SimpleSelect } from "@/modules/hr/ui/select";
@@ -39,6 +40,14 @@ const schema = z.object({
   source: z.string().min(1),
   expected_salary: z.string(),
   location: z.string(),
+  // OJT applications only — see the requisition-driven fields below.
+  school: z.string(),
+  required_hours: z
+    .string()
+    .refine(
+      (v) => v === "" || (Number.isInteger(Number(v)) && Number(v) >= 1 && Number(v) <= 2000),
+      "Enter a whole number of hours (1–2000)",
+    ),
   notes: z.string(),
 });
 type FormValues = z.infer<typeof schema>;
@@ -70,6 +79,7 @@ export function CandidateFormDialog({
   const {
     register,
     control,
+    watch,
     handleSubmit,
     reset,
     formState: { errors, isSubmitting },
@@ -77,9 +87,18 @@ export function CandidateFormDialog({
     resolver: zodResolver(schema),
     defaultValues: {
       name: "", email: "", phone: "", requisition_id: String(requisitionId),
-      source: "referral", expected_salary: "", location: "", notes: "",
+      source: "referral", expected_salary: "", location: "",
+      school: "", required_hours: "", notes: "",
     },
   });
+
+  /*
+   * An OJT application is asked for a school and the practicum hours it requires; a
+   * standard one is not. Keyed off the SELECTED requisition's pipeline — the same column
+   * the server guards on — so the form and the record it writes always agree.
+   */
+  const chosenReq = activeReqs.find((r) => String(r.id) === watch("requisition_id"));
+  const ojtApplication = isOjt(chosenReq?.pipeline);
 
   useEffect(() => {
     if (!open) {
@@ -89,7 +108,8 @@ export function CandidateFormDialog({
     }
     reset({
       name: "", email: "", phone: "", requisition_id: String(requisitionId),
-      source: "referral", expected_salary: "", location: "", notes: "",
+      source: "referral", expected_salary: "", location: "",
+      school: "", required_hours: "", notes: "",
     });
   }, [open, requisitionId, reset]);
 
@@ -118,6 +138,10 @@ export function CandidateFormDialog({
         source: v.source,
         expected_salary: v.expected_salary || null,
         location: v.location || null,
+        // Only sent for an OJT; the server drops them for anything else regardless.
+        school: ojtApplication ? v.school || null : null,
+        required_hours:
+          ojtApplication && v.required_hours !== "" ? Number(v.required_hours) : null,
         notes: v.notes || null,
         resume,
       },
@@ -255,8 +279,11 @@ export function CandidateFormDialog({
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="space-y-1.5">
-              <Label>Expected Salary</Label>
-              <Input placeholder="₱45,000 - 65,000" {...register("expected_salary")} />
+              <Label>{ojtApplication ? "Expected Allowance" : "Expected Salary"}</Label>
+              <Input
+                placeholder={ojtApplication ? "₱650/day" : "₱45,000 - 65,000"}
+                {...register("expected_salary")}
+              />
             </div>
             <div className="space-y-1.5">
               <Label>Location</Label>
@@ -274,6 +301,29 @@ export function CandidateFormDialog({
               />
             </div>
           </div>
+
+          {ojtApplication && (
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label>School</Label>
+                <Input placeholder="Adamson University" {...register("school")} />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Required Hours</Label>
+                <Input
+                  type="number"
+                  min="1"
+                  max="2000"
+                  placeholder="486"
+                  aria-invalid={!!errors.required_hours}
+                  {...register("required_hours")}
+                />
+                {errors.required_hours && (
+                  <p className="text-xs text-destructive">{errors.required_hours.message}</p>
+                )}
+              </div>
+            </div>
+          )}
 
           <div className="space-y-1.5">
             <Label>Note (optional)</Label>

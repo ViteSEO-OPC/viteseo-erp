@@ -2,8 +2,8 @@
 
 namespace App\Modules\Crm\Database\Factories;
 
-use App\Modules\Crm\Models\PlannerEvent;
 use App\Models\User;
+use App\Modules\Crm\Models\PlannerEvent;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
@@ -45,11 +45,5 @@ class PlannerEventFactory extends Factory
     public function assignedTo(User $user): static
     {
         return $this->state(fn () => ['assigned_to' => $user->id]);
-    }
-
-    /** A dateless backlog item — appears only on the Board, not the calendar. */
-    public function backlog(): static
-    {
-        return $this->state(fn () => ['starts_at' => null, 'status' => 'todo']);
     }
 }

@@ -103,7 +103,28 @@ class OpenAiDiscoveryProvider(DiscoveryProvider):
         self._client = httpx.Client(timeout=timeout)
         self._stats: dict[str, Any] = {}
 
-    def discover(self, *, area: str, category: str, limit: int) -> list[RawBusiness]:
+    def discover(
+        self,
+        *,
+        area: str,
+        category: str,
+        limit: int,
+        bbox: Optional[tuple[float, float, float, float]] = None,
+    ) -> list[RawBusiness]:
+        # `bbox` bounds the name LOOKUP, not the proposals: the model is still asked about the area.
+        # Without a cell the lookup searches the whole geocoded area, exactly as it always did. With
+        # one it searches the cell widened by a margin and clipped to the area (see
+        # `OpenStreetMapProvider.find_by_name`) — wide enough that a business just outside the cell is
+        # still found, and never the province-sized box of a nationwide cell's anchor label, which
+        # outlasted the query's own timeout. Sent ONLY when there is one, so a lookup written before
+        # this parameter existed is still called with exactly the arguments it has always accepted.
+        resolver = self._resolver
+        if bbox is not None:
+            osm = self._osm
+            resolver = OsmNameResolver(
+                lambda names, area: osm.find_by_name(names, area=area, bbox=bbox)
+            )
+
         ask = min(limit * PROPOSAL_OVERSAMPLE, MAX_PROPOSALS)
         proposals, usage, status, error = self._propose(area=area, category=category, count=ask)
 
@@ -130,7 +151,7 @@ class OpenAiDiscoveryProvider(DiscoveryProvider):
             )
             return []
 
-        outcome = self._resolver.resolve(proposals, area=area)
+        outcome = resolver.resolve(proposals, area=area)
 
         self._stats = {
             "execution_status": EXECUTION_OK,

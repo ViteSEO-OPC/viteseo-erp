@@ -1,6 +1,7 @@
 import { Globe, Check, X, ExternalLink } from "lucide-react";
 import { cn } from "@/modules/crm/lib/utils";
 import { WebsiteEvidenceSection } from "@/modules/crm/features/nearby-clients/components/website-evidence-section";
+import { awaitingWebsiteCheck } from "@/modules/crm/features/nearby-clients/components/website-intel-badge";
 import type {
   NearbyPriority,
   WebsiteSignals,
@@ -108,7 +109,7 @@ export function WebsiteIntelPanel({
           <Globe className="h-3 w-3" aria-hidden />
           {status?.label ?? "Website unknown"}
         </span>
-        {!website.audited && (
+        {awaitingWebsiteCheck(website) && (
           <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Not audited</span>
         )}
       </div>
@@ -207,7 +208,9 @@ function priorityExplanation(website: WebsiteSummary): string {
     case "website-unknown":
       return website.url
         ? "A URL was found but could not be confirmed as this business's own website — priority stays neutral until it is verified."
-        : "No website has been discovered for this business yet. That is not the same as having none, so priority stays neutral until one is checked.";
+        : website.checked
+          ? "A website search ran and could neither confirm a website nor rule one out, so priority stays neutral."
+          : "No website has been discovered for this business yet. That is not the same as having none, so priority stays neutral until one is checked.";
     case "website-unreachable":
       return "The known URL did not respond, so nothing could be confirmed about this business's web presence — priority stays neutral.";
     case "needs-redesign": {

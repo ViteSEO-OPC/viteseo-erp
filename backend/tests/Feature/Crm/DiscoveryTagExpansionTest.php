@@ -182,6 +182,100 @@ class DiscoveryTagExpansionTest extends TestCase
             ->assertJsonPath('data.selectors', ['amenity=fast_food']);
     }
 
+    // --- the covered set is part of the question, so it is part of the key ---
+
+    /**
+     * TWO COVERED SETS ARE TWO QUESTIONS. The prompt asks for selectors ADDITIONAL to the ones the
+     * caller says it already has, so the same category asked with a different covered set has a
+     * legitimately different answer. Sharing one entry replayed the first caller's answer to every
+     * later one — observed in practice, when a diagnostic call made with NO covered set cached an
+     * answer consisting only of the baseline's own selectors and that answer was then served to the
+     * real discovery lane, which had asked the narrower question.
+     */
+    public function test_a_different_covered_set_is_a_different_cache_entry(): void
+    {
+        $this->actingAsScraper();
+        $this->openAiLive();
+        Http::fake(['*' => Http::sequence()
+            ->push($this->openAiChat(['amenity=pharmacy']))
+            ->push($this->openAiChat(['shop=chemist']))]);
+
+        $first = $this->postJson(self::EXPANSIONS, ['category' => 'pharmacy'])->assertOk();
+        $second = $this->postJson(self::EXPANSIONS, [
+            'category' => 'pharmacy',
+            'knownSelectors' => ['amenity=pharmacy'],
+        ])->assertOk();
+
+        Http::assertSentCount(2);
+        $this->assertSame(['amenity=pharmacy'], $first->json('data.selectors'));
+        $this->assertSame(['shop=chemist'], $second->json('data.selectors'));
+    }
+
+    public function test_the_same_covered_set_still_answers_from_cache(): void
+    {
+        $this->actingAsScraper();
+        $this->openAiLive();
+        Http::fake(['*' => Http::response($this->openAiChat(['shop=chemist']))]);
+
+        $payload = ['category' => 'pharmacy', 'knownSelectors' => ['amenity=pharmacy']];
+        $this->postJson(self::EXPANSIONS, $payload)->assertOk();
+        $again = $this->postJson(self::EXPANSIONS, $payload)->assertOk();
+
+        Http::assertSentCount(1);
+        $this->assertSame('cache', $again->json('data.usage.model'));
+    }
+
+    /** Order and casing do not make a new question — the fingerprint is normalised and sorted. */
+    public function test_the_covered_set_fingerprint_ignores_order_and_case(): void
+    {
+        $this->actingAsScraper();
+        $this->openAiLive();
+        Http::fake(['*' => Http::response($this->openAiChat(['shop=chemist']))]);
+
+        $this->postJson(self::EXPANSIONS, [
+            'category' => 'pharmacy',
+            'knownSelectors' => ['amenity=pharmacy', 'shop=beauty'],
+        ])->assertOk();
+
+        $again = $this->postJson(self::EXPANSIONS, [
+            'category' => 'pharmacy',
+            'knownSelectors' => ['SHOP=BEAUTY', 'amenity=pharmacy'],
+        ])->assertOk();
+
+        Http::assertSentCount(1);
+        $this->assertSame('cache', $again->json('data.usage.model'));
+    }
+
+    /** Forgetting is scoped the same way, so one covered set's entry cannot clear another's. */
+    public function test_forgetting_one_covered_set_leaves_the_other_cached(): void
+    {
+        $this->actingAsScraper();
+        $this->openAiLive();
+        Http::fake(['*' => Http::sequence()
+            ->push($this->openAiChat(['amenity=pharmacy']))
+            ->push($this->openAiChat(['shop=chemist']))
+            ->push($this->openAiChat(['healthcare=pharmacy']))]);
+
+        $this->postJson(self::EXPANSIONS, ['category' => 'pharmacy'])->assertOk();
+        $this->postJson(self::EXPANSIONS, [
+            'category' => 'pharmacy', 'knownSelectors' => ['amenity=pharmacy'],
+        ])->assertOk();
+        Http::assertSentCount(2);
+
+        OpenAiTagExpander::forget('pharmacy');
+
+        // The unconstrained entry is gone and re-asks…
+        $this->postJson(self::EXPANSIONS, ['category' => 'pharmacy'])->assertOk();
+        Http::assertSentCount(3);
+
+        // …while the covered-set entry is untouched.
+        $kept = $this->postJson(self::EXPANSIONS, [
+            'category' => 'pharmacy', 'knownSelectors' => ['amenity=pharmacy'],
+        ])->assertOk();
+        Http::assertSentCount(3);
+        $this->assertSame('cache', $kept->json('data.usage.model'));
+    }
+
     public function test_forgetting_a_category_makes_the_next_call_re_ask(): void
     {
         $this->actingAsScraper();
@@ -309,17 +403,20 @@ class DiscoveryTagExpansionTest extends TestCase
         }
     }
 
-    public function test_selectors_leave_unvalidated_because_the_scraper_owns_that_vocabulary(): void
+    public function test_selectors_are_held_to_the_engines_key_vocabulary_before_they_leave(): void
     {
-        // Deliberate: the code that will EXECUTE a selector validates it, next to the OSM key list it
-        // already owns. A second copy here would eventually disagree with the one that matters — so
-        // this asserts the endpoint passes nonsense through rather than silently filtering it.
+        // CHANGED CONTRACT (AI hardening): selectors used to leave unvalidated, on the reasoning that
+        // the engine that executes them owns the vocabulary. They are now held to the same allowed
+        // keys and value shape HERE too, so an out-of-vocabulary answer is never cached or returned.
+        // The engine's non-business list (parking, benches...) stays the engine's: `amenity=parking`
+        // is a well-formed business-key selector and passes; the engine refuses it. The key list is
+        // pinned against the engine's own by scraper/tests/test_tag_expansion_key_parity.py.
         $this->actingAsScraper();
         $this->openAiLive();
-        Http::fake(['*' => Http::response($this->openAiChat(['amenity=parking', 'building=yes']))]);
+        Http::fake(['*' => Http::response($this->openAiChat(['amenity=parking', 'building=yes', 'Shop=Chemist']))]);
 
         $this->postJson(self::EXPANSIONS, ['category' => 'restaurant'])
             ->assertOk()
-            ->assertJsonPath('data.selectors', ['amenity=parking', 'building=yes']);
+            ->assertJsonPath('data.selectors', ['amenity=parking', 'shop=chemist']);
     }
 }

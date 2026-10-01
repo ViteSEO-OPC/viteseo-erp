@@ -20,6 +20,9 @@ use Illuminate\Foundation\Events\Dispatchable;
  * notification, n8n emission) attaches without reopening the ingest pipeline — the same seam
  * InboundReplyReceived gives the email path.
  *
+ * Phase 3I attaches the first one: QueueAiAutoReply (registered in CrmServiceProvider). It is
+ * synchronous and never throws, because this event's listeners run inside ingest's try block.
+ *
  * ShouldDispatchAfterCommit: the event is dispatched from INSIDE the ingest transaction, and the
  * framework holds it until the OUTERMOST transaction commits (Dispatcher::dispatch → the database
  * transactions manager). A successful inner savepoint is not enough — a batch ingest that wraps

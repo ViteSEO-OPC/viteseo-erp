@@ -32,7 +32,17 @@ class TemplateRenderer
      *
      * @return array<string, string>
      */
-    private function tokens(Lead $lead, ?User $sender): array
+    /**
+     * The placeholder map for one lead and sender.
+     *
+     * PUBLIC so the send path can build an EmailDesignContext with the identical substitution a
+     * plain-text send already uses — the designed HTML and the plain-text body must resolve
+     * `{{first_name}}` to the same string, or the two parts of one email would disagree. Exposed
+     * rather than duplicated for exactly that reason: one token map, one meaning.
+     *
+     * @return array<string, string>
+     */
+    public function tokens(Lead $lead, ?User $sender): array
     {
         $contact = (string) ($lead->contact_name ?? '');
 

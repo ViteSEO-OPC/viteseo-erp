@@ -15,7 +15,13 @@ actually belongs to the business.
 
 from __future__ import annotations
 
-from scraper.models import NormalizedBusiness, RawBusiness
+import re
+
+from scraper.models import NormalizedBusiness, ProvenanceOnlyRecord, RawBusiness
+
+#: The OpenStreetMap element key — the only identity a provenance-only record may carry. The CRM
+#: validates the same shape, so a Google place id can never travel on this path.
+_OSM_ID = re.compile(r"^(node|way|relation)/[1-9][0-9]{0,18}$")
 
 
 def _looks_like_url(value: str) -> bool:
@@ -55,4 +61,25 @@ def normalize(raw: RawBusiness, source: str) -> NormalizedBusiness:
         longitude=raw.longitude,
         place_id=raw.provider_id or None,
         source=raw.discovered_by or source,
+        # Passed straight through, including False. `or` would be wrong here: it collapses a
+        # recorded False into None and loses the distinction the field exists to carry.
+        discovery_ai_assisted=raw.ai_assisted,
+        # Sorted and de-duplicated; None when empty so a plain record's payload is unchanged.
+        discovery_also_found_by=sorted(set(raw.also_found_by)) or None,
+    )
+
+
+def normalize_provenance(raw: RawBusiness, lane: str) -> ProvenanceOnlyRecord | None:
+    """Reduce an AI finding the result limit dropped to a provenance-only record.
+
+    ``None`` when the record cannot be one: no OSM identity to match an existing lead on, or no
+    position for the CRM's national boundary to check. Dropping it loses nothing the ordinary path
+    would have kept — the record was already outside the result.
+    """
+    if not raw.provider_id or not _OSM_ID.match(raw.provider_id):
+        return None
+    if raw.latitude is None or raw.longitude is None:
+        return None
+    return ProvenanceOnlyRecord(
+        place_id=raw.provider_id, lane=lane, latitude=raw.latitude, longitude=raw.longitude
     )

@@ -1,0 +1,334 @@
+{
+  "knowledge": [
+    {
+      "id": "priority-levels",
+      "question": "What do the priority levels mean?",
+      "keywords": "priority high medium low levels meaning hot warm cold filter set manually",
+      "answer": "Leads carry a **priority** of *High*, *Medium*, or *Low*, and it is set **manually** — it is never derived from the lead score. High-priority leads should be worked first. You can filter the **Leads** list by priority, and the *Priority Overview* cards show the distribution with each bucket's average score."
+    },
+    {
+      "id": "lead-statuses",
+      "question": "What lead statuses exist in the pipeline?",
+      "keywords": "status statuses pipeline stages new interested awaiting reply call back declined workflow update frozen five",
+      "answer": "There are exactly five, and the set is **frozen**: **new · interested · awaiting-reply · call-back-req · declined**. Status reflects where the *conversation* stands — not the lead's quality, which is the *score*. It is a **manual business decision**: nothing in the CRM sets it automatically, and automated flows are specifically forbidden from reclassifying it. Set it from a lead's detail page, and filter the **Leads** list by it."
+    },
+    {
+      "id": "why-awaiting-reply",
+      "question": "Why is this lead Awaiting Reply?",
+      "keywords": "why is this lead awaiting reply status changed who set automatic manual reclassify inbound",
+      "answer": "Because **a person set it there**. Lead status is a manual decision — no automation writes it. In particular, when a lead replies to an email the inbound pipeline updates the *engagement* fields and re-scores the lead, but it deliberately **never** changes the lead's status; doing so would silently overwrite a BD's judgement. To see who last changed it and when, open the lead's **Activity Timeline**."
+    },
+    {
+      "id": "website-status",
+      "question": "What does website status mean for a lead?",
+      "keywords": "website status no website needs redesign has website site web presence filter segment qualification",
+      "answer": "**Website status** classifies a prospect's online presence: *No Website*, *Needs Redesign*, or *Has Website*. It feeds the **lead score** directly — *No Website* is the strongest positive signal (+25), *Needs Redesign* adds +10, and *Has Website* subtracts 15. Note it does **not** affect *qualification*: qualifying a prospect into the pipeline is an explicit BD decision, unrelated to web presence. The **Leads** list can filter by it."
+    },
+    {
+      "id": "score-vs-status-vs-priority",
+      "question": "What is the difference between Lead Score, Lead Status, and Priority?",
+      "keywords": "difference lead score status priority three compare versus vs quality conversation manual automatic",
+      "answer": "Three independent axes. **Score** (0–100) is *automatic* and measures opportunity strength. **Status** is *manual* and records where the conversation stands. **Priority** (High/Medium/Low) is *also manual* and records how urgently you intend to work it. None is derived from another — there is no code mapping score to priority, and a high-scoring lead may legitimately sit at Low priority. Ask me how the score is computed for the full signal list."
+    },
+    {
+      "id": "prospect-pool",
+      "question": "What is the Prospect Pool and what is a prospect?",
+      "keywords": "prospect pool prospects discovered nearby clients unqualified candidate not yet qualified source",
+      "answer": "A **prospect** is a business found by discovery that nobody has qualified yet — technically its `source` is set and `qualified_at` is still empty. These live in the **Prospect Pool** surfaced by *Nearby Clients*. Prospects are **not CRM leads yet**: they are excluded from every dashboard figure, report and pipeline total, and they are **not scored at all** (they carry 0 until qualified). This is deliberate — engagement signals are meaningless for a business nobody has contacted."
+    },
+    {
+      "id": "qualification",
+      "question": "What is a qualified lead and how does qualification work?",
+      "keywords": "qualified lead qualify qualification bridge promote prospect into pipeline qualified_at decision",
+      "answer": "Qualification is the **single bridge** from the Prospect Pool into the sales pipeline: a Business Developer decides a discovered prospect is worth working, and that stamps its `qualified_at`. From that moment it is an **Active CRM Lead**, it starts appearing in dashboards and reports, and it gets its **first score**. ⚠️ Don't confuse this with the *Qualified* tab on the Leads page — that tab simply means `status = interested` and has nothing to do with qualification."
+    },
+    {
+      "id": "active-vs-prospect",
+      "question": "What is the difference between a Prospect, a Qualified Lead, and an Active Lead?",
+      "keywords": "difference prospect qualified active lead compare versus vs candidate terminology three",
+      "answer": "A **Prospect** is discovered but unqualified — outside the pipeline, unscored, excluded from all business computation. A **Qualified Lead** is a prospect a BD promoted in (`qualified_at` set). An **Active CRM Lead** is anything genuinely in the pipeline: entered deliberately (created or imported) **or** a qualified prospect. Only Active CRM Leads count anywhere. Separately, the *Active Leads* **metric** means something narrower again — active leads that aren't declined."
+    },
+    {
+      "id": "active-meanings",
+      "question": "Why does Active mean two different things?",
+      "keywords": "active meaning two different confusing provenance status declined scope metric ambiguous",
+      "answer": "Because two distinct filters share the word. **Active as provenance** means \"a real CRM lead, not an unqualified prospect\" — this is what every dashboard and report query applies. **Active as status** means \"not declined\" — this is what the *Active Leads* card counts. Most business queries apply both. So *Total Leads* includes declined leads while *Active Leads* excludes them, and their difference is exactly the declined count."
+    },
+    {
+      "id": "contacted-meanings",
+      "question": "Why do different screens show different Contacted numbers?",
+      "keywords": "contacted different numbers three meanings mismatch percent tab funnel disagree confusing engaged",
+      "answer": "*Contacted* legitimately means three things. On **Reports** the *Contacted* KPI is a **percentage** of all leads. The funnel's *Contacted* **bar** is a **count** of engaged leads. On the **Leads** page the *Contacted* **tab** means `status IN (awaiting-reply, call-back-req)`, which is a different set again. None is wrong — always check which surface you're reading. Ask me how any of them is computed."
+    },
+    {
+      "id": "funnel-vs-consultations",
+      "question": "Why does the Consultations KPI differ from the funnel's Consultation bar?",
+      "keywords": "consultation kpi funnel bar differ mismatch different numbers 3 10 disagree scheduled held",
+      "answer": "They answer different questions, on purpose. The **Consultations KPI** counts consultations that were actually **held** — unique leads who turned up. The funnel's **Consultation bar** counts **scheduled slots** surviving at that stage. Changing one funnel stage in isolation would break the funnel's monotonic survival logic, so the whole funnel is being redesigned separately. Expect the two figures to differ until then — it is a known, accepted discrepancy, not a bug."
+    },
+    {
+      "id": "add-lead",
+      "question": "How do I add a new lead?",
+      "keywords": "add lead new create wizard manually enter business record notes website",
+      "answer": "On the **Leads** page use **Add New Lead** to open the create wizard, then enter the business, contact, website status, niche and other details. The lead is scored automatically once saved. If you're a Business Developer, the lead is **assigned to you automatically** — you cannot create a lead owned by someone else."
+    },
+    {
+      "id": "import-leads",
+      "question": "How do I import leads?",
+      "keywords": "import leads csv excel upload bulk add file mapping duplicates spreadsheet dry run preview headers",
+      "answer": "On the **Leads** page choose **Import** and upload a CSV/Excel file. Import is a **dry run by default**: you map columns, preview the result (valid rows, duplicates, errors, and any unrecognised columns) and only then commit — nothing is written until you do. Header matching is tolerant of dashes and common aliases. Duplicate emails are flagged so you don't create the same lead twice, and every imported row is **assigned to the importing BD**."
+    },
+    {
+      "id": "export-leads",
+      "question": "How do I export leads?",
+      "keywords": "export leads csv download filter current view report spreadsheet list",
+      "answer": "The **Export** button on **Leads** downloads a **CSV**, built in your browser by walking the list you're currently looking at. It is *filter-aware* — you get exactly the leads matching your active search, priority, status, website-status and niche filters, across every page, not just the visible one."
+    },
+    {
+      "id": "pdf-export",
+      "question": "How do I export a lead as a PDF?",
+      "keywords": "pdf export lead profile download print single lead document share",
+      "answer": "Open a lead and use **Export PDF** in the header to download a one-page profile — business, contact, pipeline details and the lead score, rendered on the server. Business Developers can also export straight from the **Leads** table row actions. You can only export a lead you're allowed to open. Scope note: the PDF is the lead *profile* only — it deliberately excludes the activity timeline, internal notes and email history. There is **no** whole-list PDF export."
+    },
+    {
+      "id": "lead-details",
+      "question": "What is on a lead's detail page?",
+      "keywords": "lead detail details page open view profile score ring header sections presence timeline calls",
+      "answer": "Open any lead from the **Leads** table to reach its detail page: the **score** ring, **priority** and **status**, *Digital & Marketplace Presence*, **Quick Actions**, **Internal Notes**, and a tabbed panel with the **Activity Timeline** and **Call History**. Header actions cover **Edit**, **Export PDF**, and — for Admins — **Reassign**."
+    },
+    {
+      "id": "lead-quick-actions",
+      "question": "What do the Quick Actions on a lead do?",
+      "keywords": "quick actions lead detail card email call schedule follow up won lose status buttons",
+      "answer": "The **Quick Actions** card is fully wired: change **Lead Status**, *Draft & send email* (hands off to **Outreach**), *Schedule follow-up* (creates a real Planner event), and **Won** / **Lose** to record the outcome. *Mark as contacted* was removed — status is changed directly instead. To log a call, use the calling panel further down the page rather than Quick Actions."
+    },
+    {
+      "id": "lead-notes",
+      "question": "How do notes on a lead work?",
+      "keywords": "notes note internal discussion comment add write team lead detail audit",
+      "answer": "Each lead's detail page has **Internal Notes** — notes your team can add, edit and delete. Every note change is recorded in **Activity Logs**, so there's a full audit trail of who wrote what and when."
+    },
+    {
+      "id": "lead-ownership",
+      "question": "How is lead ownership and assignment handled?",
+      "keywords": "ownership assigned assignment owner assign unassigned bd reassign visibility scope who",
+      "answer": "**Visibility follows ownership**: a Business Developer sees only the leads assigned to them, while Admins and Super Admins see every lead. A BD who creates or imports a lead is **assigned to it automatically** and cannot hand it to someone else — only Admins can reassign, using **Reassign** on the lead. Admins can also list ownerless leads through the *Assigned BD* column filter's *Unassigned* option. Ask me why a specific lead is assigned to you for the full rules."
+    },
+    {
+      "id": "assignment-rules",
+      "question": "Who can assign leads and what are the assignment rules?",
+      "keywords": "assign rules who can assign permission reassign force self import bd admin ownership change",
+      "answer": "Three rules. **One** — a Business Developer creating a lead is force-assigned to themselves, whatever the form says. **Two** — a CSV import assigns every row to the importing BD. **Three** — only **Admins** and **Super Admins** hold the assign permission, so only they can move a lead between owners. Reassignment writes an explicit *lead.assigned* entry naming who did it and who received it, and deliberately suppresses the generic \"updated\" entry to keep the audit trail readable."
+    },
+    {
+      "id": "leads-filters",
+      "question": "How do I filter and sort the Leads list?",
+      "keywords": "filter sort search leads list columns niche status priority website assigned bd tabs pagination",
+      "answer": "The **Leads** page filters by search text, priority, status, website status, niche, and — for Admins — assigned BD. Sorting covers newest/oldest, score high/low and name A–Z/Z–A; the default is newest first. The status tabs above the table are the same server-side filter in another form. Filters live in the URL, so a filtered view can be bookmarked or shared, and **Export** honours whatever is active."
+    },
+    {
+      "id": "bulk-actions",
+      "question": "Can I act on several leads at once?",
+      "keywords": "bulk multiple select checkbox mass delete archive many leads at once niche assign",
+      "answer": "Yes — select leads with the row checkboxes on the **Leads** table for a **bulk delete** (which is an archive, not a destructive delete). Business niches can also be applied to many leads in one flow. There is no bulk edit for other fields; bulk operations reuse the same single-record workflows internally, so they log the same activity and honour the same permissions."
+    },
+    {
+      "id": "archive-restore",
+      "question": "How does archiving and restoring leads work?",
+      "keywords": "archive restore deleted recycle bin soft delete recover trash removed bring back",
+      "answer": "Deleting a lead is a **soft delete** — the record stays and is simply marked archived; there is no separate archive table and nothing is destroyed. Admins and Super Admins can browse and restore archived leads from *Settings → Archive*, filtering by search, year, status and who archived it. \"Archived by\" is derived from the audit trail rather than a stored column. **Business Developers cannot archive or restore.** There is no permanent delete."
+    },
+    {
+      "id": "niches",
+      "question": "How do business niches work?",
+      "keywords": "niche niches industry business niche vocabulary registry add custom rename assign category",
+      "answer": "A lead's **niche is its industry value** — there is no separate niche field or link table. The Business Niche registry supplies a managed vocabulary those values are drawn from, so spelling stays consistent. Add one from the *+ Add Business Niche…* row in the niche dropdown on the create/edit forms; you can then optionally assign it to existing leads in the same flow. Only registered niches can be assigned, renaming a niche repoints its leads, and a niche still in use cannot be deleted."
+    },
+    {
+      "id": "outreach",
+      "question": "How does outreach and email work?",
+      "keywords": "outreach email emails send draft compose reply inbox follow ups composer schedule template",
+      "answer": "**Outreach** is your email workspace, with two views: **Follow-ups** and **Drafts**. You compose and **send** real email to a lead from there or from a lead's *Draft & send email* action, and every send is recorded in the activity feed. Drafts persist, sends can be **scheduled** for later, and templates are available. Replies are synced back automatically. Not built: attachments."
+    },
+    {
+      "id": "drafts",
+      "question": "Where are my email drafts?",
+      "keywords": "drafts draft saved unsent compose later where find my drafts",
+      "answer": "In **Outreach**, on the **Drafts** tab. A draft is not a separate record — it's the same email in a draft state, so sending it transitions that record rather than creating a second one. You can edit or delete your own drafts."
+    },
+    {
+      "id": "scheduled-send",
+      "question": "Can I schedule an email to send later?",
+      "keywords": "schedule send later scheduled email time delay queue send at automation",
+      "answer": "Yes. Outreach supports **scheduled sending** — you pick when it goes out and the send pipeline delivers it later. Scheduling is owned by the Planner, which is the CRM's single scheduling authority, so a scheduled email and a planned follow-up don't drift apart. Emails still travel through the same single send pipeline whether immediate or scheduled."
+    },
+    {
+      "id": "inbound-replies",
+      "question": "What happens when a lead replies to my email?",
+      "keywords": "reply replies inbound received response lead responded email sync notification score",
+      "answer": "Replies are ingested automatically. The reply is stored against the lead, an *email.received* entry appears in the activity feed, the owning BD is **notified**, the lead's **score is recalculated**, and any open follow-up for that lead is **completed**. What it deliberately does **not** do is change the lead's status — that stays your decision. Note the per-lead email conversation panel was removed from the detail page; replies surface through the activity feed."
+    },
+    {
+      "id": "outreach-vs-status",
+      "question": "What is the difference between Email Outreach status and Lead Status?",
+      "keywords": "email outreach status vs lead status difference independent none sent opened replied frozen",
+      "answer": "They are **independent by design, and this rule is frozen**. *Email Outreach* (none → sent → opened → replied) is the **communication** lifecycle and may be advanced automatically. *Lead Status* is the **sales** lifecycle and is only ever set by a person. Automated flows may move email outreach but must **never** auto-mutate lead status. Cold calling status (not-called → scheduled → called) works the same way."
+    },
+    {
+      "id": "follow-ups",
+      "question": "What counts as a follow-up?",
+      "keywords": "follow up follow-ups due reminder next step overdue missed scheduled planner completed",
+      "answer": "A follow-up is a **Planner event** with a due time — a real scheduled commitment, not merely an email you sent. Sending an outbound email is **not** itself a follow-up. Follow-ups appear in **Outreach** and in the Planner, they're bucketed Overdue / Today / Upcoming on Manila day boundaries, and one is counted **missed** once its time passes without being completed. Ask me how the follow-up metrics are computed."
+    },
+    {
+      "id": "planner",
+      "question": "What is the Planner?",
+      "keywords": "planner calendar schedule events meetings tasks calls follow ups board agenda",
+      "answer": "The **Planner** is the CRM's **single scheduling authority** — every dated commitment lives there, whether a follow-up, call, meeting, task or consultation. Anything elsewhere that schedules something (a scheduled email, a *Schedule follow-up* quick action, starting an ad-hoc call) creates a Planner event rather than keeping its own private schedule. It's a Business Developer workspace: Admins don't have it. Completing an event is what drives the follow-up and discipline metrics."
+    },
+    {
+      "id": "calling-workspace",
+      "question": "How do I log a call?",
+      "keywords": "call calling log phone dial call history session start complete outcome disposition record",
+      "answer": "On a lead's detail page, use the calling panel to **Start Call** — a live timer runs and the CRM computes the duration for you (there's no Stop button; you either Complete or Discard). Completing asks for an **outcome** and optional notes. Calls are always attached to a Planner event: starting an ad-hoc call creates one first. Past calls appear in **Call History** next to the Activity Timeline, and only one call can be active on an event at a time."
+    },
+    {
+      "id": "call-disposition",
+      "question": "What do the call outcomes mean?",
+      "keywords": "call outcome disposition connected no answer busy voicemail failed cancelled discard retry frozen",
+      "answer": "The rule is **frozen**: only **connected** completes the owning Planner event. Every other outcome — *no answer*, *busy*, *voicemail*, *failed*, and a discarded call — deliberately leaves the event **open so you can retry**. That's why one planned call can have several call records against it. Each start and completion is logged to the lead's timeline, and *connected* is reused elsewhere as the canonical signal that the conversation actually happened."
+    },
+    {
+      "id": "consultations-workflow",
+      "question": "How does a consultation work?",
+      "keywords": "consultation schedule hold outcome successful not interested no show cancelled attended result",
+      "answer": "A consultation is a **Planner event** of its own type. You schedule it, and once it's over you mark it complete and record an **outcome**: *successful* or *not interested* both mean the lead attended, while *no show* and *cancelled* mean it never happened. Leaving the outcome blank means \"awaiting result\" — those appear in a work queue rather than counting either way, so nothing is silently miscounted. Ask me how the Consultations KPI is computed."
+    },
+    {
+      "id": "deals",
+      "question": "How do Deals work and when is one created?",
+      "keywords": "deal deals won mark as won amount revenue create conversion lost 409 one active",
+      "answer": "A **Deal** is created only by marking a lead **Won**, and it is the CRM's **sole source of truth for revenue**. Its amount defaults to the lead's estimated amount unless you supply one. A lead can hold **one active Deal** — a second attempt is rejected. Marking a lead **Lost** creates no Deal at all; it records the reason and closes out that lead's open follow-ups. Neither outcome changes the lead's status or score. Ask me how Won and Lost work for the full rules."
+    },
+    {
+      "id": "revenue-vs-pipeline",
+      "question": "What is the difference between revenue and pipeline value?",
+      "keywords": "revenue pipeline estimated value difference amount deal lead expected realized versus",
+      "answer": "**Revenue** is realized money from won Deals. **Estimated Pipeline Value** is the expected value of leads still in play, held on the lead itself. They come from different fields, answer different questions, and are **never summed together or substituted for one another** — a lead's estimate never becomes revenue just because the lead progressed. Only marking the lead Won creates the Deal that revenue counts."
+    },
+    {
+      "id": "business-rules",
+      "question": "What are Business Rules and how do they change lead scoring?",
+      "keywords": "business rules settings scoring points configure publish version rollback audit draft admin",
+      "answer": "**Business Rules** (in *Settings*) is where the **point values** behind lead scoring are managed, without a code change. The workflow is deliberate: edit a **draft**, **publish** it to create an immutable **version**, and roll back forward-only to an earlier version if needed — with an append-only **audit history** of every change. Publishing **automatically re-scores every lead**. The category caps and the 7-day / 30-day activity windows are *not* editable here. Business Rules is a management surface: Business Developers have no access."
+    },
+    {
+      "id": "score-breakdown",
+      "question": "Can I see why a lead has the score it does?",
+      "keywords": "score breakdown why this score signals explain per signal diagnose lead score reason",
+      "answer": "The CRM computes a full per-signal breakdown for any lead — every signal, whether it fired, and the points it contributed, grouped into Fit, Engagement and Negative with each category's subtotal and cap. It is recalculated live rather than read from a stored value, which also makes it the way to diagnose a score that looks wrong. It isn't surfaced on screen yet. In the meantime, ask me what signals affect a lead score and I'll list all of them with their weights."
+    },
+    {
+      "id": "activities",
+      "question": "What is in the Activity Logs?",
+      "keywords": "activity activities logs feed history audit events login note email created updated assigned calls",
+      "answer": "**Activity Logs** is an **append-only, immutable** feed — there is no way to edit or delete an entry. It records leads created, updated, archived and restored, emails sent and received, note changes, assignments, calls started and completed, and sign-ins. It is scoped to what you're allowed to see, and the same feed powers the Dashboard's *Recent Activity* and each lead's own timeline."
+    },
+    {
+      "id": "dashboard",
+      "question": "What is on the dashboard?",
+      "keywords": "dashboard home kpis widgets management bd role based total leads status live pending",
+      "answer": "The **Dashboard** adapts to your role. Live for everyone: *Total Leads*, *High Priority*, *Interested*, the *Leads by Status* breakdown, the *Lead Priority Overview* cards, and recent leads and activity. Admins additionally see *BD Performance* and *Lead Acquisition*. Still showing **Pending**: *Follow-ups Due* and *Completed Outreach* — the data now exists but the cards aren't wired yet, so they honestly show a dash rather than a guess. Ask me how any dashboard figure is computed."
+    },
+    {
+      "id": "performance",
+      "question": "What is on My Performance?",
+      "keywords": "performance my stats kpis assigned leads conversion revenue targets discipline scorecard",
+      "answer": "**My Performance** is your own scorecard, computed live: *Conversion Rate*, *Converted*, *Revenue*, *Estimated Pipeline*, *Active* and *Assigned* leads, *Completed Follow-ups*, plus *Follow-up Discipline* and *Recent Activity*. Ask me how any of them is computed. Only *Personal Target* is Pending — the CRM has no monthly-goal source, so no progress can be shown. The range selector and Export PDF on this page are still Demo affordances."
+    },
+    {
+      "id": "reports",
+      "question": "What is on Reports & Performance?",
+      "keywords": "reports performance management analytics admin funnel status mix niche outreach targets",
+      "answer": "**Reports & Performance** is the management analytics surface (Admin and Super Admin only). It shows a headline KPI row, the **Conversion Funnel** with its biggest drop-off, *Lead Status Mix*, *Outreach by Channel*, *Monthly Acquisition*, *Quarter Targets*, *Decline Reason*, *Pending Follow-ups* and *Leads by Niche*. Every figure is a real server-side aggregate — nothing is sampled or invented, and anything that can't yet be computed is marked **Pending** instead."
+    },
+    {
+      "id": "reports-scope",
+      "question": "How do I see one Business Developer's numbers in Reports?",
+      "keywords": "reports scope chip bd drill down individual all reports switch per bd compare scorecard",
+      "answer": "Use the scope chips at the top of **Reports**: *All Reports* shows the whole CRM, and selecting a BD's chip re-scopes every widget to that person and switches to their scorecard layout. Drilling into a BD returns **exactly** what that BD sees in their own My Performance — the same computations, just scoped. A Business Developer cannot drill into another BD; that's refused by the server, not just hidden in the UI."
+    },
+    {
+      "id": "pending-metrics",
+      "question": "Why do some cards show Pending or a dash instead of a number?",
+      "keywords": "pending dash empty no data placeholder why blank target decline reason not measurable null",
+      "answer": "Because the CRM refuses to invent numbers. Two different cases. **Pending** means the input doesn't exist yet — there's no goal source for targets and no decline-reason field, so those cards show the real parts and nothing more. A **dash** means the value isn't measurable right now: when a denominator is zero the CRM returns \"undefined\" rather than 0%, because a fabricated zero would read as a real measurement of nothing. Ask me about a specific card and I'll tell you which case it is."
+    },
+    {
+      "id": "roles",
+      "question": "What user roles are there?",
+      "keywords": "roles role permissions super admin admin bd business development manager access rbac who can",
+      "answer": "Three CRM roles: **Super Admin**, **Admin** (CRM Manager), and **Business Development Manager** (BD), who works their assigned leads. Visibility follows ownership — a BD sees only their own leads, Admins and Super Admins see everything. Access is **not** simply seniority: some surfaces are management-only, and others are BD workspaces that Admins deliberately don't get. Ask me why you can't reach a particular page."
+    },
+    {
+      "id": "rbac-model",
+      "question": "How does page access work in the CRM?",
+      "keywords": "rbac access model page permission route guard min role allowed roles inherit exact who can see",
+      "answer": "Two different rules, which explains most surprises. Most pages use a **minimum role** — anyone at that level or above gets in, so access inherits upward. But some pages use an **exact allow-list**, where only the named roles get in and being more senior does **not** help. That's why *Outreach*, *Planner*, *My Performance* and *Nearby Clients* are Business Developer workspaces an Admin cannot open: they're allow-listed to the BD role on purpose, because they're personal working surfaces rather than management views. Separately, individual actions are gated by their own permissions."
+    },
+    {
+      "id": "why-no-reports",
+      "question": "Why can't I access Reports?",
+      "keywords": "cant access reports denied forbidden redirected dashboard no permission blocked why bd",
+      "answer": "**Reports & Performance is management-only** — it needs Admin or Super Admin. A Business Developer opening it is redirected to the **Dashboard**, which is the universal landing page. That isn't a fault: your equivalent surface is **My Performance**, which runs the *same* computations scoped to you. An Admin drilling into your chip in Reports sees identical numbers to your own view."
+    },
+    {
+      "id": "why-no-outreach",
+      "question": "Why can't I open Outreach or Planner as an Admin?",
+      "keywords": "admin cant open outreach planner my performance nearby clients blocked redirected allow list bd only",
+      "answer": "Because those are **Business Developer workspaces**, restricted by an exact allow-list rather than a seniority threshold — so being an Admin doesn't grant them. They're personal working surfaces (an inbox, a schedule, a personal scorecard), not management views. Management equivalents exist: use **Reports & Performance** and scope to a BD to see their pipeline, follow-ups and outcomes."
+    },
+    {
+      "id": "team-and-roles",
+      "question": "How are user accounts and roles managed?",
+      "keywords": "team accounts roles access users create user invite deactivate suspend manage staff bd account settings admin custom role permissions",
+      "answer": "Admins manage Zerem staff in *Settings → Team & Roles* — one page for the whole job: add a member (or grant Zerem access to a colleague who already has a Vite SEO Systems account), set each person's role, and build your organisation's own roles. The row menu holds sign-in details, rename, suspend or restore Zerem access, and handing a resigning BD's leads to someone else. Only a **Super Admin** can delete an account; an Admin suspends instead. Suspending matters for reporting: management views and the BD scope chips only list **active** Business Developers, so a suspended account drops out of comparisons rather than skewing them."
+    },
+    {
+      "id": "nearby-clients",
+      "question": "What is Nearby Clients?",
+      "keywords": "nearby clients discovery prospect pool find businesses scraper area map qualify enrichment",
+      "answer": "**Nearby Clients** is the discovery surface where found businesses land before anyone works them — the Prospect Pool. From there a Business Developer reviews a prospect and **qualifies** it into the pipeline, which is the moment it becomes a real CRM lead and starts being scored and counted. It's a BD workspace. Related: the **service-area registry** defines your target locations, and a lead matching one earns a scoring bonus."
+    },
+    {
+      "id": "getting-started",
+      "question": "How do I get started with the CRM?",
+      "keywords": "getting started onboarding new user first time tour where begin help learn training guide",
+      "answer": "A reasonable first week: start on the **Dashboard** for the shape of your pipeline, then work **Leads** — sort by highest score and open the *No Website* segment, since that's the strongest-converting group. Open a lead to see its score, presence details and history. Use *Draft & send email* or the calling panel to make contact, then *Schedule follow-up* so nothing is dropped. Track yourself in **My Performance**. Ask me how anything is computed, or why a number looks the way it does — I'll give you the actual formula and rule."
+    },
+    {
+      "id": "where-to-find",
+      "question": "Where do I find things in the CRM?",
+      "keywords": "where find navigate menu sidebar page location go to which screen sections map",
+      "answer": "**Dashboard** — pipeline overview and recent activity. **Leads** — the full list, plus create, import, export and assignment. **Nearby Clients** — the discovery Prospect Pool. **Outreach** — email follow-ups and drafts. **Planner** — everything scheduled. **My Performance** — your own scorecard. **Activity Logs** — the full audit feed. **Reports & Performance** (Admin) — management analytics. **Settings** (Admin) — Team & Roles, Archive, Business Rules. Tell me where you want to go and I'll take you."
+    },
+    {
+      "id": "search",
+      "question": "How do I find a specific lead or company?",
+      "keywords": "search find lead company business name email look up locate filter box",
+      "answer": "Use the search box on the **Leads** page — it matches business name, contact name and email — or the search field in the top bar. Search combines with your other filters rather than replacing them, so clear the filters if a lead you expect isn't showing. There's no separate company search, because company details live on the lead itself."
+    },
+    {
+      "id": "companies",
+      "question": "Is there a Companies section?",
+      "keywords": "companies company module section workspace business accounts organization search separate",
+      "answer": "No — there is no **Companies** module, and no such page exists. Each company's details live on its **Lead** instead, over on the **Leads** page. Use the Leads search to find a business by name."
+    },
+    {
+      "id": "copilot",
+      "question": "What can the Vite AI Copilot do?",
+      "keywords": "copilot assistant help what can you do commands capabilities ai vite rule based explain",
+      "answer": "I'm the **Vite AI Copilot**. My **built-in CRM answers** come from the CRM's own documented rules, so they are always available. I can **explain how any figure is computed** — the formula, its numerator and denominator, and why it's defined that way — explain the **business rules** behind statuses, scoring, assignment, calling, outreach and permissions, walk you through **workflows**, and jump you to any workspace. When an administrator has enabled **optional AI assistance**, some questions are also answered in plain language from the CRM figures you're allowed to see; those replies are marked *AI-assisted*. Either way I only read — I never change anything in the CRM — and if the CRM doesn't define something, I'll tell you that instead of guessing. Built-in answers don't quote *your* live numbers — ask me on the relevant page for those."
+    }
+  ]
+}

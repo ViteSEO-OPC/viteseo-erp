@@ -35,6 +35,16 @@ class RecruitmentController extends Controller
         )->response();
     }
 
+    // GET /api/v1/hr/requisitions/{requisition}
+    // The board reads its own requisition through this rather than picking it out of the
+    // index page, which is filtered and paged and can stop containing it mid-session.
+    public function showRequisition(Requisition $requisition): JsonResponse
+    {
+        return RequisitionResource::make(
+            $requisition->load(['department', 'hiringManager.user'])->loadCount('candidates'),
+        )->response();
+    }
+
     // POST /api/v1/hr/requisitions
     public function storeRequisition(StoreRequisitionRequest $request): JsonResponse
     {

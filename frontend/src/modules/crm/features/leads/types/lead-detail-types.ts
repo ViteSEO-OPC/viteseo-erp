@@ -1,8 +1,6 @@
 import type { JSONContent } from "@tiptap/react";
-import type { LeadRow, PriorityLevel, LeadStatus, ActivityType } from "@/modules/crm/features/dashboard/types/dashboard-types";
+import type { LeadRow, ActivityType } from "@/modules/crm/features/dashboard/types/dashboard-types";
 import type { LeadOutcome } from "@/modules/crm/features/leads/components/lead-score-ring";
-
-export type { PriorityLevel, LeadStatus };
 
 /**
  * The lead's Won conversion, projected read-only from its Deal (GET /leads/{id}). The Deal remains
@@ -93,6 +91,9 @@ export type EmailThreadMessage = {
   // A formatted reply's Tiptap document, rendered read-only; null for every plain-text, inbound and
   // older email, which render `body` exactly as before.
   bodyDoc: JSONContent | null;
+  // A received email's HTML part, sanitised by the server and shown in a sandboxed frame; null when
+  // the email has none, which renders `body` as plain text.
+  bodyHtml: string | null;
   // Delivery/lifecycle state: sent · received · failed · draft.
   status: string;
   // Unified chronological key (inbound receipt / outbound send / row creation).

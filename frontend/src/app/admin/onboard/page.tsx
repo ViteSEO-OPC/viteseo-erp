@@ -200,6 +200,24 @@ function OnboardContent() {
               </Link>{" "}
               to convert the trial and keep access active.
             </p>
+            {/*
+              Browser calling is the one availed capability that needs the CLIENT to do something in a
+              third-party console before it works, and nothing else in the product would ever tell them
+              so. Shown only when they actually availed the CRM — a client without it has no such
+              screen, and a next step they cannot take is worse than none.
+            */}
+            {created.features.some((f) => f.startsWith("crm")) ? (
+              <p className="mt-3 text-caption text-muted-foreground">
+                <strong>If they want calling from the browser:</strong> their admin sets it up in Zerem
+                under <strong>Settings → Integrations → Calling</strong>, using their own Twilio
+                account. They will need a Twilio Account SID and Auth Token, an API Key SID and Secret,
+                a TwiML App SID, and an owned or verified Caller ID — and the TwiML App&apos;s Voice
+                Request URL has to be the address that screen shows, set to POST. Send them the Twilio
+                setup guide. Calling works without any of this: the team dials from their phones and
+                logs outcomes in the CRM, exactly as before.
+              </p>
+            ) : null}
+
             <button
               type="button"
               onClick={resetForm}

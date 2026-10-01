@@ -28,6 +28,11 @@ class AttendanceReportService
         private readonly ScheduleService $schedule,
         private readonly HolidayService $holidays,
         private readonly AttendancePolicyService $policy,
+        // Not for its reads — for its ONE judgement. `arrivalCategory()` is what the attendance
+        // board and the payslip's late line are measured with, and a time record that disagreed
+        // with either would be the document people trust least while checking the other two.
+        private readonly AttendanceService $attendance,
+        private readonly HalfDayWindowService $halfDays,
     ) {}
 
     /** Shared tab metadata, so the three reports describe each other identically. */
@@ -169,6 +174,7 @@ class AttendanceReportService
                     $day['time_in'] ?? '—',
                     $day['time_out'] ?? '—',
                     $day['hours'] > 0 ? number_format($day['hours'], 2) : '—',
+                    ($day['late_minutes'] ?? 0) > 0 ? $day['late_minutes'] . ' min' : '—',
                     $this->statusLabel($day['status']),
                 ];
             }
@@ -185,7 +191,7 @@ class AttendanceReportService
             ],
             'dtr' => $rows,
             'table' => [
-                'columns' => ['Employee', 'Department', 'Date', 'Day', 'Time in', 'Time out', 'Hours', 'Status'],
+                'columns' => ['Employee', 'Department', 'Date', 'Day', 'Time in', 'Time out', 'Hours', 'Late by', 'Status'],
                 'rows' => $csv,
             ],
         ]);
@@ -365,6 +371,10 @@ class AttendanceReportService
             'employees' => $employees,
             'attendance' => $this->attendanceFor($employeeIds, $start, $end),
             'leave' => $this->leaveDatesFor($employeeIds, $start, $end),
+            // Which half of a day somebody was excused from, for every approved half day in the
+            // month. Read once for the whole report rather than per employee per day: lateness on
+            // a half day is measured from the half they were actually expected in.
+            'off_halves' => $this->halfDays->offHalvesBetween($start, $end),
             'holidays' => $holidays,
             'departments' => $departments,
             'department_label' => $deptId === null
@@ -639,6 +649,23 @@ class AttendanceReportService
             $in = $row?->time_in?->copy()->setTimezone($tz);
             $out = $row?->time_out?->copy()->setTimezone($tz);
 
+            /*
+             * How late the punch was, by the same rule the attendance board uses.
+             *
+             * Zero is the answer for an arrival inside the grace window or before the start, and
+             * for a day whose schedule cannot say when it began — the Status column already tells
+             * those three apart, so this one only ever speaks up when there are minutes to report.
+             *
+             * Judged from the punch, not from the stored status: a day HR has overridden to
+             * "present" still arrived when it arrived, and the board shows the same pair.
+             */
+            $lateMinutes = $in === null ? null : $this->attendance->arrivalCategory(
+                $in,
+                $eff,
+                $cursor->copy(),
+                $ctx['off_halves']["{$employee->id}|{$date}"] ?? null,
+            )['late_minutes'];
+
             $days[] = [
                 'day' => $day,
                 'date' => $date,
@@ -651,6 +678,7 @@ class AttendanceReportService
                 'in_minutes' => $in ? $in->hour * 60 + $in->minute : null,
                 'out_minutes' => $out ? $out->hour * 60 + $out->minute : null,
                 'hours' => (float) ($row?->hours_worked ?? 0),
+                'late_minutes' => $lateMinutes,
                 'note' => $row?->note,
             ];
         }

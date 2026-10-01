@@ -3,6 +3,7 @@
 use App\Modules\Hr\Http\Controllers\ApprovalQueueController;
 use App\Modules\Hr\Http\Controllers\AttendanceController;
 use App\Modules\Hr\Http\Controllers\AttendancePolicyController;
+use App\Modules\Hr\Http\Controllers\InternAllowanceSettingsController;
 use App\Modules\Hr\Http\Controllers\RemoteCheckinController;
 use App\Modules\Hr\Http\Controllers\BenefitController;
 use App\Modules\Hr\Http\Controllers\BenefitProgramController;
@@ -333,6 +334,7 @@ Route::middleware(['auth:sanctum', 'set-current-org', 'subscription-active', 'fe
 
         // Recruitment (HR only).
         Route::get('requisitions', [RecruitmentController::class, 'requisitionsIndex']);
+        Route::get('requisitions/{requisition}', [RecruitmentController::class, 'showRequisition']);
         Route::post('requisitions', [RecruitmentController::class, 'storeRequisition']);
         Route::match(['put', 'patch'], 'requisitions/{requisition}', [RecruitmentController::class, 'updateRequisition']);
         Route::delete('requisitions/{requisition}', [RecruitmentController::class, 'destroyRequisition']);
@@ -445,6 +447,9 @@ Route::middleware(['auth:sanctum', 'set-current-org', 'subscription-active', 'fe
         Route::post('employees/{employee}/reopen-onboarding', [EmployeeController::class, 'reopenOnboarding']);
         // The employment lifecycle's exit and its two ways back in.
         Route::post('employees/{employee}/separate', [EmployeeController::class, 'separate']);
+        // The end of an internship. Not the same as editing Employment status: it closes the
+        // internship on the timeline, opens the salary history, and raises leave credits.
+        Route::post('employees/{employee}/convert-intern', [EmployeeController::class, 'convertIntern']);
         // `withTrashed()` on both: a separated employee IS soft-deleted, so without it route model
         // binding 404s and the reversal is unreachable — which is the gap describes.
         Route::post('employees/{employee}/reinstate', [EmployeeController::class, 'reinstate'])
@@ -521,6 +526,16 @@ Route::middleware(['auth:sanctum', 'set-current-org', 'subscription-active', 'fe
         Route::match(['put', 'patch'], 'employees/{employee}/schedule', [WorkScheduleController::class, 'updateEmployeeSchedule']);
         Route::get('attendance-policy', [AttendancePolicyController::class, 'show']);
         Route::match(['put', 'patch'], 'attendance-policy', [AttendancePolicyController::class, 'update']);
+
+        // Company → Intern Allowance: how interns are paid inside the regular payroll runs.
+        Route::get('intern-allowance-settings', [InternAllowanceSettingsController::class, 'show']);
+        Route::put('intern-allowance-settings', [InternAllowanceSettingsController::class, 'update']);
+        // Prices an invented month under the page's unsaved settings, on every edit — hence the
+        // generous limit; it writes nothing.
+        Route::post('intern-allowance-settings/preview', [InternAllowanceSettingsController::class, 'preview'])
+            ->middleware('throttle:120,1,hr-intern-preview:');
+        Route::delete('intern-allowance-settings/versions/{date}', [InternAllowanceSettingsController::class, 'destroyVersion'])
+            ->where('date', '\d{4}-\d{2}-\d{2}');
 
         // Company → Settings: who the employer is, as printed on every letterhead.
         Route::match(['put', 'patch'], 'company-profile', [CompanyProfileController::class, 'update']);

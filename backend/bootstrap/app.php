@@ -46,6 +46,8 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->api(append: [
             \App\Http\Middleware\EnsureAccountIsActive::class,
             \App\Http\Middleware\EndSessionsPastTheirCeiling::class,
+            // Confines org-bound service tokens (the NERBY scraper) to their callback routes.
+            \App\Http\Middleware\RestrictServiceTokens::class,
         ]);
 
         // ── Rich-text documents must not be whitespace-trimmed ──
@@ -94,6 +96,22 @@ return Application::configure(basePath: dirname(__DIR__))
             // Enforces the 24h expiry on temp kiosk client logins (kiosk_client role).
             'kiosk-access' => \App\Modules\Kiosk\Middleware\EnsureKioskAccess::class,
         ]);
+
+        /*
+         * The tenant is pinned BEFORE route-model binding resolves `{model}` parameters.
+         *
+         * SubstituteBindings sits in Laravel's priority list and set-current-org did not, so the
+         * sorter ran bindings first. A human never noticed — CurrentOrg::id() resolves their org
+         * lazily from membership, the same answer the pin gives. A NERBY service user belongs to no
+         * org, so only its token's `org:<id>` binding (applied by SetCurrentOrg) names the tenant:
+         * resolved earlier, every `{lead}` callback looked in no org and 404'd, silently stopping
+         * website search and audit write-back. Still after auth:sanctum, which precedes
+         * SubstituteBindings in the same list.
+         */
+        $middleware->prependToPriorityList(
+            before: \Illuminate\Routing\Middleware\SubstituteBindings::class,
+            prepend: \App\Http\Middleware\SetCurrentOrg::class,
+        );
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         // Render JSON (not the HTML "Route [login] not defined" page) for API calls

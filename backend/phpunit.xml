@@ -34,7 +34,28 @@
         <env name="QUEUE_CONNECTION" value="sync"/>
         <env name="SESSION_DRIVER" value="array"/>
         <env name="PULSE_ENABLED" value="false"/>
+        <!-- The Copilot AI ops kill switch at its shipped default. A developer's local .env may turn it
+             on for manual testing; without this pin the suite would inherit that and stop proving the
+             default. Tests that need AI turn it on themselves. -->
+        <env name="COPILOT_AI_ENABLED" value="false"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
         <env name="NIGHTWATCH_ENABLED" value="false"/>
+
+        <!-- Calling: pinned so a developer's own .env cannot decide the suite.
+
+             Both are DEPLOYMENT settings. The Calling tests that exercise a CLIENT organization
+             depend on the ambient default being "per-organization accounts off, no central
+             organization named"; the tests that want either one set it explicitly with
+             Config::set(). Without these two lines a machine whose .env names a central
+             organization designates the suite's OWN first tenant as ViteSEO's, and 48 tests fail
+             on a tree with nothing wrong with it. That is not hypothetical - it is exactly what
+             happened while testing the client settings screen locally.
+
+             This blocks the .env file, which is the vector that actually occurs. It does NOT
+             block a variable exported into the process environment (PHPUnit leaves an
+             already-set variable alone, and Laravel's env repository reads putenv values
+             first) - so do not export either of these before running the suite. -->
+        <env name="CALLING_ORGANIZATION_CREDENTIALS" value="false"/>
+        <env name="CALLING_CENTRAL_ORG_ID" value=""/>
     </php>
 </phpunit>

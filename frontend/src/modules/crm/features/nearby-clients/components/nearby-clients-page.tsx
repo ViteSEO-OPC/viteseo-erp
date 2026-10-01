@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { MapPin } from "lucide-react";
 import { notify as toast } from "@/core/lib/notify";
 import { Button } from "@/modules/crm/components/ui/button";
@@ -13,6 +13,8 @@ import { ClientsInRangeList } from "@/modules/crm/features/nearby-clients/compon
 import { NearbyMap } from "@/modules/crm/features/nearby-clients/components/nearby-map";
 import { PlanVisitModal } from "@/modules/crm/features/nearby-clients/components/plan-visit-modal";
 import { TargetAreasDialog } from "@/modules/crm/features/nearby-clients/components/target-areas-dialog";
+import { AdvancedDiscoveryDialog } from "@/modules/crm/features/nearby-clients/components/advanced-discovery-dialog";
+import { useDiscoveryCapability } from "@/modules/crm/features/nearby-clients/hooks/use-map-provider";
 import type { NearbyClient } from "@/modules/crm/features/nearby-clients/types/nearby-clients-types";
 
 /**
@@ -42,13 +44,21 @@ export function NearbyClientsPage() {
     clearOrigin,
     geoStatus,
     totalCount,
+    matchesIgnoringPriority,
     isLoading,
     isError,
   } = useNearbyClients();
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // The results panel below — the list virtualizes against its scroll position.
+  const listScrollRef = useRef<HTMLDivElement>(null);
   const [planClient, setPlanClient] = useState<NearbyClient | null>(null);
   const [areasOpen, setAreasOpen] = useState(false);
+  // Advanced Lead Discovery is an ADDITIVE surface: it fills the pool this board reads, and opening
+  // or closing it changes nothing about the board itself.
+  const [discoveryOpen, setDiscoveryOpen] = useState(false);
+  // Additive capability, read from the one endpoint that already resolves the provider.
+  const { canDiscover } = useDiscoveryCapability();
 
   // The qualification bridge: accept a prospect into the CRM. On success it leaves the pool.
   const qualify = useQualifyProspect();
@@ -67,7 +77,7 @@ export function NearbyClientsPage() {
   };
 
   return (
-    <div className="flex flex-col gap-4 lg:h-full lg:min-h-[45rem]">
+    <div className="flex flex-col gap-4 lg:min-h-[45rem]">
       {/* Header row: context + admin registry access */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
@@ -77,16 +87,37 @@ export function NearbyClientsPage() {
           </span>
         </div>
         {isManager && (
-          <Button variant="outline" size="sm" onClick={() => setAreasOpen(true)}>
-            Manage target areas
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Starts a fresh on-demand search against the factual provider.
+                TWO GATES, BOTH PRE-EXISTING. The role check is the same one the registry action
+                beside it uses — no new frontend permission. The CAPABILITY check asks
+                `GET /discovery/config` which provider is EFFECTIVE, resolved from
+                `crm_nerby_provider_settings` with its fallbacks already applied.
+                Why capability and not only role: on the OpenStreetMap baseline this button offers a
+                paid Google search that would quietly run as a free Overpass sweep. It would work,
+                and its results would not be what its name promises — a difference invisible until
+                someone compares them. With no Stage 2 capability configured the board is exactly
+                what it was before Stage 2 existed. */}
+            {canDiscover && (
+              <Button variant="outline" size="sm" onClick={() => setDiscoveryOpen(true)}>
+                Advanced Lead Discovery
+              </Button>
+            )}
+            <Button variant="outline" size="sm" onClick={() => setAreasOpen(true)}>
+              Manage target areas
+            </Button>
+          </div>
         )}
       </div>
 
-      {/* Enterprise two-panel layout. From `lg` the page fills <main> exactly (no page-level
-          scroll): the left panel pins its filters and scrolls its list internally; the map holds a
-          fixed height. Below `lg` that pinning is dropped — see the panel and list below. */}
-      <div className="grid grid-cols-1 gap-6 lg:min-h-0 lg:flex-1 lg:grid-cols-12">
+      {/* Two panels that are deliberately NOT the same height.
+          `items-start` is the whole mechanism: grid items stretch to the tallest row by default,
+          which tied the results column to the map and made the map the ceiling on how many leads
+          could be shown — 32px of list at one point, less than a single card. The two columns answer
+          different questions and need different amounts of room: the map is a fixed canvas, the list
+          is as long as five cards need. Each now sizes to its own content, and the map pins itself
+          (below) so it stays usable while the longer column scrolls past it. */}
+      <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-12">
         {/* Left: filters above the results list.
             Below `lg` the panel must size to its CONTENT. It used to be a fixed `h-[70vh]
             min-h-[480px] overflow-hidden` box at every width, but the filter stack — search,
@@ -94,7 +125,10 @@ export function NearbyClientsPage() {
             viewport `overflow-hidden` clipped the bottom filters with no way to scroll to them,
             and the list underneath was left a sliver. The fixed height and the clipping therefore
             apply only from `lg`, where the pinned layout has the room to sustain them. */}
-        <div className="flex flex-col rounded-xl border border-border bg-card shadow-card lg:col-span-4 lg:h-full lg:min-h-0 lg:overflow-hidden">
+        <div className="flex flex-col rounded-xl border border-border bg-card shadow-card lg:col-span-4">
+          {/* THE FILTERS ARE ALWAYS FULLY VISIBLE. `shrink-0` is deliberate at every width: a filter
+              a user cannot see is a filter they cannot tell is applied, and a stack that scrolls
+              hides that state behind a gesture. The list is the thing that scrolls — see below. */}
           <div className="shrink-0 p-5 pb-4">
             <NearbyFilters
               filters={filters}
@@ -107,11 +141,16 @@ export function NearbyClientsPage() {
               geoStatus={geoStatus}
             />
           </div>
-          {/* Below `lg` the list owns a bounded height of its own rather than inheriting whatever
-              the filters left over: 60vh keeps it proportional to the screen and the 20rem floor
-              stops it collapsing into a sliver. From `lg` both are dropped and it goes back to
-              filling the pinned panel. */}
-          <div className="max-h-[60vh] min-h-[20rem] overflow-y-auto border-t border-border-subtle px-5 py-4 lg:max-h-none lg:min-h-0 lg:flex-1">
+          {/* THE ONLY THING THAT SCROLLS. The filters above are `shrink-0` at every width and stay
+              whole and reachable; the overflow lives here.
+              Its height is STATED rather than inherited. As `flex-1` inside a panel pinned to the
+              map's height the list got whatever the filters did not want, which is how it ended up
+              shorter than one card. 66rem is what about five compact cards need — five × 179px plus
+              their gaps, the list header and its padding — and not a pixel more, so the column is as
+              short as the target allows. Lead six onward is reached by scrolling here.
+              Below `lg` the viewport-proportional rules are unchanged: in a stacked layout the list
+              should stay relative to the screen, not 1000px tall. */}
+          <div ref={listScrollRef} className="max-h-[60vh] min-h-[20rem] overflow-y-auto border-t border-border-subtle px-5 py-4 lg:h-[66rem] lg:max-h-none lg:min-h-0">
             {isLoading ? (
               <div className="flex flex-col gap-3" aria-busy>
                 {[0, 1, 2, 3].map((i) => (
@@ -133,18 +172,21 @@ export function NearbyClientsPage() {
                 // discovered yet" from "your filters excluded everything" — the page previously
                 // reported both as a filter miss, which reads as broken when the pool is empty.
                 poolIsEmpty={totalCount === 0}
+                priorityFilter={filters.priority}
+                matchesIgnoringPriority={matchesIgnoringPriority}
+                scrollElementRef={listScrollRef}
               />
             )}
           </div>
         </div>
 
-        {/* Right: interactive map — fixed height matching the left panel. `lg:min-h-0` drops the
-            480px floor from the pinned path only: as a grid item that floor forced the whole row to
-            480px however little height was available, which is what pushed the panel and its list
-            below the fold. The root's floor above now guarantees the row's height instead. Below
-            `lg` the 480px floor still applies, so the stacked layout is unchanged. */}
+        {/* Right: interactive map — its own height, no longer the ceiling on the list.
+            `lg:h-[76vh]` reproduces the height it had while stretched to the row, so the map itself
+            is unchanged in size. `sticky` is what keeps it usable now that the left column is
+            taller: it stays in view as the list scrolls past instead of sliding away and leaving
+            half the screen empty. Below `lg` the stacked layout is untouched. */}
         <NearbyMap
-          className="h-[70vh] min-h-[480px] lg:col-span-8 lg:h-full lg:min-h-0"
+          className="h-[70vh] min-h-[480px] lg:sticky lg:top-6 lg:col-span-8 lg:h-[76vh]"
           clients={clients}
           origin={origin}
           radiusKm={filters.radiusKm}
@@ -163,6 +205,10 @@ export function NearbyClientsPage() {
       />
 
       {isManager && <TargetAreasDialog open={areasOpen} onOpenChange={setAreasOpen} />}
+
+      {isManager && (
+        <AdvancedDiscoveryDialog open={discoveryOpen && canDiscover} onOpenChange={setDiscoveryOpen} />
+      )}
     </div>
   );
 }

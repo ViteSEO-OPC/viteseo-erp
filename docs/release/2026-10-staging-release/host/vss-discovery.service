@@ -1,0 +1,34 @@
+# PROPOSED — NOT INSTALLED. Install only as part of an approved production deploy of staging.
+# Target: /etc/systemd/system/vss-discovery.service   (then: systemctl daemon-reload; systemctl enable --now vss-discovery)
+#
+# The dedicated consumer of the `discovery` queue. Deliberately separate from vss-queue: one discovery
+# job may run 900 s, and sharing the general worker would stall auto-replies (600 s trigger age),
+# send-later mail, reminders and mailbox sync behind a paid sweep.
+#
+#  - connection `discovery` (config/queue.php): same `jobs` table, retry_after 960 > the 900 s job timeout,
+#    so a still-running paid run is never re-offered.
+#  - --tries=1: discovery spends provider money; a failed run is re-requested by a person, never retried.
+#  - ONE process: no Instances/template unit. Nationwide runs already refuse to overlap in the controller.
+#  - KillMode=mixed + TimeoutStopSec above the job timeout: `systemctl stop/restart` sends SIGTERM to the
+#    PHP worker ONLY (not to the Python engine child it is running), queue:work finishes the current job and
+#    exits; anything still alive after 960 s is killed. The default control-group mode would SIGTERM the
+#    engine mid-sweep.
+#  - PATH/HOME: artisan as www-data with a throwaway HOME, same as vss-queue.
+[Unit]
+Description=Vite SEO Systems discovery worker (Laravel, queue "discovery", system.viteseo.ph)
+After=network.target mariadb.service
+
+[Service]
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/vsp-releaseN/backend
+Environment=HOME=/tmp
+ExecStart=/usr/bin/php8.4 artisan queue:work discovery --queue=discovery --tries=1 --timeout=900 --sleep=3 --max-time=3600 --memory=512
+Restart=always
+RestartSec=5
+KillSignal=SIGTERM
+KillMode=mixed
+TimeoutStopSec=960
+
+[Install]
+WantedBy=multi-user.target

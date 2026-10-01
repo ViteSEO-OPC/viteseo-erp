@@ -9,14 +9,28 @@ use App\Modules\Crm\Controllers\AutomationConversationController;
 use App\Modules\Crm\Controllers\AutomationEmailController;
 use App\Modules\Crm\Controllers\BusinessRuleController;
 use App\Modules\Crm\Controllers\CallController;
+use App\Modules\Crm\Controllers\CallSettingsController;
+use App\Modules\Crm\Controllers\CopilotController;
+use App\Modules\Crm\Controllers\CopilotSettingController;
+use App\Modules\Crm\Controllers\TwilioVoiceWebhookController;
+use App\Modules\Crm\Http\Middleware\ValidateTwilioSignature;
 use App\Modules\Crm\Controllers\ConversationController;
+use App\Modules\Crm\Controllers\ConversationDraftController;
 use App\Modules\Crm\Controllers\ConversationLeadController;
+use App\Modules\Crm\Controllers\ConversationMessageResolutionController;
 use App\Modules\Crm\Controllers\ConversationReplyController;
 use App\Modules\Crm\Controllers\DashboardController;
 use App\Modules\Crm\Controllers\DeliveryMonitorController;
 use App\Modules\Crm\Controllers\EmailController;
+use App\Modules\Crm\Controllers\EmailAssetController;
+use App\Modules\Crm\Controllers\EmailBrandingController;
+use App\Modules\Crm\Controllers\EmailDesignManagementController;
 use App\Modules\Crm\Controllers\EmailTemplateController;
+use App\Modules\Crm\Controllers\EmailTemplateManagementController;
+use App\Modules\Crm\Controllers\EmailTemplateOptionController;
 use App\Modules\Crm\Controllers\DiscoveryConfigController;
+use App\Modules\Crm\Controllers\DiscoveryKnownPlacesController;
+use App\Modules\Crm\Controllers\DiscoveryRunController;
 use App\Modules\Crm\Controllers\GmailOAuthController;
 use App\Modules\Crm\Controllers\MetaConnectController;
 use App\Modules\Crm\Controllers\NerbyProviderSettingController;
@@ -38,6 +52,8 @@ use App\Modules\Crm\Controllers\UserController;
 use App\Modules\Crm\Controllers\WebsiteEnrichmentController;
 use App\Modules\Crm\Controllers\WebsiteEvidenceController;
 use App\Modules\Crm\Http\Middleware\EnsureCrmAccessIsActive;
+use App\Modules\Crm\Http\Middleware\EnsureNerbyServiceCaller;
+use App\Modules\Crm\Http\Middleware\ThrottleDiscoveryCallbacks;
 use App\Modules\Crm\Http\Middleware\EnsureCrmIntegrationAccount;
 use App\Modules\Crm\Http\Middleware\EnsurePerformanceManagement;
 use App\Modules\Crm\Models\Lead;
@@ -54,6 +70,13 @@ Route::prefix('v1/crm')->group(function (): void {
     // NOTE: there is deliberately no public inbound webhook. Inbound email is pulled by the
     // scheduled `outreach:sync` poll, so the CRM exposes no unauthenticated endpoint for it and
     // needs no Pub/Sub push subscription, OIDC verification, or public HTTPS callback.
+
+    // The ONE unauthenticated CRM route: an email asset's PNG, for email clients, which fetch images
+    // anonymously and long after sending. Read-only, PNG only, by a random UUID that is the asset's whole
+    // identity; the URL never expires. See EmailAssetController for the response headers.
+    Route::get('/email-assets/{uuid}.png', [EmailAssetController::class, 'show'])
+        ->where('uuid', '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}')
+        ->middleware('throttle:600,1');
 
     // EnsureCrmAccessIsActive covers EVERY route below: CRM suspension is enforced per-request
     // (403 + `crm_access_suspended`), never by revoking the shared Sanctum token, which also signs the
@@ -88,6 +111,15 @@ Route::middleware(['auth:sanctum', 'set-current-org', 'subscription-active', 'fe
         Route::post('/me/photo', [ProfilePhotoController::class, 'store'])->middleware('throttle:10,1');
         Route::delete('/me/photo', [ProfilePhotoController::class, 'destroy']);
 
+        // The Copilot's OPTIONAL AI fallback (config `copilot.ai.enabled`, off by default). Read-only:
+        // it answers from the caller's own aggregate lead figures or declines, and never acts.
+        Route::post('/copilot/ask', [CopilotController::class, 'ask'])
+            ->middleware(['role:super_admin|crm_admin|crm_bd', 'throttle:20,1']);
+        // Whether the Copilot may offer a question to AI at all: one boolean, read by every CRM role.
+        // Changing it is the Super Admin's `settings/integrations/copilot` below.
+        Route::get('/copilot/config', [CopilotController::class, 'config'])
+            ->middleware('role:super_admin|crm_admin|crm_bd');
+
         // Generic, reusable activity feed (append-only Activity log). Powers Dashboard Recent
         // Activity now; reusable for the Activity Logs page, notifications, and future consumers.
         Route::get('/activities', [ActivityController::class, 'index']);
@@ -115,7 +147,13 @@ Route::middleware(['auth:sanctum', 'set-current-org', 'subscription-active', 'fe
         // ownership-scoped dataset as the list, so the tabs can never disagree with the table.
         // Declared before the /leads/{lead} wildcards, like priority-summary above.
         Route::get('/leads/status-summary', [LeadController::class, 'statusSummary'])->can('viewAny', Lead::class);
-        Route::post('/leads/import', [LeadController::class, 'import'])->can('import', Lead::class);
+        // Import starts are rate-limited per user (CEO audit crm-06): every preview and every commit is a
+        // full parse of the uploaded file, and a commit writes the whole sheet in one transaction. The
+        // `crm-lead-import:` prefix gives this route its own bucket, so it never shares a counter with
+        // any other CRM throttle. Status polling and discovered-lead ingest below stay unthrottled.
+        Route::post('/leads/import', [LeadController::class, 'import'])
+            ->middleware('throttle:10,1,crm-lead-import:')
+            ->can('import', Lead::class);
 
         // Poll a queued `.xls` conversion. Same `import` ability as the upload — no new permission
         // surface; ownership is enforced per-record in XlsImportJobStore (foreign job => 404).
@@ -123,12 +161,19 @@ Route::middleware(['auth:sanctum', 'set-current-org', 'subscription-active', 'fe
             ->can('import', Lead::class);
         // Programmatic enrichment ingest — a discovery provider (Python Scraper) submits normalized
         // discovered businesses as JSON. Same `import` permission; lands fit-data only, assigns no owner.
-        Route::post('/leads/discovered', [LeadController::class, 'ingestDiscovered'])->can('import', Lead::class);
+        //
+        // MACHINE-ONLY (EnsureNerbyServiceCaller): `crm.leads.import` alone let every BD post invented
+        // prospects and forge Website Intelligence findings. These are the scraper's write callbacks;
+        // no screen calls them, and human imports keep their own routes above.
+        Route::post('/leads/discovered', [LeadController::class, 'ingestDiscovered'])->can('import', Lead::class)
+            ->middleware(EnsureNerbyServiceCaller::class);
         // Website Intelligence — audit provider (Scrapy). `queue` lists businesses with a website to
         // audit; `website-enrichment` records the audit findings (1:1) + derives website_status. Strict
         // data provider (same `import` permission); never touches Lead Status / score / ownership.
-        Route::get('/website-enrichment/queue', [WebsiteEnrichmentController::class, 'queue'])->can('import', Lead::class);
-        Route::put('/leads/{lead}/website-enrichment', [WebsiteEnrichmentController::class, 'update'])->can('import', Lead::class);
+        Route::get('/website-enrichment/queue', [WebsiteEnrichmentController::class, 'queue'])->can('import', Lead::class)
+            ->middleware(EnsureNerbyServiceCaller::class);
+        Route::put('/leads/{lead}/website-enrichment', [WebsiteEnrichmentController::class, 'update'])->can('import', Lead::class)
+            ->middleware(EnsureNerbyServiceCaller::class);
 
         // Nearby discovery provider — the scraper's window onto the configuration an admin chose in
         // Settings → Integrations. Same `import` permission as the two providers above, because it is
@@ -164,23 +209,86 @@ Route::middleware(['auth:sanctum', 'set-current-org', 'subscription-active', 'fe
         // still cannot produce it and is untouched. Guarded by the lead policy rather than a role, so
         // a BD acts on leads they can already see; `confirmAbsence` additionally requires `update`,
         // since it changes a field on the lead.
-        Route::get('/website-evidence/queue', [WebsiteEvidenceController::class, 'queue'])->can('import', Lead::class);
-        Route::post('/leads/{lead}/website-candidates', [WebsiteEvidenceController::class, 'storeCandidates'])->can('import', Lead::class);
-        Route::put('/leads/{lead}/website-candidates/{candidate}', [WebsiteEvidenceController::class, 'verifyCandidate'])->can('import', Lead::class);
+        Route::get('/website-evidence/queue', [WebsiteEvidenceController::class, 'queue'])->can('import', Lead::class)
+            ->middleware(EnsureNerbyServiceCaller::class);
+        Route::post('/leads/{lead}/website-candidates', [WebsiteEvidenceController::class, 'storeCandidates'])->can('import', Lead::class)
+            ->middleware(EnsureNerbyServiceCaller::class);
+        Route::put('/leads/{lead}/website-candidates/{candidate}', [WebsiteEvidenceController::class, 'verifyCandidate'])->can('import', Lead::class)
+            ->middleware(EnsureNerbyServiceCaller::class);
         Route::get('/leads/{lead}/website-evidence', [WebsiteEvidenceController::class, 'show'])->can('viewWebsiteEvidence', 'lead');
         Route::post('/leads/{lead}/website-absence', [WebsiteEvidenceController::class, 'confirmAbsence'])->can('confirmWebsiteAbsence', 'lead');
 
-        Route::get('/discovery/config', [DiscoveryConfigController::class, 'config'])->can('import', Lead::class);
+        // Throttled like its siblings, though it spends nothing itself: the Nearby board now reads it
+        // on every load to choose its map, so it went from an occasional scraper call to a
+        // per-page-view request. A cheap read is still a read worth bounding. Deliberately looser than
+        // the paid endpoints' 30/min — this one is expected to be called by every BD viewing the board.
+        Route::get('/discovery/config', [DiscoveryConfigController::class, 'config'])
+            ->can('import', Lead::class)
+            ->middleware(ThrottleDiscoveryCallbacks::class.':60,1');
+        // `nerby_service` below: the scraper's least-privilege service identity (org-bound, short-lived
+        // tokens confined to these callbacks — see NerbyServiceIdentity). Human access is unchanged.
+        // ThrottleDiscoveryCallbacks is `throttle:N,1` for humans, byte for byte; the service identity is
+        // counted per RUN TOKEN instead, so concurrent runs and tenants never share one counter (H-4).
         Route::post('/discovery/proposals', [DiscoveryConfigController::class, 'proposals'])
             ->can('import', Lead::class)
-            ->middleware(['role:super_admin|crm_admin', 'throttle:30,1']);
+            ->middleware(['role:super_admin|crm_admin|nerby_service', ThrottleDiscoveryCallbacks::class.':30,1']);
         // Search STRATEGY, not business records: which OSM tags a category can hide under. Same
         // guard and throttle as `proposals` because it reaches the same paid provider — though the
         // answer is cached per category forever, so a healthy deployment calls it a handful of times
         // in total.
         Route::post('/discovery/tag-expansions', [DiscoveryConfigController::class, 'tagExpansions'])
             ->can('import', Lead::class)
-            ->middleware(['role:super_admin|crm_admin', 'throttle:30,1']);
+            ->middleware(['role:super_admin|crm_admin|nerby_service', ThrottleDiscoveryCallbacks::class.':30,1']);
+        // Google Places (API New) Text Search, made server-side with the encrypted key. Same guard and
+        // throttle as `proposals`, because it reaches a paid provider.
+        Route::post('/discovery/places', [DiscoveryConfigController::class, 'places'])
+            ->can('import', Lead::class)
+            ->middleware(['role:super_admin|crm_admin|nerby_service', ThrottleDiscoveryCallbacks::class.':30,1']);
+        // HOW to search, for whichever provider is executing — selectors, query phrases, place types
+        // and sub-areas. Same guard and throttle as the other paid capabilities; unlike them it is
+        // NOT gated on the effective provider, because strategy is useful to all of them.
+        Route::post('/discovery/strategy', [DiscoveryConfigController::class, 'strategy'])
+            ->can('import', Lead::class)
+            ->middleware(['role:super_admin|crm_admin|nerby_service', ThrottleDiscoveryCallbacks::class.':30,1']);
+        // VOLUME MODE's pre-filter: which of a cell's OSM keys this org already holds. Machine-only, like
+        // the ingest it sits in front of; spends nothing, so it gets the looser read bound. The ingest
+        // still deduplicates on its own — this only saves the engine geocoding what the CRM has.
+        Route::post('/discovery/known-places', DiscoveryKnownPlacesController::class)
+            ->can('import', Lead::class)
+            ->middleware([EnsureNerbyServiceCaller::class, ThrottleDiscoveryCallbacks::class.':60,1']);
+
+        // ── On-demand discovery runs ────────────────────────────────────────────────────────────
+        // ADDITIVE. The prospect pool (`GET /nearby-clients` below) and the curated rotation
+        // (`discover-all` over discovery-targets.json) are untouched and remain the default
+        // behaviour; these four routes are the only way to start a FRESH discovery run, and nothing
+        // starts one implicitly. Changing a filter on the board reaches none of them.
+        //
+        // THE GATE IS COPIED, NOT INVENTED. Identical to the paid capabilities directly above —
+        // `can('import', Lead::class)` plus `role:super_admin|crm_admin` — for the identical
+        // documented reason: `crm.leads.import` is deliberately held by Business Development
+        // managers for their own spreadsheet imports, so the permission alone would let any BD run
+        // up a provider bill. No existing role, policy, permission or middleware is added to,
+        // weakened or modified by this feature.
+        //
+        // Starting a run is throttled harder than its siblings and in its own bucket: one click can
+        // schedule many provider searches, so the expensive verb is bounded more tightly than the
+        // cheap reads that follow it.
+        Route::post('/discovery/runs', [DiscoveryRunController::class, 'store'])
+            ->can('import', Lead::class)
+            ->middleware(['role:super_admin|crm_admin', 'throttle:10,1,crm-discovery-run:']);
+        // Polling must stay responsive for the whole life of a run, so the reads keep the looser
+        // 60/min bound rather than the start verb's 10/min.
+        Route::get('/discovery/runs', [DiscoveryRunController::class, 'index'])
+            ->can('import', Lead::class)
+            ->middleware(['role:super_admin|crm_admin', 'throttle:60,1']);
+        Route::get('/discovery/runs/{discoveryRun}', [DiscoveryRunController::class, 'show'])
+            ->can('import', Lead::class)
+            ->middleware(['role:super_admin|crm_admin', 'throttle:60,1']);
+        // Stops the NEXT search. It cannot refund a provider call already made, and everything
+        // already discovered stays in the CRM — the controller says so in its response.
+        Route::post('/discovery/runs/{discoveryRun}/cancel', [DiscoveryRunController::class, 'cancel'])
+            ->can('import', Lead::class)
+            ->middleware(['role:super_admin|crm_admin', 'throttle:60,1']);
         Route::get('/leads/{lead}/activities', [LeadController::class, 'activities'])->can('view', 'lead');
         // One lead as a PDF profile. Authorized by `view` on the lead — the same ownership boundary as
         // reading it — so a BD can export their own leads and nobody can export a lead they cannot see.
@@ -381,6 +489,39 @@ Route::middleware(['auth:sanctum', 'set-current-org', 'subscription-active', 'fe
             ->middleware(['permission:crm.conversations.reply', 'throttle:10,1']);
 
         /*
+         * Phase 3H.5A — an operator's verdict on an outbound message whose delivery nobody could
+         * confirm: `{"outcome": "sent" | "not_sent"}`. It never calls a provider and never re-sends.
+         *
+         * Reply authority, because confirming what the business said to a customer belongs to the
+         * people allowed to say it — plus conversation view, because the response carries the
+         * message, and reply authority alone must not become a way to read threads.
+         *
+         * `scopeBindings()` resolves `{message}` through the conversation's own `messages()`, so a
+         * message from another thread is a 404 at binding time.
+         */
+        Route::post('/conversations/{conversation}/messages/{message}/resolution', [ConversationMessageResolutionController::class, 'store'])
+            ->middleware(['permission:crm.conversations.view', 'permission:crm.conversations.reply', 'throttle:10,1'])
+            ->scopeBindings();
+
+        /*
+         * Phase 4A-lite — an AI-written DRAFT reply for the agent to review, edit and send through
+         * the reply route above. It NEVER sends: no provider call, no message row, no credential.
+         *
+         * View + reply, the same pair as the resolution route: the model reads the thread, and the
+         * draft is text meant to be spoken for the business.
+         *
+         * `throttle:5,1` with its OWN key prefix. A bare numeric throttle keys on the user alone, so
+         * without a prefix drafting and replying would share one counter and five drafts would lock
+         * the agent out of sending.
+         */
+        Route::post('/conversations/{conversation}/draft', [ConversationDraftController::class, 'store'])
+            ->middleware([
+                'permission:crm.conversations.view',
+                'permission:crm.conversations.reply',
+                'throttle:5,1,crm-conversation-draft:',
+            ]);
+
+        /*
          * Phase 3H.3A — attaching a thread to a CRM lead by hand. LINK ONLY: NULL → lead. Relinking
          * to a different lead is refused with a 409, and unlinking is not implemented.
          *
@@ -484,6 +625,12 @@ Route::middleware(['auth:sanctum', 'set-current-org', 'subscription-active', 'fe
         Route::get('/leads/{lead}/attachments/{attachment}/preview', [LeadAttachmentController::class, 'preview'])
             ->scopeBindings()
             ->can('view', 'lead');
+        // DOC/DOCX/PPT/PPTX rendered to PDF by the private conversion service and streamed inline. Same
+        // content in yet another shape, so again the SAME authorization as download — never weaker.
+        // The generated PDF is cached on the private disk and has no URL of its own.
+        Route::get('/leads/{lead}/attachments/{attachment}/document-preview', [LeadAttachmentController::class, 'documentPreview'])
+            ->scopeBindings()
+            ->can('view', 'lead');
         Route::delete('/leads/{lead}/attachments/{attachment}', [LeadAttachmentController::class, 'destroy'])
             ->scopeBindings()
             ->can('delete', 'attachment');
@@ -515,6 +662,20 @@ Route::middleware(['auth:sanctum', 'set-current-org', 'subscription-active', 'fe
         Route::post('/planner-events/{plannerEvent}/calls', [CallController::class, 'storeForEvent'])
             ->middleware('permission:crm.calls.log')
             ->can('view', 'plannerEvent');
+        // What this deployment's calling can do, for this lead — drives which controls the Call panel
+        // renders. Read-only and gated like Call History.
+        Route::get('/leads/{lead}/calling-capability', [CallController::class, 'capability'])
+            ->middleware('permission:crm.calls.view')
+            ->can('view', 'lead');
+        // A short-lived browser credential for an open call. Authorized exactly like concluding one,
+        // because being allowed to place the call is the same right as being allowed to log it.
+        // Throttled per authenticated user (user ids are platform-wide, so this is already
+        // tenant-safe): 10 a minute is far above any honest retry pattern, and each token is a live
+        // credential on the centralized Twilio account. Manual calling and the Twilio webhooks are
+        // deliberately NOT throttled.
+        Route::post('/calls/{call}/token', [CallController::class, 'token'])
+            ->can('update', 'call')
+            ->middleware('throttle:10,1,crm-call-token:');
         Route::patch('/calls/{call}/complete', [CallController::class, 'complete'])->can('update', 'call');
         Route::patch('/calls/{call}/discard', [CallController::class, 'discard'])->can('update', 'call');
 
@@ -620,6 +781,63 @@ Route::middleware(['auth:sanctum', 'set-current-org', 'subscription-active', 'fe
                 Route::delete('/{performanceTarget}', [PerformanceTargetController::class, 'destroy']);
             });
 
+        // Settings → Email Templates: manage the templates the Outreach composer and the n8n automation
+        // endpoint read. Org configuration, so management roles only, like Archive and Team. The composer's
+        // read route above (GET /leads/{lead}/email-templates) and the automation send route are unchanged;
+        // EmailTemplateManagementService keeps an admin from leaving an automation purpose with no template.
+        // `preview` renders unsaved template content in a design through the same EmailDesignRenderer the send
+        // path uses and writes no template; it is throttled because the designer calls it as the admin edits.
+        Route::middleware('role:super_admin|crm_admin')
+            ->prefix('settings/email-templates')
+            ->group(function () {
+                Route::get('/', [EmailTemplateManagementController::class, 'index']);
+                Route::post('/preview', [EmailTemplateManagementController::class, 'preview'])->middleware('throttle:60,1');
+                Route::post('/', [EmailTemplateManagementController::class, 'store']);
+                Route::patch('/{emailTemplate}', [EmailTemplateManagementController::class, 'update'])->whereNumber('emailTemplate');
+                Route::delete('/{emailTemplate}', [EmailTemplateManagementController::class, 'destroy'])->whereNumber('emailTemplate');
+            });
+
+        // Settings → Email Templates → custom purposes and tones: this organization's own additions to the catalog,
+        // reusable by any of its templates. Same management roles. EmailTemplateOptionService refuses a value that
+        // would equal a built-in purpose, tone or automation key however spelled — which is what lets the composer's
+        // purpose allowlist include custom purposes without ever reaching an automation template — and refuses to
+        // delete a value a template still uses.
+        Route::middleware('role:super_admin|crm_admin')
+            ->prefix('settings/email-template-options')
+            ->group(function () {
+                Route::get('/', [EmailTemplateOptionController::class, 'index']);
+                Route::post('/', [EmailTemplateOptionController::class, 'store'])->middleware('throttle:60,1');
+                Route::delete('/{emailTemplateOption}', [EmailTemplateOptionController::class, 'destroy'])->whereNumber('emailTemplateOption');
+            });
+
+        // Settings → Email Designs: the reusable looks designed templates are shown in. Same management roles
+        // as Email Templates. EmailDesignService creates each org's default design on first use, refuses to
+        // delete the default or a design in use, and regenerates the plain-text bodies of the templates a
+        // layout change reaches. `preview` renders an unsaved layout with sample content and writes nothing.
+        Route::middleware('role:super_admin|crm_admin')
+            ->prefix('settings/email-designs')
+            ->group(function () {
+                Route::get('/', [EmailDesignManagementController::class, 'index']);
+                Route::get('/apply-to-all-summary', [EmailDesignManagementController::class, 'applyToAllSummary']);
+                Route::post('/preview', [EmailDesignManagementController::class, 'preview'])->middleware('throttle:60,1');
+                Route::post('/', [EmailDesignManagementController::class, 'store']);
+                Route::patch('/{emailDesign}', [EmailDesignManagementController::class, 'update'])->whereNumber('emailDesign');
+                Route::delete('/{emailDesign}', [EmailDesignManagementController::class, 'destroy'])->whereNumber('emailDesign');
+            });
+
+        // Settings → Email Designs → Organization logo: the organization's email branding. Same management roles.
+        // An upload is checked (`inspect`, which stores nothing — for an SVG it returns the sanitized version to
+        // crop), then stored as a new immutable email asset the branding points at; every design's logo block
+        // shows it. Throttled: an upload decodes and writes files.
+        Route::middleware('role:super_admin|crm_admin')
+            ->prefix('settings/email-branding')
+            ->group(function () {
+                Route::get('/', [EmailBrandingController::class, 'show']);
+                Route::post('/logo/inspect', [EmailBrandingController::class, 'inspectLogo'])->middleware('throttle:30,1');
+                Route::post('/logo', [EmailBrandingController::class, 'uploadLogo'])->middleware('throttle:20,1');
+                Route::delete('/logo', [EmailBrandingController::class, 'removeLogo']);
+            });
+
         // `kpi` joins the enabled modules: the KPI definition catalog (M-01…M-06) is managed through
         // the SAME Business Rules surface rather than a second CRUD implementation. Its WRITES also
         // require `crm.performance.manage` (see below), while lead_scoring keeps its existing
@@ -674,6 +892,32 @@ Route::middleware(['auth:sanctum', 'set-current-org', 'subscription-active', 'fe
             Route::get('/settings/integrations/gmail', [GmailOAuthController::class, 'show']);
             Route::delete('/settings/integrations/gmail', [GmailOAuthController::class, 'destroy']);
             Route::post('/settings/integrations/gmail/authorization', [GmailOAuthController::class, 'store']);
+
+            // Settings → Integrations → Calling: the client's OWN Twilio account, which turns on
+            // browser calling for this organization.
+            //
+            // `crm_admin` is allowed here, unlike the Nearby routes below. That is the documented
+            // distinction, not an oversight: Nearby holds ViteSEO's centrally-bought API keys and is
+            // therefore super-admin only, while these credentials belong to the client, are billed to
+            // the client, and are stored per organization in `crm_call_provider_settings`. The Nearby
+            // comment below states the rule for exactly this case — a table a client brings its own
+            // key to needs org_id and the crm_admin gate.
+            //
+            // GET returns identifiers, secret PRESENCE (last 4 characters only) and what is actually
+            // in force — never an Auth Token, never an API Secret, never ciphertext, never a length.
+            //
+            // PUT treats both secrets as write-only: omitting one keeps the stored value, so
+            // correcting a caller ID never sends a live secret through a browser again. Clearing them
+            // is the separate DELETE, because a blank field usually means "I didn't retype it".
+            //
+            // POST .../test verifies the stored credentials with read-only Twilio REST lookups and
+            // records a status code. It NEVER places a call. Throttled, because it reaches a third
+            // party on a button press.
+            Route::get('/settings/integrations/calling', [CallSettingsController::class, 'show']);
+            Route::put('/settings/integrations/calling', [CallSettingsController::class, 'update']);
+            Route::delete('/settings/integrations/calling/credentials', [CallSettingsController::class, 'destroyCredentials']);
+            Route::post('/settings/integrations/calling/test', [CallSettingsController::class, 'test'])
+                ->middleware('throttle:10,1');
 
             /*
              * Settings → Integrations → Meta. Same role gate as Gmail above, and for the same
@@ -759,7 +1003,49 @@ Route::middleware(['auth:sanctum', 'set-current-org', 'subscription-active', 'fe
                 Route::delete('/settings/integrations/nerby/providers/{provider}/credential', [NerbyProviderSettingController::class, 'destroyCredential']);
                 Route::post('/settings/integrations/nerby/providers/{provider}/test', [NerbyProviderSettingController::class, 'test'])
                     ->middleware('throttle:10,1');
+
+                // Settings → Integrations → Copilot AI: whether the Copilot may use AI. Here, not with
+                // Gmail/Calling, for the same reason as Nearby: the AI it switches on spends Vite SEO's
+                // own credit (the NERBY OpenAI credential, read and never written), so it is one global
+                // row in `crm_copilot_settings` and a platform decision. CRM users read only the
+                // boolean at GET /copilot/config.
+                Route::get('/settings/integrations/copilot', [CopilotSettingController::class, 'show']);
+                Route::put('/settings/integrations/copilot', [CopilotSettingController::class, 'update']);
             });
         });
     });
+});
+
+/*
+|--------------------------------------------------------------------------
+| Twilio Voice webhooks — the ONE unauthenticated CRM surface
+|--------------------------------------------------------------------------
+|
+| Mounted OUTSIDE the authenticated group above, and outside `set-current-org`,
+| `subscription-active`, `feature:crm` and `EnsureCrmAccessIsActive`. That is a
+| deliberate, narrow exception to the note at the top of this file, and it exists
+| because Twilio calls us from the internet with no user, no token and no tenant:
+| there is no credential it could present to any of those gates.
+|
+| Two independent checks replace them, and BOTH must pass:
+|
+|   1. ValidateTwilioSignature  — the official Twilio SDK's RequestValidator proves
+|                                 the request really came from Twilio. Anything
+|                                 unsigned or mis-signed is refused 403.
+|   2. CallCorrelation          — an HMAC token, minted earlier by an AUTHENTICATED
+|                                 request that passed CallPolicy, names the single
+|                                 crm_calls row this webhook may touch. No id from
+|                                 the request body is ever dereferenced.
+|
+| The org is then read from that row's existing relationships. No tenant is
+| resolved here and multi-tenancy is untouched.
+|
+| These routes are inert unless Twilio is configured: the middleware refuses with
+| 503 when credentials are absent, which is every deployment running the free
+| manual mode.
+|
+*/
+Route::prefix('v1/twilio')->middleware(ValidateTwilioSignature::class)->group(function (): void {
+    Route::post('/voice', [TwilioVoiceWebhookController::class, 'voice']);
+    Route::post('/voice/completed', [TwilioVoiceWebhookController::class, 'completed']);
 });

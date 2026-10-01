@@ -12,6 +12,7 @@ use App\Modules\Crm\Services\WebsiteIdentityVerifier;
 use Database\Seeders\RolesAndPermissionsSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
+use Tests\Concerns\ActsAsNerbyService;
 use Tests\TestCase;
 
 /**
@@ -31,6 +32,7 @@ use Tests\TestCase;
  */
 class WebsiteEvidenceChainTest extends TestCase
 {
+    use ActsAsNerbyService;
     use RefreshDatabase;
 
     protected function setUp(): void
@@ -103,7 +105,7 @@ class WebsiteEvidenceChainTest extends TestCase
 
     public function test_the_queue_offers_discovered_leads_that_have_no_url(): void
     {
-        Sanctum::actingAs($this->user('crm_admin'));
+        $this->actingAsNerbyService();
         $lead = $this->discoveredLead();
 
         $this->getJson('/api/v1/crm/website-evidence/queue')->assertOk()
@@ -111,11 +113,45 @@ class WebsiteEvidenceChainTest extends TestCase
             ->assertJsonPath('data.0.business', 'Vigan Dental Care');
     }
 
+    public function test_the_queue_carries_the_coordinates_tier_0_needs_to_find_an_osm_element(): void
+    {
+        // WHY THE QUEUE SENDS A POSITION. Tier 0 reads an OSM element and finds it by id. A Google
+        // lead's `places/ChIJ…` is not an OSM id and cannot be converted into one, so for that entire
+        // pool Tier 0 had nowhere to look, `tiers_run` was honestly empty forever, and the lead could
+        // never reach a genuine exhaustion however absent its website really was. Coordinates are the
+        // other way to reach the same element — already captured at ingest, sent here so the tier has
+        // somewhere to look.
+        $this->actingAsNerbyService();
+        $lead = $this->discoveredLead();
+        $lead->update([
+            'place_id' => 'places/ChIJ_anF5hvJlzMR9ku',
+            'latitude' => 14.5995,
+            'longitude' => 120.9842,
+        ]);
+
+        $this->getJson('/api/v1/crm/website-evidence/queue')->assertOk()
+            ->assertJsonPath('data.0.placeId', 'places/ChIJ_anF5hvJlzMR9ku')
+            ->assertJsonPath('data.0.latitude', 14.5995)
+            ->assertJsonPath('data.0.longitude', 120.9842);
+    }
+
+    public function test_a_lead_without_coordinates_is_still_queued_with_nulls(): void
+    {
+        // Absence of a position is not a reason to withhold the lead: the probe tier does not need
+        // one, and the resolver simply cannot match it. It must not become a null-pointer either.
+        $this->actingAsNerbyService();
+        $this->discoveredLead()->update(['latitude' => null, 'longitude' => null]);
+
+        $this->getJson('/api/v1/crm/website-evidence/queue')->assertOk()
+            ->assertJsonPath('data.0.latitude', null)
+            ->assertJsonPath('data.0.longitude', null);
+    }
+
     public function test_a_lead_that_already_has_a_url_is_not_queued(): void
     {
         // It has a URL, so the ORDINARY audit owns it. Searching for a website it already has would
         // be wasted spend.
-        Sanctum::actingAs($this->user('crm_admin'));
+        $this->actingAsNerbyService();
         $this->discoveredLead()->update(['website' => 'https://example.ph']);
 
         $this->getJson('/api/v1/crm/website-evidence/queue')->assertOk()->assertJsonCount(0, 'data');
@@ -123,7 +159,7 @@ class WebsiteEvidenceChainTest extends TestCase
 
     public function test_an_exhausted_lead_leaves_the_queue(): void
     {
-        Sanctum::actingAs($this->user('crm_admin'));
+        $this->actingAsNerbyService();
         $lead = $this->discoveredLead();
         $this->service()->recordCandidates($lead, [], WebsiteEvidenceService::REQUIRED_TIERS);
         $this->service()->markExhausted($lead);
@@ -135,7 +171,7 @@ class WebsiteEvidenceChainTest extends TestCase
 
     public function test_candidates_are_recorded_with_their_provenance(): void
     {
-        Sanctum::actingAs($this->user('crm_admin'));
+        $this->actingAsNerbyService();
         $lead = $this->discoveredLead();
 
         $this->postJson("/api/v1/crm/leads/{$lead->id}/website-candidates", [
@@ -155,7 +191,7 @@ class WebsiteEvidenceChainTest extends TestCase
     {
         // "We ran Wikidata and it had nothing" is a fact worth keeping. An empty submission that
         // recorded nothing would be indistinguishable from never having looked.
-        Sanctum::actingAs($this->user('crm_admin'));
+        $this->actingAsNerbyService();
         $lead = $this->discoveredLead();
 
         $this->postJson("/api/v1/crm/leads/{$lead->id}/website-candidates", [
@@ -207,7 +243,7 @@ class WebsiteEvidenceChainTest extends TestCase
 
     public function test_a_strong_candidate_is_verified(): void
     {
-        Sanctum::actingAs($this->user('crm_admin'));
+        $this->actingAsNerbyService();
         $lead = $this->discoveredLead();
         $this->service()->recordCandidates($lead, [
             ['url' => 'https://vigandentalcare.ph', 'source' => 'wikidata'],
@@ -436,7 +472,7 @@ class WebsiteEvidenceChainTest extends TestCase
 
     public function test_a_candidate_cannot_be_verified_against_a_different_lead(): void
     {
-        Sanctum::actingAs($this->user('crm_admin'));
+        $this->actingAsNerbyService();
         $lead = $this->discoveredLead();
         $other = $this->discoveredLead();
         $this->service()->recordCandidates($other, [
@@ -523,7 +559,7 @@ class WebsiteEvidenceChainTest extends TestCase
         // cannot notice that this lead was answered. Nothing else would take it out either: exhaustion
         // is refused while a candidate is verified. Without an explicit exclusion it would be searched
         // again on every run, forever, ahead of leads nobody has looked at yet.
-        Sanctum::actingAs($this->user('crm_admin'));
+        $this->actingAsNerbyService(); // the queues are the discovery service's (machine-only)
         $solved = $this->discoveredLead();
         $unsolved = $this->discoveredLead();
 
@@ -837,8 +873,7 @@ class WebsiteEvidenceChainTest extends TestCase
     {
         // BEFORE: in the evidence queue, absent from the audit queue.
         // AFTER:  the reverse. That routing is what the seam broke and this restores.
-        $bd = $this->user('crm_bd');
-        Sanctum::actingAs($bd);
+        $this->actingAsNerbyService(); // the queues are the discovery service's (machine-only)
         $lead = $this->discoveredLead();
 
         $this->assertContains((string) $lead->id, $this->evidenceQueueIds());
@@ -856,8 +891,7 @@ class WebsiteEvidenceChainTest extends TestCase
 
     public function test_a_lead_with_no_verified_candidate_stays_in_the_evidence_path(): void
     {
-        $bd = $this->user('crm_bd');
-        Sanctum::actingAs($bd);
+        $this->actingAsNerbyService(); // the queues are the discovery service's (machine-only)
         $lead = $this->discoveredLead();
 
         $this->service()->recordCandidates($lead, [

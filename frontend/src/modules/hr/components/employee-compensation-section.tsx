@@ -20,16 +20,24 @@ import {
   type FieldSpec,
 } from "@/modules/hr/components/record-fields";
 import {
+  numberOrNull,
   optionalChoice,
+  optionalMoney,
   optionalText,
   orNull,
   requiredMoney,
 } from "@/modules/hr/lib/employee-validation";
+import { useInternAllowanceSettings } from "@/modules/hr/hooks/use-intern-allowance";
+import {
+  internAllowanceUnit,
+  internDefaultAmount,
+} from "@/modules/hr/lib/intern-allowance-options";
 import { useRecordSection } from "@/modules/hr/lib/use-record-section";
 import { ContributionEnrolmentBlock } from "@/modules/hr/components/contribution-enrolment-block";
 import { EmployeeAllowancesBlock } from "@/modules/hr/components/employee-allowances-block";
 import { MyAllowancesBlock } from "@/modules/hr/components/my-allowances-block";
 import { MinimumWageBlock } from "@/modules/hr/components/minimum-wage-block";
+import { MAX_OTHER_IDS, OtherIdsFields } from "@/modules/hr/components/other-ids-fields";
 import {
   BANK_ACCOUNT_TYPES,
   PAY_FREQUENCIES,
@@ -43,6 +51,10 @@ const PAY_FREQUENCY_VALUES = PAY_FREQUENCIES.map((f) => f.value);
 
 const schema = z.object({
   base_salary: requiredMoney("Base salary"),
+  // An intern's own allowance; blank reads the company default (Company → Intern Allowance).
+  allowance_amount: optionalMoney("Allowance"),
+  // Not a field — says whether the allowance is this record's to send at all.
+  is_intern: z.boolean(),
   pay_frequency: optionalChoice(PAY_FREQUENCY_VALUES, "Pay frequency"),
   currency: z
     .string()
@@ -56,6 +68,16 @@ const schema = z.object({
   sss_number: optionalText(32),
   philhealth_number: optionalText(32),
   pagibig_number: optionalText(32),
+  // Both halves of every row are required — the API refuses a half-typed entry, and an empty row
+  // the user added and changed their mind about is removed with its own button.
+  other_ids: z
+    .array(
+      z.object({
+        type: z.string().trim().min(1, "Enter the ID type"),
+        number: z.string().trim().min(1, "Enter the ID number"),
+      }),
+    )
+    .max(MAX_OTHER_IDS, `You can record at most ${MAX_OTHER_IDS} other IDs`),
   is_management: z.boolean(),
   // Out of the minimum-wage check, with the reason on the record. The server requires
   // the reason when the flag is set; asked for here so it is never a silent exemption.
@@ -74,6 +96,8 @@ type Values = z.infer<typeof schema>;
 function toValues(employee: Employee): Values {
   return {
     base_salary: String(parseFloat(employee.base_salary)),
+    allowance_amount: employee.allowance_amount != null ? String(employee.allowance_amount) : "",
+    is_intern: employee.employment_status === "ojt",
     pay_frequency: employee.pay_frequency ?? "",
     currency: employee.currency ?? "",
     bank_name: employee.bank_name ?? "",
@@ -84,6 +108,7 @@ function toValues(employee: Employee): Values {
     sss_number: employee.sss_number ?? "",
     philhealth_number: employee.philhealth_number ?? "",
     pagibig_number: employee.pagibig_number ?? "",
+    other_ids: (employee.other_ids ?? []).map((row) => ({ type: row.type, number: row.number })),
     is_management: employee.is_management ?? false,
     minimum_wage_exempt: employee.minimum_wage_exempt ?? false,
     minimum_wage_exempt_reason: employee.minimum_wage_exempt_reason ?? "",
@@ -96,6 +121,9 @@ function toValues(employee: Employee): Values {
 function toPayload(v: Values): EmployeeUpdateInput {
   return {
     base_salary: Number(v.base_salary),
+    // Sent only for an intern: the API refuses an allowance on anyone else, and a converted intern
+    // keeps theirs on the record for the days before the conversion.
+    ...(v.is_intern ? { allowance_amount: numberOrNull(v.allowance_amount) } : {}),
     pay_frequency: orNull(v.pay_frequency),
     currency: orNull(v.currency)?.toUpperCase() ?? null,
     bank_name: orNull(v.bank_name),
@@ -107,6 +135,9 @@ function toPayload(v: Values): EmployeeUpdateInput {
     sss_number: orNull(v.sss_number),
     philhealth_number: orNull(v.philhealth_number),
     pagibig_number: orNull(v.pagibig_number),
+    other_ids: v.other_ids
+      .filter((row) => row.type.trim() !== "" || row.number.trim() !== "")
+      .map((row) => ({ type: row.type.trim(), number: row.number.trim() })),
     is_management: v.is_management,
     minimum_wage_exempt: v.minimum_wage_exempt,
     // Cleared server-side when the flag comes off, so a stale note can never sit on someone who is
@@ -159,17 +190,43 @@ export function EmployeeCompensationSection({
     },
   });
 
+  const isIntern = employee.employment_status === "ojt";
+  // HR-only endpoint: asked only when HR is looking at an intern.
+  const { data: internRules } = useInternAllowanceSettings(isHr && isIntern);
+  /*
+   * WHICH UNIT the allowance is quoted in lives behind that HR-only endpoint, so an intern reading
+   * their OWN record never has it. Say nothing rather than guess: defaulting to "per day" on a
+   * company that pays per hour or per month misstates a person's pay back to their face.
+   */
+  const allowanceUnit = internRules ? internAllowanceUnit(internRules.settings.method) : null;
+  const companyDefault = internRules ? internDefaultAmount(internRules.settings) : null;
+
   const salaryChanged =
     editing && Number(form.watch("base_salary")) !== parseFloat(employee.base_salary);
 
   const pay: FieldSpec<Values>[] = [
-    {
-      name: "base_salary",
-      label: "Base salary",
-      kind: "number",
-      placeholder: "45000",
-      display: `${formatPeso(employee.base_salary)} / mo`,
-    },
+    // An intern is paid an allowance, not a salary: the field is theirs to override the default.
+    isIntern
+      ? {
+          name: "allowance_amount",
+          label: allowanceUnit ? `Allowance (${allowanceUnit})` : "Allowance",
+          kind: "number",
+          placeholder: companyDefault != null ? String(companyDefault) : "Company default",
+          display:
+            employee.allowance_amount != null
+              ? [formatPeso(employee.allowance_amount), allowanceUnit].filter(Boolean).join(" ")
+              : companyDefault != null
+                ? `Company default — ${[formatPeso(companyDefault), allowanceUnit].filter(Boolean).join(" ")}`
+                : "Company default",
+          hint: "Leave blank to use the company default in Company → Intern Allowance.",
+        }
+      : {
+          name: "base_salary",
+          label: "Base salary",
+          kind: "number",
+          placeholder: "45000",
+          display: `${formatPeso(employee.base_salary)} / mo`,
+        },
     {
       name: "pay_frequency",
       label: "Pay frequency",
@@ -251,7 +308,8 @@ export function EmployeeCompensationSection({
          * monthly figure can see what it implies per day — which is the actual gap, not that HR
          * would knowingly underpay.
          */}
-        <MinimumWageBlock employee={employee} editing={editing} form={form} />
+        {/* An allowance is not a wage the minimum daily wage applies to. */}
+        {!isIntern && <MinimumWageBlock employee={employee} editing={editing} form={form} />}
 
         {/*
          * What replaces the three fixed allowance boxes B9 removed. Rendered from
@@ -277,7 +335,8 @@ export function EmployeeCompensationSection({
             Government IDs
           </p>
           <p className="mb-4 text-caption text-muted-foreground">
-            Membership numbers printed on the payslip — not the peso amounts above.
+            Membership numbers printed on the payslip — not the peso amounts above. Stored numbers
+            are shown masked; leave one as it is to keep it, or type it in full to replace it.
           </p>
           <FieldGrid
             specs={[
@@ -290,6 +349,40 @@ export function EmployeeCompensationSection({
             form={form}
             columns={4}
           />
+
+          {/* Anything the four above do not cover — as many as the record needs. */}
+          <div className="mt-6 border-t border-border pt-6">
+            <p className="mb-1 text-label font-semibold uppercase tracking-wide text-brand">
+              Other IDs
+            </p>
+            <p className="mb-4 text-caption text-muted-foreground">
+              A passport, a driver&rsquo;s licence, a PRC card — whichever this person carries.
+            </p>
+
+            {editing ? (
+              <OtherIdsFields
+                ids={form.watch("other_ids")}
+                onIdsChange={(next) => form.setValue("other_ids", next, { shouldDirty: true })}
+                typeErrors={form
+                  .watch("other_ids")
+                  .map((_, i) => form.formState.errors.other_ids?.[i]?.type?.message)}
+                numberErrors={form
+                  .watch("other_ids")
+                  .map((_, i) => form.formState.errors.other_ids?.[i]?.number?.message)}
+              />
+            ) : employee.other_ids.length === 0 ? (
+              <p className="text-sm text-muted-foreground">None recorded.</p>
+            ) : (
+              <ul className="space-y-1.5 text-sm">
+                {employee.other_ids.map((row, i) => (
+                  <li key={i} className="flex flex-wrap gap-x-3">
+                    <span className="w-44 shrink-0 text-muted-foreground">{row.type}</span>
+                    <span className="font-medium text-foreground">{row.number}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         </div>
 
         {editing ? (

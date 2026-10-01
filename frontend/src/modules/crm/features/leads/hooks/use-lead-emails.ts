@@ -17,6 +17,8 @@ type EmailApi = {
   body: string;
   /** Optional so an older payload without the field simply means "plain text". */
   bodyDoc?: JSONContent | null;
+  /** Optional for the same reason: absent or null means there is no HTML part to show. */
+  bodyHtml?: string | null;
   status: string;
   timestamp: string | null;
   sentAt: string | null;
@@ -50,6 +52,7 @@ export function useLeadEmails(id: string) {
     subject: api.subject,
     body: api.body,
     bodyDoc: api.bodyDoc ?? null,
+    bodyHtml: api.bodyHtml ?? null,
     status: api.status,
     timestamp: api.timestamp ?? api.receivedAt ?? api.sentAt ?? "",
     fromName: api.fromName,

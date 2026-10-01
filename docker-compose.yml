@@ -45,7 +45,11 @@ services:
 
   api:
     build:
-      context: ./docker/php
+      # Root context so the image can bake scraper/requirements.txt as the one
+      # source of truth for the discovery engine's deps. .dockerignore denies
+      # everything and allows only that file plus the Dockerfile.
+      context: .
+      dockerfile: docker/php/Dockerfile
     image: viteseo-php:8.4
     container_name: viteseo-api
     restart: unless-stopped
@@ -57,8 +61,14 @@ services:
       # That uid has no /etc/passwd entry inside the container, so HOME would be
       # unset and composer would fail trying to write its cache to /.
       HOME: /tmp
+      # This stack runs the dedicated `worker` below, so discovery runs may be accepted.
+      DISCOVERY_WORKER_ENABLED: "true"
     volumes:
       - ./backend:/app
+      # The discovery engine, READ-ONLY. Mounted so the API container can inspect
+      # and invoke it the same way the worker does; it is never written to from
+      # here, and the scraper's own runtime state stays on the host.
+      - ./scraper:/scraper:ro
     network_mode: host
     depends_on:
       mysql:
@@ -69,7 +79,11 @@ services:
     # Same image as `api` — only the command differs. Reverb needs the pcntl and
     # sockets extensions that ./docker/php/Dockerfile compiles in.
     build:
-      context: ./docker/php
+      # Root context so the image can bake scraper/requirements.txt as the one
+      # source of truth for the discovery engine's deps. .dockerignore denies
+      # everything and allows only that file plus the Dockerfile.
+      context: .
+      dockerfile: docker/php/Dockerfile
     image: viteseo-php:8.4
     container_name: viteseo-reverb
     restart: unless-stopped
@@ -86,6 +100,103 @@ services:
     # only: reaching the app over a LAN IP will connect to the API but fail every
     # WebSocket upgrade. Browse via localhost.
     command: ["php", "artisan", "reverb:start"]
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # DISCOVERY WORKER — the on-demand execution path.
+  #
+  # Same image and mounts as `api`; only the command differs, exactly as `reverb`
+  # does. It consumes ONLY the `discovery` queue, so an on-demand discovery run
+  # can never be held up behind unrelated jobs, and unrelated jobs are never held
+  # up behind a 15-minute nationwide sweep.
+  #
+  # WHY IT EXISTS AS A SERVICE: a dispatched job with no consumer is a silent
+  # dead end. Defining the worker in compose is what makes "click Run Discovery"
+  # actually start work rather than enqueue it forever.
+  #
+  # This is independent of the nightly `discover-all` cron, which is untouched.
+  # ───────────────────────────────────────────────────────────────────────────
+  worker:
+    build:
+      # Root context so the image can bake scraper/requirements.txt as the one
+      # source of truth for the discovery engine's deps. .dockerignore denies
+      # everything and allows only that file plus the Dockerfile.
+      context: .
+      dockerfile: docker/php/Dockerfile
+    image: viteseo-php:8.4
+    container_name: viteseo-worker
+    restart: unless-stopped
+    user: "${DOCKER_UID:-1000}:${DOCKER_GID:-1000}"
+    environment:
+      HOME: /tmp
+    volumes:
+      - ./backend:/app
+      - ./scraper:/scraper:ro
+    network_mode: host
+    depends_on:
+      mysql:
+        condition: service_healthy
+    # --tries=1 IS DELIBERATE. A discovery job spends real money at a paid
+    # provider; a retry would re-issue those requests. `ingestDiscovered` dedupes
+    # the ROWS, but nothing can refund the calls, so a failed run is reported and
+    # re-requested by a human rather than retried automatically.
+    # --timeout=900 accommodates a bounded nationwide sweep across several tasks.
+    command:
+      ["php", "artisan", "queue:work", "discovery", "--queue=discovery", "--tries=1", "--timeout=900", "--sleep=1"]
+
+  # THE TRIGGER FOR WEBSITE INTELLIGENCE — AND ONLY FOR IT.
+  #
+  # `crm:enrich-websites` is registered on Laravel's schedule, but a registration is not a trigger:
+  # nothing in this stack ran `schedule:run`, so the entry existed and never fired. That is the same
+  # shape of bug the command itself was written to fix one level up — a pipeline that works and is
+  # never asked — and it is why every discovered lead sat at "Not audited".
+  #
+  # WHY NOT `schedule:work`. Because `schedule:run` fires every DUE entry, not the one you wanted.
+  # This database holds emails scheduled for 2026-07-19 and the sender has no age cap, so starting
+  # Laravel's scheduler to get enrichment would also mail two-month-old drafts to real contacts.
+  # Running the scheduler here is therefore not a smaller decision than it looks, and this service
+  # deliberately does not make it: it invokes ONE command by name and can dispatch nothing else.
+  #
+  # NO QUEUE WORKER NEEDED. The command runs the engine as a synchronous subprocess and queues no
+  # job — VERIFIED: a real tick audited four leads and left `jobs` untouched at 7 rows. So this needs
+  # no `default` worker, and adding one is not a hidden prerequisite.
+  #
+  # OVERLAP IS STRUCTURALLY IMPOSSIBLE HERE — the loop is sequential, so the next tick cannot start
+  # until the last one returns. The command also takes its own atomic lock, which is what protects it
+  # from a second trigger (a cron entry, an operator) rather than from this loop.
+  #
+  # The sleep is the remainder of the interval, not a flat delay, so the cadence stays at 30 minutes
+  # instead of drifting by however long each tick took. `|| true` keeps a failed tick from killing
+  # the loop: the command already reports a non-zero exit without retrying, and its queues are
+  # ordered so the next tick resumes exactly where this one stopped.
+  enrichment:
+    build:
+      context: .
+      dockerfile: docker/php/Dockerfile
+    image: viteseo-php:8.4
+    container_name: viteseo-enrichment
+    restart: unless-stopped
+    user: "${DOCKER_UID:-1000}:${DOCKER_GID:-1000}"
+    environment:
+      HOME: /tmp
+      # The command is off by default everywhere; this service exists to run it.
+      DISCOVERY_ENRICHMENT_ENABLED: "true"
+    volumes:
+      - ./backend:/app
+      - ./scraper:/scraper:ro
+    network_mode: host
+    depends_on:
+      mysql:
+        condition: service_healthy
+    command:
+      - sh
+      - -c
+      - |
+        while true; do
+          start=$$(date +%s)
+          php artisan crm:enrich-websites || true
+          elapsed=$$(( $$(date +%s) - start ))
+          [ "$$elapsed" -lt 1800 ] && sleep $$(( 1800 - elapsed ))
+        done
 
 volumes:
   mysql-data:

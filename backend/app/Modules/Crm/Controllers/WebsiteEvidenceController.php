@@ -9,6 +9,7 @@ use App\Modules\Crm\Requests\ConfirmWebsiteAbsenceRequest;
 use App\Modules\Crm\Requests\StoreWebsiteCandidatesRequest;
 use App\Modules\Crm\Requests\StoreWebsiteCandidateVerificationRequest;
 use App\Modules\Crm\Services\Website\WebsiteEvidenceService;
+use App\Modules\Crm\Support\LeadIdScope;
 use Illuminate\Http\JsonResponse;
 use RuntimeException;
 use Symfony\Component\HttpFoundation\Response;
@@ -42,9 +43,13 @@ class WebsiteEvidenceController extends Controller
     {
         $limit = min((int) request()->integer('limit', 50) ?: 50, 200);
 
+        // OPTIONAL SCOPE, exactly as on the audit queue.
+        $scope = LeadIdScope::from(request());
+
         $leads = Lead::query()
             ->whereNull('crm_leads.website')
             ->whereNotNull('crm_leads.source')
+            ->when($scope !== null, fn ($q) => $q->whereIn('crm_leads.id', $scope))
             ->leftJoin('crm_lead_website_searches as s', 's.lead_id', '=', 'crm_leads.id')
             ->whereNull('s.confirmed_absent_at')
             ->whereNull('s.exhausted_at')
@@ -58,6 +63,10 @@ class WebsiteEvidenceController extends Controller
                 ->where('c.verified', true))
             ->orderByRaw('s.last_searched_at IS NOT NULL')
             ->orderBy('s.last_searched_at')
+            // Same deterministic tiebreak as the audit queue, for the same reason: never-searched
+            // leads all tie on the two keys above, and an undefined order among them means a tick's
+            // slice is not reproducible.
+            ->orderBy('crm_leads.id')
             ->limit($limit)
             ->get(['crm_leads.*']);
 
@@ -71,6 +80,14 @@ class WebsiteEvidenceController extends Controller
                 'region' => $lead->region,
                 'industry' => $lead->industry,
                 'placeId' => $lead->place_id,
+                // WHERE THE BUSINESS IS. Tier 0 reads an OSM element, and a Google lead's
+                // `places/ChIJ…` is not an OSM id — so for that whole pool the tier had nothing to
+                // resolve and could never honestly report itself as run. These two columns are the
+                // other way to reach the same element: the resolver matches the lead's real
+                // coordinates and name against real OSM elements. Already captured at ingest,
+                // already shown on the map; sent here so the tier has somewhere to look.
+                'latitude' => $lead->latitude !== null ? (float) $lead->latitude : null,
+                'longitude' => $lead->longitude !== null ? (float) $lead->longitude : null,
             ])->all(),
         ]);
     }

@@ -28,6 +28,7 @@ from scraper.providers.openstreetmap import OpenStreetMapProvider
 _PROVIDERS = {
     "openstreetmap": "OpenStreetMap Overpass/Nominatim (default, no API key)",
     "openai": "OpenStreetMap baseline PLUS AI-proposed candidates resolved against OSM",
+    "google_places": "Google Places (API New) Text Search, made by the CRM (which holds the key)",
 }
 
 #: The permanent baseline, and the end of every fallback chain. Named so the fallback path reads as
@@ -45,13 +46,22 @@ def canonical_provider(name: str) -> str:
     return _ALIASES.get(key, key)
 
 
-def build_openstreetmap(config: Config) -> OpenStreetMapProvider:
-    """The OSM provider, built from config. Shared with the OpenAI provider, which resolves through it."""
+def build_openstreetmap(config: Config, *, reverse_geocode: bool = True) -> OpenStreetMapProvider:
+    """The OSM provider, built from config. Shared with the OpenAI provider, which resolves through it.
+
+    ``reverse_geocode=False`` is used ONLY by the AI-assisted capacity mode, for the AI lanes' own
+    client: their candidates are geocoded after the merge, and only the ones actually returned.
+    """
     return OpenStreetMapProvider(
         overpass_url=config.overpass_url,
         nominatim_url=config.nominatim_url,
         user_agent=config.user_agent,
         timeout=config.request_timeout,
+        # ONE geocoder, ONE country fence. Google reaches its search box through this same provider,
+        # so restricting it here restricts every provider at once rather than per-adapter.
+        country_code=config.discovery_country or None,
+        nominatim_state_dir=config.nominatim_state_dir or None,
+        **({} if reverse_geocode else {"reverse_geocode": False}),
     )
 
 
@@ -129,6 +139,12 @@ def get_provider(config: Config) -> DiscoveryProvider:
         from scraper.providers.ai_assisted import AiAssistedDiscoveryProvider
         from scraper.providers.openai_discovery import OpenAiDiscoveryProvider
 
+        if config.volume:
+            return _volume_mode(config)
+
+        if config.ai_total_limit is not None:
+            return _ai_assisted_capacity_mode(config)
+
         # ONE OSM CLIENT, SHARED BY BOTH LANES. The composite sweeps with it and the AI leg resolves
         # names through it, so a run opens one Overpass/Nominatim client rather than two — and there
         # is a single owner to close.
@@ -151,8 +167,100 @@ def get_provider(config: Config) -> DiscoveryProvider:
             ),
         )
 
+    if name == "google_places":
+        # Imported HERE, like the AI provider, so an OSM run never loads this path.
+        from scraper.providers.google_places import GooglePlacesProvider
+
+        # AN ADDITIONAL PROVIDER, NOT A REPLACEMENT: OpenStreetMap stays the default and the fallback.
+        # The OSM client is used only for its geocoder, so Google is restricted to the same bounding
+        # box an OSM run would sweep. No Google key here — the CRM holds it and makes the call.
+        return GooglePlacesProvider(
+            crm_base_url=config.crm_base_url,
+            crm_token=config.crm_token,
+            timeout=config.request_timeout,
+            osm=build_openstreetmap(config),
+            # EXPLICIT, and off unless an environment opts in. A Google-only run is factual discovery
+            # and must reach no model; the planner stays available for the future AI-enabled flow.
+            use_strategy=config.use_ai_strategy,
+        )
+
     raise ValueError(
         f"Unknown discovery provider '{config.discovery_provider}'. "
         f"Available: {', '.join(sorted(_PROVIDERS))} (alias: osm). "
-        f"Google Places and other providers are planned; add them here — no other code changes."
+        f"Add a provider here — no other code changes."
+    )
+
+
+def _ai_assisted_capacity_mode(config: Config) -> DiscoveryProvider:
+    """The combined `openai` provider with AI capacity above the ordinary per-search limit.
+
+    Built only when `ai_total_limit` is configured; without it `get_provider` builds exactly what it
+    always built. TWO OSM CLIENTS here, deliberately: the sweep keeps the ordinary client, which
+    geocodes each business as it always has, so the sweep's output is unchanged; the AI lanes get a
+    client that does not geocode, and the composite geocodes only the AI candidates it returns (R1).
+    Every request both make is counted, so a run can report what it actually cost.
+    """
+    from scraper.call_counts import CallCounter
+    from scraper.providers.ai_assisted import AiAssistedDiscoveryProvider
+    from scraper.providers.openai_discovery import OpenAiDiscoveryProvider
+
+    counter = CallCounter(overpass_url=config.overpass_url, nominatim_url=config.nominatim_url)
+    baseline_osm = build_openstreetmap(config)
+    lane_osm = build_openstreetmap(config, reverse_geocode=False)
+    ai = OpenAiDiscoveryProvider(
+        crm_base_url=config.crm_base_url,
+        crm_token=config.crm_token,
+        timeout=config.openai_timeout,
+        osm=lane_osm,
+    )
+    for client in (baseline_osm._client, lane_osm._client):
+        counter.attach(client)
+    counter.attach(ai._client, as_ai=True)
+
+    return AiAssistedDiscoveryProvider(
+        osm=baseline_osm,
+        ai=ai,
+        lane_osm=lane_osm,
+        total_limit=config.ai_total_limit,
+        skip_ai_lanes=config.skip_ai_lanes,
+        call_counter=counter,
+    )
+
+
+def _volume_mode(config: Config) -> DiscoveryProvider:
+    """The combined `openai` provider in VOLUME MODE — see `scraper.providers.volume`.
+
+    Built only when a run asks for it; without `volume` `get_provider` builds exactly what it always
+    built. ONE OSM client, built without per-business geocoding: the provider geocodes the new
+    businesses it returns and nothing else (R2). Every outbound request is counted.
+    """
+    from scraper.call_counts import CallCounter
+    from scraper.known_places import KnownPlacesClient
+    from scraper.providers.openai_discovery import OpenAiDiscoveryProvider
+    from scraper.providers.volume import VolumeDiscoveryProvider
+
+    counter = CallCounter(overpass_url=config.overpass_url, nominatim_url=config.nominatim_url)
+    osm = build_openstreetmap(config, reverse_geocode=False)
+    # Used for tag expansion only — the name lane never runs in this mode.
+    ai = OpenAiDiscoveryProvider(
+        crm_base_url=config.crm_base_url,
+        crm_token=config.crm_token,
+        timeout=config.openai_timeout,
+        osm=osm,
+    )
+    known = KnownPlacesClient(
+        base_url=config.crm_base_url, token=config.crm_token, user_agent=config.user_agent
+    )
+    counter.attach(osm._client)
+    counter.attach(ai._client, as_ai=True)
+    counter.attach(known.http_client)
+
+    return VolumeDiscoveryProvider(
+        osm=osm,
+        ai=ai,
+        known=known.known,
+        raw_cap=config.volume_raw_cap,
+        task_cap=config.volume_task_cap,
+        call_counter=counter,
+        closers=(known.close,),
     )

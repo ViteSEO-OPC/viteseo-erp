@@ -3,7 +3,7 @@
 import { Link2, Link2Off } from "lucide-react";
 
 import { ChannelBadge } from "@/modules/crm/features/inbox/components/channel-badge";
-import type { InboxConversation } from "@/modules/crm/features/inbox/types/inbox-types";
+import { LINKED_LEAD_UNAVAILABLE, type InboxConversation } from "@/modules/crm/features/inbox/types/inbox-types";
 
 function when(iso: string | null): string {
     if (!iso) return "";
@@ -66,7 +66,11 @@ export function ConversationList({
                                 {conversation.leadLinked ? (
                                     <>
                                         <Link2 aria-hidden className="size-3.5" />
-                                        {conversation.lead?.businessName ?? "Linked to a lead"}
+                                        {/* `lead` is null on a linked thread whose lead is archived or
+                                            hidden from this viewer — same neutral wording as the header. */}
+                                        {conversation.lead === null
+                                            ? LINKED_LEAD_UNAVAILABLE
+                                            : conversation.lead.businessName ?? "Linked to a lead"}
                                     </>
                                 ) : (
                                     <>
