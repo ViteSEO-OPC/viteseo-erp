@@ -3,7 +3,8 @@
 **Status: NOT APPROVED. Production stays on hold until every gate in §0 is green.** Nothing here has been run.
 Written 2026-10-01 against: staging `796eda8c` (+ the `release/staging-readiness` merge), main `2c445ea6`,
 production release9 @ `f70ae1aa` (detached), DB `teamora` 350 migrations / batch 17.
-**Scope update 2026-10-01:** staging moved to `10270d6c` (Copilot Phase 2, §7) before this branch was merged. The
+**Scope update 2026-10-01:** staging moved to `10270d6c` and then `c39a9cab` (Copilot Phase 2 Slices 1–3, §7) before
+this branch was merged. The
 **final staging / main SHA is decided only after the readiness PR merges** — always deploy the reviewed `MAIN_SHA`
 from §1.1, never a SHA written in this file. Copilot Phase 2 added no migration, so the 28-migration plan stands.
 
@@ -178,7 +179,9 @@ Enrichment alone: delete `DISCOVERY_ENRICHMENT_ENABLED` (next tick skipped).
 
 ## 7. Copilot (Phase 1 + Phase 2) — in scope, shipped OFF
 **New to production as a whole:** production `f70ae1aa` has no Copilot AI backend; this release adds Phase 1 (global
-aggregates/knowledge) and Phase 2 (lead-scoped answers, commits `4f7cd82d`, `29f3a00a`, merge `10270d6c`), plus the two
+aggregates/knowledge) and Phase 2 (lead-scoped answers, commits `4f7cd82d`, `29f3a00a`, merge `10270d6c`; Slice 3
+`7a47ad39`, merge `c39a9cab` — frontend only: on a lead's page, "this lead" questions send THAT page's lead id through
+the same endpoint and the same server-side authorization, only when AI is available), plus the two
 pending migrations `2026_09_29_000000_create_crm_copilot_settings_table` / `…000100_create_crm_copilot_ai_logs_table`
 (already among the 28).
 - **Off by default, two locks:** env `COPILOT_AI_ENABLED` (absent = off) AND a Super Admin setting row
