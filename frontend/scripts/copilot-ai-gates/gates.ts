@@ -17,16 +17,28 @@
  * H5  NATURAL-LANGUAGE CRM QUESTIONS THAT LAND ON AN ARTICLE CAN REACH AI.
  * H6  QUICK ACTIONS NEVER REACH AI — every chip binds to a real intent, so none falls back to `send`.
  * H7  WIRING — AI only behind server availability and the rule; on failure the SAME intent's
- *     deterministic turn; availability reads OFF unless the server says exactly `true`.
+ *     deterministic turn; availability reads OFF unless the server says exactly `true`. The lead
+ *     path (Phase 2 Slice 2) asks only from free text, behind availability AND the lead rule, sends
+ *     only the resolved lead's id, and falls through to the rule-based lead reply.
  * H8  KNOWLEDGE PARITY — the backend's copy of the Copilot knowledge (what the model may be given)
  *     is byte-identical to the articles the rule-based Copilot ships.
  * H9  STATUS VOCABULARY PARITY — the backend's LeadVocabulary labels match lead-status.ts.
+ * H10 LEAD AI RULE (PO decision D1, 2026-09-30) — only an open-ended `lead-about` question about
+ *     exactly ONE resolved lead may reach the AI; exact phrasings, every other lead intent, no or
+ *     several matches, and every non-lead intent never do; the lead id must be a strict positive
+ *     integer.
  *
  * Exits non-zero if any gate fails.
  */
 import { readFileSync } from "node:fs";
-import { matchIntentWithEntity, findIntent } from "@/modules/crm/features/copilot/engine/matcher";
-import { isAiEligible } from "@/modules/crm/features/copilot/engine/ai-fallback";
+import { matchIntentWithEntity, findIntent, normalize } from "@/modules/crm/features/copilot/engine/matcher";
+import {
+  isAiEligible,
+  isLeadAiEligible,
+  leadIdForAi,
+  LEAD_AI_INTENT_ID,
+  LEAD_EXACT_PHRASES,
+} from "@/modules/crm/features/copilot/engine/ai-fallback";
 import { COMPUTATION_DOCS } from "@/modules/crm/features/copilot/engine/computations";
 import knowledgeData from "@/modules/crm/features/copilot/data/knowledge.json";
 import intentData from "@/modules/crm/features/copilot/data/intents.json";
@@ -148,8 +160,13 @@ function report(gate: string, ok: number, total: number, detail: string[] = []) 
     ["availability is OFF unless the server says exactly true", aiHook.includes("return query.data === true;") && aiHook.includes("aiAvailable === true")],
     ["exactly one AI call site, given the matcher's intent", (hook.match(/runAiFallback\(text/g) ?? []).length === 1 && hook.includes("void runAiFallback(text, intent);")],
     ["AI failure runs the same intent's deterministic turn", hook.includes("if (answer === null) {\n        await runTurn(text, intent, text);")],
-    ["AI-off path unchanged", hook.includes("void runTurn(text, intent, text);")],
-    ["quick actions never call AI directly", !quickAction.includes("runAiFallback") && !quickAction.includes("askAi")],
+    ["rule-based path may offer lead AI only when the server says available", hook.includes("void runTurn(text, intent, text, aiAvailable);")],
+    ["quick actions never call AI directly", !quickAction.includes("runAiFallback") && !quickAction.includes("askAi") && !quickAction.includes("aiAvailable")],
+    ["lead AI only behind the lead rule and a valid resolved id", hook.includes("if (leadAi && leadId !== null && isLeadAiEligible(intent, message, matches.length)) {")],
+    ["lead AI sends only the resolved lead's id", hook.includes("const leadId = only ? leadIdForAi(only.id) : null;") && hook.includes("await askAi(message, leadId);")],
+    ["exactly two AI requests in the hook (fallback, lead)", (hook.match(/askAi\(/g) ?? []).length === 2],
+    ["lead AI failure falls through to the rule-based lead reply", hook.includes("if (answer !== null) {")],
+    ["lead_id is sent only as a number", aiHook.includes('typeof leadId === "number" ? { question, lead_id: leadId } : { question }')],
   ];
   report(
     "H7 hook wiring",
@@ -183,6 +200,55 @@ function report(gate: string, ok: number, total: number, detail: string[] = []) 
     ? []
     : [`frontend ${frontend.join(", ")}`, `backend  ${backend.join(", ")}`];
   report("H9 status vocabulary = lead-status.ts", bad.length === 0 ? 1 : 0, 1, bad);
+}
+
+// ── H10 ──
+{
+  const LEAD = "Kopi Roasters";
+  const bad: string[] = [];
+  let ok = 0;
+  let total = 0;
+  const expect = (label: string, actual: boolean, expected: boolean) => {
+    total++;
+    if (actual === expected) ok++;
+    else bad.push(`${label}: expected ${expected ? "eligible" : "not eligible"}`);
+  };
+  const exact = (q: string) => LEAD_EXACT_PHRASES.some((p) => ` ${normalize(q)} `.includes(` ${normalize(p)} `));
+
+  // Every lead-intent phrasing, as the real matcher routes it, with one / no / several resolved leads.
+  for (const intent of CONFIG.intents.filter((i) => i.response.type === "lead_lookup")) {
+    for (const kw of intent.keywords) {
+      const q = `${kw} ${LEAD}`;
+      const m = matchIntentWithEntity(q, CONFIG);
+      expect(describe(q), isLeadAiEligible(m.intent, q, 1), m.intent.id === LEAD_AI_INTENT_ID && !exact(q));
+      expect(`${describe(q)} [0 leads]`, isLeadAiEligible(m.intent, q, 0), false);
+      expect(`${describe(q)} [2 leads]`, isLeadAiEligible(m.intent, q, 2), false);
+      if (intent.id !== LEAD_AI_INTENT_ID) expect(`${describe(q)} [other lead intent]`, isLeadAiEligible(intent, q, 1), false);
+    }
+  }
+  // Open-ended questions reach AI; exact phrasings never do, whatever they route to.
+  for (const q of [`tell me about ${LEAD}`, `kamusta si ${LEAD}`, `what about ${LEAD}`]) {
+    const m = matchIntentWithEntity(q, CONFIG);
+    expect(`${describe(q)} [open-ended]`, isLeadAiEligible(m.intent, q, 1), true);
+  }
+  const leadAbout = findIntent(LEAD_AI_INTENT_ID, CONFIG);
+  for (const q of [`status of ${LEAD}`, `ano status ng ${LEAD}`, `what is the status of ${LEAD}`]) {
+    expect(`<<${q}>> [exact, even on lead-about]`, leadAbout ? isLeadAiEligible(leadAbout, q, 1) : true, false);
+  }
+  // No non-lead intent is ever a lead-AI turn.
+  for (const intent of CONFIG.intents.filter((i) => i.response.type !== "lead_lookup")) {
+    for (const kw of intent.keywords) expect(`${intent.id} <<${kw}>>`, isLeadAiEligible(intent, kw, 1), false);
+  }
+  // The id the server receives: a strict positive integer, or no AI at all.
+  const ids: [string | number, number | null][] = [
+    [42, 42], ["42", 42], ["0", null], [0, null], [-1, null], ["1.5", null], ["abc", null], ["", null], ["9007199254740993", null],
+  ];
+  for (const [input, want] of ids) {
+    total++;
+    if (leadIdForAi(input) === want) ok++;
+    else bad.push(`leadIdForAi(${JSON.stringify(input)}) = ${leadIdForAi(input)}, want ${want}`);
+  }
+  report("H10 lead AI only for one open-ended lead question", ok, total, bad);
 }
 
 console.log(failed === 0 ? "\nAll AI gates passed." : `\n${failed} gate(s) FAILED.`);

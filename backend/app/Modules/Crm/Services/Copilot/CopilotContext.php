@@ -15,6 +15,8 @@ use App\Modules\Crm\Services\Copilot\Retrieval\FactScope;
  * can be held to the metric and subject a figure belongs to. `viewerScope` is the scope of the data
  * figures (null when only reference text was supplied). `text` is the lower-cased concatenation of every
  * supplied name, description and article, used to decide whether a concept was supplied at all.
+ * `hasLead` says one authorised lead was supplied, and `leadNames` holds its (lower-cased, scrubbed)
+ * business name when it survived scrubbing, so a sentence naming the lead can be held to its figures.
  */
 final readonly class CopilotContext
 {
@@ -26,6 +28,7 @@ final readonly class CopilotContext
      * @param  array<string, true>  $percents
      * @param  array<string, true>  $pesos
      * @param  array<string, list<array{path: string, scope: string, family: string|null, negative: bool|null, kind: string}>>  $figures
+     * @param  list<string>  $leadNames
      */
     public function __construct(
         public array $payload,
@@ -38,5 +41,7 @@ final readonly class CopilotContext
         public ?string $viewerScope,
         public string $text,
         public int $bytes,
+        public bool $hasLead = false,
+        public array $leadNames = [],
     ) {}
 }

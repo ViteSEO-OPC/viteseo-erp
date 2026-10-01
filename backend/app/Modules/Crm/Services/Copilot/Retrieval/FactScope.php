@@ -11,6 +11,8 @@ use App\Models\User;
  *   own          — the caller's own leads/work (a BD's view).
  *   organization — the whole CRM (an Admin/Super Admin's view). Never "your leads".
  *   reference    — rules and help text; describes no one's data.
+ *   lead         — the one lead the question is about, already authorised for this user
+ *                  ({@see AuthorizedLead}). It never decides the viewer's scope.
  */
 final class FactScope
 {
@@ -19,6 +21,8 @@ final class FactScope
     public const ORGANIZATION = 'organization';
 
     public const REFERENCE = 'reference';
+
+    public const LEAD = 'lead';
 
     /**
      * The scope of every `visibleTo`-scoped figure for this viewer. Mirrors the role check in

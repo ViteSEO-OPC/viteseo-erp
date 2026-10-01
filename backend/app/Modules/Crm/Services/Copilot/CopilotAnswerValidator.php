@@ -6,6 +6,7 @@ use App\Modules\Crm\Services\Copilot\Knowledge\FactVocabulary;
 use App\Modules\Crm\Services\Copilot\Knowledge\LeadVocabulary;
 use App\Modules\Crm\Services\Copilot\Prompts\CopilotInstruction;
 use App\Modules\Crm\Services\Copilot\Retrieval\FactScope;
+use App\Modules\Crm\Services\Copilot\Retrieval\RetrievedFacts;
 
 /**
  * THE SAFETY BOUNDARY on the model's output. It never writes, rewrites or completes an answer — the
@@ -24,6 +25,8 @@ use App\Modules\Crm\Services\Copilot\Retrieval\FactScope;
  *     Activity scoring rule), probability, expected value — except in a sentence saying the data
  *     cannot tell; "opportunity" except as the scoring article defines it (tied to the lead score,
  *     naming no lead group) or in everyday phrasing ("opportunities to improve");
+ *   - a supplied date placed relative to today ("in the future", "recently", "two months ago") —
+ *     the model is never told today's date;
  *   - a figure attached to the wrong subject ("your" for the whole CRM's figure, another role), a
  *     ranking out of order or mixing breakdowns, a scoring figure with the wrong sign;
  *   - an answer that ignores a premise the data cannot support ("leads that are not moving").
@@ -154,6 +157,68 @@ class CopilotAnswerValidator
         'role_label' => '/(?:^|\n)\s*(?:system|developer|assistant|user)\s*:/iu',
     ];
 
+    /**
+     * A relative duration ("7 days ago", "3 weeks since", "2 araw na ang nakalipas"): always a
+     * computation from a date — no fact supplies one — so it is refused wherever it appears.
+     */
+    private const RELATIVE_DURATION = '/\b\d[\d,]*\s*(?:days?|weeks?|months?|years?|hours?|araw|linggo|buwan|taon|oras)\s+(?:ago|since|before now|back|na ang nakalipas|nakaraan|ang nakalipas)\b/iu';
+
+    /**
+     * A date placed relative to today ("in the future", "has already passed", "yesterday",
+     * "recently"). The model is never told today's date, so this is a guess wherever it appears —
+     * even inside a sentence that goes on to say the data cannot tell something else.
+     */
+    private const RELATIVE_DATE = '/\bin the (?:near |distant |recent )?(?:future|past(?!\s+\d))\b|\b(?:future|past|upcoming) date\b|\b(?:has|have|had)(?:n(?:\'|’)t| not)? (?:yet |already |since |long )?(?:passed|happened|occurred|arrived|elapsed)\b|\byet to (?:happen|occur|come|arrive|pass)\b|\b(?:yesterday|tomorrow|(?<!most )recently|lately|last (?:week|month|year)|earlier this (?:week|month|year)|kahapon|kamakailan|nakalipas|nakaraan\w*|hinaharap)\b/iu';
+
+    /**
+     * Elapsed time with no figure ("two months ago", "it has been a while"). Allowed only in a
+     * sentence saying the data cannot tell ("the data cannot tell how many days ago that was").
+     */
+    private const ELAPSED = '/\bago\b|\bit(?:\'s|’s| has| is) been\s+(?:\w+\s+){0,4}(?:days?|weeks?|months?|years?|long|a while)\b/iu';
+
+    /**
+     * A calendar period placed relative to today ("this week", "next month", "the past 3 months",
+     * "ngayong linggo"). The model is never told today's date, so with a date supplied this is a
+     * guess — unless the phrase is a supplied window quoted in a sentence not about the lead.
+     */
+    private const RELATIVE_PERIOD = '/\b(?:this|next|last|past|previous|coming|following|current)\s+(?:(?:few|couple|of|several|\d[\d,]*|two|three|four|five|six|seven|eight|nine|ten|twelve)\s+){0,2}(?:days?|weeks?|weekend|months?|quarters?|years?)\b|\bthis\s+(?:morning|afternoon|evening)\b|\btonight\b|\b(?:ngayong|nitong|ngayon\s+na|sa\s+susunod\s+na|sa\s+darating\s+na|noong\s+isang|noong\s+nakaraang)\s+(?:linggo|buwan|taon)\b/iu';
+
+    /**
+     * A span of elapsed or scheduled time ("for 3 months", "for over 30 days", "within 2 weeks",
+     * "in a few days", "3 months without activity", "3 buwan na"). Allowed only in a clause saying
+     * the data cannot tell, or as a supplied window in a sentence not about the lead.
+     */
+    private const TIME_SPAN = '/\b(?:for|within|in|over|after|during)\s+(?:(?:the|a|an|over|more|than|nearly|almost|about|around|at|least|past|last|next|few|couple|of|several|many|some|\d[\d,]*|one|two|three|four|five|six|seven|eight|nine|ten|twelve)\s+){0,4}(?:days|weeks|months|years|day|week|month|year)\b|\b\d[\d,]*\s*(?:days?|weeks?|months?|years?)\s+(?:without|with no|of (?:no )?activity|of inactivity|straight|running|in a row)\b|\b(?:\d[\d,]*|ilang|maraming)\s*(?:araw|linggo|buwan|taon)\s+(?:na|nang)\b/iu';
+
+    /** "Today" about the lead is a claim unless it is the supplied due-today follow-up count. */
+    private const TODAY = '/\b(?:today|ngayong araw)\b/iu';
+
+    private const DUE_TODAY = '/\bdue\b|\bfollow-?ups?\b|\bnakatakda\b/iu';
+
+    /**
+     * Evaluative wording no supplied fact makes about ONE lead: a grade or tier, a ranking among
+     * leads, a quality label, a level of interest or engagement, or a judgment of its score. The
+     * stored score may be stated; what a score measures may be explained in general.
+     */
+    private const LEAD_GRADE = [
+        '/\bgrad(?:e|es|ed|ing)\b|\btiers?\b|\brat(?:ed|ing)\b/iu',
+        '/\b(?:best|top|strongest|weakest|worst|most promising|least promising|hottest|prime)\s+(?:[\p{L}-]+\s+)?(?:leads?|prospects?|accounts?|clients?|candidates?|ones?)\b/iu',
+        '/\b(?:good|great|excellent|strong|weak|poor|bad|solid|promising|hot|warm|cold|quality|high-quality|low-quality|valuable|ideal|healthy|attractive|serious|viable|worthwhile|decent|average|mediocre|top-tier)\s+(?:leads?|prospects?|accounts?|clients?|candidates?|fit|targets?)\b/iu',
+        '/\bpromising\b|\bworth\s+(?:pursuing|prioriti[sz]ing|chasing|the effort|your time|focusing on|following up)\b|\b(?:has|have|shows?|showing|with)\s+(?:some\s+|real\s+|good\s+|great\s+|strong\s+|little\s+|limited\s+)?potential\b/iu',
+        '/\b(?:level|degree)\s+of\s+(?:interest|engagement|intent|commitment)\b|\b(?:interest|engagement)\s+level\b|\b(?:high|higher|moderate|low|lower|strong|weak|limited|little|significant|genuine|real|keen|serious|mild|lukewarm)\s+(?:interest|engagement|intent)\b|\b(?:highly|very|moderately|somewhat|fairly|quite|not very|less|more)\s+(?:engaged|interested|motivated|committed|keen)\b/iu',
+        '/\b(?:high|higher|highest|low|lower|lowest|moderate|decent|good|great|strong|weak|poor|average|solid|healthy|impressive|modest|mediocre|respectable|excellent|above[- ]average|below[- ]average)\s+(?:lead\s+)?scor(?:e|es|ing)\b|\bscor(?:e|es)\b[^.,;]{0,40}?\b(?:is|are|was|seems|looks|remains)\s+(?:quite\s+|very\s+|relatively\s+|fairly\s+|rather\s+)?(?:high|low|moderate|decent|good|strong|weak|poor|average|solid|healthy|impressive|modest)\b|\bscor(?:es|ed)\s+(?:well|highly|poorly)\b/iu',
+        '/\b(?:magandang|mahusay na|malakas na|mahinang|pinakamagandang|pinakamahusay na)\s+(?:lead|prospect|kliyente)\b/iu',
+    ];
+
+    /** A pronoun that, with a lead supplied, speaks about that lead. */
+    private const LEAD_PRONOUN = '/\b(?:it|its|it\'s|it’s|this one|nito|niya|siya)\b/iu';
+
+    /** A sentence speaking about the supplied lead without its name. */
+    private const LEAD_REFERENCE = '/\b(?:this|the|that)\s+lead\b|\blead\s+na\s+ito\b|\bleads?\s+(?:na\s+)?ito\b|\bito(?:ng)?\s+lead\b/iu';
+
+    /** The supplied lead's own score, spoken of by pronoun ("its score", "its 8 points", "score nito"). */
+    private const LEAD_OWN_SCORE = '/\bits\s+(?:[\p{L}\p{N}-]+\s+){0,2}(?:scores?|points?)\b|\b(?:score|puntos|iskor)\s+nito\b/iu';
+
     private const SENTENCES = '/(?<=[.!?;])\s+|\n+/u';
 
     private const CLAUSES = '/,\s+|;\s*|:\s+|\s+[—–-]\s+|\s+(?:and|but|pero|while|habang|whereas|followed by|sinundan ng|kasunod ang)\s+/iu';
@@ -202,6 +267,15 @@ class CopilotAnswerValidator
         $numbers = $this->ungroundedNumber($answer, $context, $question);
         if ($numbers !== null) {
             return [$numbers, null];
+        }
+        if (preg_match(self::RELATIVE_DURATION, $answer) === 1) {
+            return ['ungrounded_duration', null];
+        }
+        if ($this->relativeDateClaim($answer, $context)) {
+            return ['ungrounded_relative_date', null];
+        }
+        if ($this->gradesLead($answer, $context)) {
+            return ['unsupported_lead_grade', null];
         }
         $concept = $this->unsupportedConcept($answer, $context, self::GROUNDING_CONCEPTS);
         if ($concept !== null) {
@@ -275,6 +349,107 @@ class CopilotAnswerValidator
         return preg_replace('/^(\s*)\d{1,2}[.)](?=\s)/mu', '$1', $answer) ?? $answer;
     }
 
+    /**
+     * Once a date was supplied, an answer may state it and nothing about where it sits relative to
+     * today: no "in the future / past", no "recently", and elapsed time ("two months ago") only in a
+     * sentence saying the data cannot tell. Answers built from no date are left to the other rules.
+     */
+    private function relativeDateClaim(string $answer, CopilotContext $context): bool
+    {
+        $suppliesDate = false;
+        foreach ($context->payload['data']['facts'] ?? [] as $source) {
+            foreach ($source['facts'] ?? [] as $fact) {
+                $suppliesDate = $suppliesDate || ($fact['unit'] ?? null) === RetrievedFacts::DATE;
+            }
+        }
+        if (! $suppliesDate) {
+            return false;
+        }
+
+        foreach (preg_split(self::SENTENCES, $answer) ?: [$answer] as $sentence) {
+            if (preg_match(self::RELATIVE_DATE, $sentence) === 1) {
+                return true;
+            }
+            if (preg_match(self::ELAPSED, $sentence) === 1 && preg_match(self::LIMITATION, $sentence) !== 1) {
+                return true;
+            }
+            if ($this->relativeTimeClaim($sentence, $context)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * A period ("this week", "next month") or span ("for 3 months", "within 2 weeks") the facts do
+     * not establish — for the activity date and the follow-up counts alike, since no fact dates a
+     * follow-up. Allowed only in a clause saying the data cannot tell, or when the phrase is quoted
+     * from the supplied data (a help article's window) in a sentence not about the lead. "Today"
+     * about the lead is allowed only for its due-today follow-up count.
+     */
+    private function relativeTimeClaim(string $sentence, CopilotContext $context): bool
+    {
+        $aboutLead = $this->aboutSuppliedLead($sentence, $context);
+        if ($aboutLead && preg_match(self::TODAY, $sentence) === 1 && preg_match(self::DUE_TODAY, $sentence) !== 1) {
+            return true;
+        }
+
+        $supplied = mb_strtolower($context->text);
+        foreach (preg_split(self::CLAUSES, $sentence) ?: [$sentence] as $clause) {
+            if (preg_match(self::LIMITATION, $clause) === 1) {
+                continue;
+            }
+            foreach ([self::RELATIVE_PERIOD, self::TIME_SPAN] as $pattern) {
+                preg_match_all($pattern, $clause, $m);
+                foreach ($m[0] as $phrase) {
+                    if ($aboutLead || ! str_contains($supplied, mb_strtolower($phrase))) {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * A grade, ranking, quality label, interest level or score judgment in a sentence about the one
+     * supplied lead. No fact grades a lead: its stored score may be stated, and what scores measure
+     * may be explained in general — in a sentence that is not about this lead — but never applied to
+     * it. A clause saying the data cannot tell is allowed.
+     */
+    private function gradesLead(string $answer, CopilotContext $context): bool
+    {
+        if (! $context->hasLead) {
+            return false;
+        }
+        foreach (preg_split(self::SENTENCES, $answer) ?: [$answer] as $sentence) {
+            if (! $this->aboutSuppliedLead($sentence, $context)) {
+                continue;
+            }
+            foreach (preg_split(self::CLAUSES, $sentence) ?: [$sentence] as $clause) {
+                if (preg_match(self::LIMITATION, $clause) === 1) {
+                    continue;
+                }
+                foreach (self::LEAD_GRADE as $pattern) {
+                    if (preg_match($pattern, $clause) === 1) {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /** By name, as "this lead", by "its score", by its score figure, or by pronoun. */
+    private function aboutSuppliedLead(string $sentence, CopilotContext $context): bool
+    {
+        return $context->hasLead
+            && ($this->gradesSuppliedLead($sentence, $context) || preg_match(self::LEAD_PRONOUN, $sentence) === 1);
+    }
+
     /** @param  list<string>  $concepts */
     private function unsupportedConcept(string $answer, CopilotContext $context, array $concepts): ?string
     {
@@ -325,8 +500,9 @@ class CopilotAnswerValidator
      *   - everyday phrasing ("opportunities to improve the conversion rate") naming no lead group;
      *   - the scoring article's own concept — a supplied article defines it, the sentence ties it to
      *     the lead score, and it names no lead group ("sort by score to see the strongest
-     *     opportunities"). Any other use — "New is a significant/good/better opportunity" — is a
-     *     judgment no supplied figure makes.
+     *     opportunities"), and does not grade the one supplied lead ({@see gradesSuppliedLead()}).
+     *     Any other use — "New is a significant/good/better opportunity" — is a judgment no supplied
+     *     figure makes.
      */
     private function describesSuppliedOpportunity(string $sentence, CopilotContext $context): bool
     {
@@ -339,7 +515,36 @@ class CopilotAnswerValidator
         }
 
         return preg_match(self::OPPORTUNITY_SUPPLIED, $context->text) === 1
-            && preg_match(self::SCORE_TIE, $sentence) === 1;
+            && preg_match(self::SCORE_TIE, $sentence) === 1
+            && ! $this->gradesSuppliedLead($sentence, $context);
+    }
+
+    /**
+     * The score-tied allowance explains what a score measures in general. It never grades the one
+     * supplied lead ("a score of 8 points, indicating a relatively weak opportunity"): the article
+     * says a higher score is a stronger opportunity and gives no point where weak ends or strong
+     * begins. A sentence is about that lead when it names or refers to it, speaks of "its" score, or
+     * carries its score figure.
+     */
+    private function gradesSuppliedLead(string $sentence, CopilotContext $context): bool
+    {
+        if (! $context->hasLead) {
+            return false;
+        }
+        if ($this->mentionsLead($sentence, $context) || preg_match(self::LEAD_OWN_SCORE, $sentence) === 1) {
+            return true;
+        }
+
+        preg_match_all(self::NUMBER, $sentence, $m);
+        foreach ($m[0] as $raw) {
+            foreach ($context->figures[CopilotContextBuilder::canonical($raw)] ?? [] as $origin) {
+                if ($origin['scope'] === FactScope::LEAD && $origin['path'] === 'lead_score') {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     /** The estimated pipeline value IS an expected value — quotable when it was supplied. */
@@ -480,8 +685,16 @@ class CopilotAnswerValidator
                     }
                     $hasCrmFigure = true;
 
-                    // 3. SUBJECT
-                    $wording ??= $this->wrongSubject($sentence, $crm[0]['scope'], $context->viewerScope);
+                    // 3. SUBJECT. A sentence about the supplied lead may carry only that lead's
+                    // figures — the metric words are the same as the caller's own totals ("overdue
+                    // follow-ups"), so a total must never pass as the lead's — and is worded by the
+                    // lead's scope.
+                    $leadFigure = array_values(array_filter($crm, static fn (array $o): bool => $o['scope'] === FactScope::LEAD));
+                    $aboutLead = $this->mentionsLead($sentence, $context);
+                    if ($aboutLead && $leadFigure === []) {
+                        $wording ??= 'misattributed_subject';
+                    }
+                    $wording ??= $this->wrongSubject($sentence, $aboutLead && $leadFigure !== [] ? FactScope::LEAD : $crm[0]['scope'], $context->viewerScope);
 
                     $family = null;
                     foreach ($crm as $o) {
@@ -642,12 +855,28 @@ class CopilotAnswerValidator
         return $claimed;
     }
 
+    /** Whether a sentence speaks about the one supplied lead — by its name or as "this lead". */
+    private function mentionsLead(string $sentence, CopilotContext $context): bool
+    {
+        if (! $context->hasLead) {
+            return false;
+        }
+        foreach ($context->leadNames as $name) {
+            if (mb_stripos($sentence, $name) !== false) {
+                return true;
+            }
+        }
+
+        return preg_match(self::LEAD_REFERENCE, $sentence) === 1;
+    }
+
     private function wrongSubject(string $sentence, string $scope, ?string $viewerScope): ?string
     {
         if ($scope === FactScope::ORGANIZATION && $this->hasOwnership($sentence)) {
             return 'misattributed_scope';
         }
-        if ($scope === FactScope::OWN && preg_match(self::ORGANIZATION, $sentence) === 1) {
+        // One lead's figures are neither the whole CRM's nor "ours".
+        if (($scope === FactScope::OWN || $scope === FactScope::LEAD) && preg_match(self::ORGANIZATION, $sentence) === 1) {
             return 'misattributed_scope';
         }
 

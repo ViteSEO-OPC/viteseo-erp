@@ -5,7 +5,9 @@ namespace App\Modules\Crm\Services\Copilot;
 use App\Models\User;
 use App\Modules\Crm\Enums\NerbyProvider;
 use App\Modules\Crm\Services\Copilot\Prompts\CopilotInstruction;
+use App\Modules\Crm\Services\Copilot\Retrieval\AuthorizedLead;
 use App\Modules\Crm\Services\Copilot\Retrieval\CapabilityRegistry;
+use App\Modules\Crm\Services\Copilot\Retrieval\LeadCapabilityRegistry;
 use App\Modules\Crm\Services\Copilot\Retrieval\RetrievedFacts;
 use App\Modules\Crm\Services\Discovery\AiChatEndpoint;
 use App\Modules\Crm\Services\Discovery\NerbyProviderSettingService;
@@ -47,14 +49,22 @@ class CopilotAiService
         private readonly CopilotSettingService $copilotSettings,
         private readonly CopilotRetrievalPlanner $planner,
         private readonly CapabilityRegistry $registry,
+        private readonly LeadCapabilityRegistry $leadRegistry,
         private readonly CopilotContextBuilder $contextBuilder,
         private readonly CopilotAnswerValidator $validator,
         private readonly CopilotUsageGuard $guard,
         private readonly CopilotAuditLogger $audit,
     ) {}
 
-    /** The model's accepted answer, or null when the Copilot should keep its deterministic reply. */
-    public function answer(User $user, string $question): ?string
+    /**
+     * The model's accepted answer, or null when the Copilot should keep its deterministic reply.
+     *
+     * `$leadId` is the one lead the browser says the question is about. It is re-authorised here
+     * ({@see AuthorizedLead::resolve()}) before any retrieval, provider call or daily-cap use; a lead
+     * that is missing, deleted, in another org or not viewable by this user stops the request with
+     * the same null as any unanswered question, audited as `lead_denied`.
+     */
+    public function answer(User $user, string $question, ?int $leadId = null): ?string
     {
         // Ops kill switch, then the Super Admin toggle, then the credential — cheapest first. Off
         // means no retrieval, no provider call and no audit row: the Copilot is exactly as before.
@@ -67,6 +77,16 @@ class CopilotAiService
             $this->audit->record($user, $question, $outcome, $reason, $context?->recordCounts, $model, intdiv(hrtime(true) - $started, 1_000_000), $usage);
         };
 
+        $lead = null;
+        if ($leadId !== null) {
+            $lead = AuthorizedLead::resolve($user, $leadId);
+            if ($lead === null) {
+                $finish('lead_denied');
+
+                return null;
+            }
+        }
+
         if ($this->guard->breakerOpen()) {
             $finish('circuit_open');
 
@@ -78,7 +98,10 @@ class CopilotAiService
             return null;
         }
 
-        $context = $this->contextBuilder->build($question, $this->retrieve($user, $question));
+        $context = $this->contextBuilder->build($question, [
+            ...$this->retrieve($user, $question),
+            ...($lead === null ? [] : $this->retrieveForLead($user, $lead, $question)),
+        ]);
 
         [$content, $failure, $model, $usage] = $this->ask($context);
         if ($content === null) {
@@ -143,6 +166,30 @@ class CopilotAiService
                 $retrieved[] = $capability->retrieve($user, $question);
             } catch (Throwable $e) {
                 Log::warning('Copilot capability failed', ['capability' => $key, 'class' => $e::class]);
+            }
+        }
+
+        return $retrieved;
+    }
+
+    /**
+     * Run every lead-scoped capability this user is permitted, for the one lead already authorised.
+     * Same rules as {@see retrieve()}: a refused or failing capability is skipped silently.
+     *
+     * @return list<RetrievedFacts>
+     */
+    private function retrieveForLead(User $user, AuthorizedLead $lead, string $question): array
+    {
+        $retrieved = [];
+        foreach ($this->leadRegistry->keys() as $key) {
+            $capability = $this->leadRegistry->get($key);
+            if (! $capability->permits($user)) {
+                continue;
+            }
+            try {
+                $retrieved[] = $capability->retrieve($user, $lead, $question);
+            } catch (Throwable $e) {
+                Log::warning('Copilot lead capability failed', ['capability' => $key, 'class' => $e::class]);
             }
         }
 

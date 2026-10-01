@@ -11,7 +11,7 @@ import type { Intent, IntentConfig, CopilotContext } from "@/modules/crm/feature
 import { matchIntentWithEntity, findIntent, extractEntityPhrase } from "@/modules/crm/features/copilot/engine/matcher";
 import { buildResponse } from "@/modules/crm/features/copilot/engine/response-engine";
 import { runAction } from "@/modules/crm/features/copilot/engine/action-engine";
-import { isAiEligible } from "@/modules/crm/features/copilot/engine/ai-fallback";
+import { isAiEligible, isLeadAiEligible, leadIdForAi } from "@/modules/crm/features/copilot/engine/ai-fallback";
 import { useCopilotContext } from "@/modules/crm/features/copilot/hooks/use-copilot-context";
 import { useCopilotData } from "@/modules/crm/features/copilot/hooks/use-copilot-data";
 import { usePermissions } from "@/modules/crm/providers/permissions-provider";
@@ -140,7 +140,7 @@ export function useCopilot() {
    * trivially testable. Every other intent takes the same path it always did, with no await.
    */
   const runTurn = useCallback(
-    async (userText: string, intent: Intent, message: string) => {
+    async (userText: string, intent: Intent, message: string, leadAi = false) => {
       let turnCtx = ctx;
 
       // Canonical follow-up figure, fetched only for the question that asks for it.
@@ -157,6 +157,21 @@ export function useCopilot() {
         const term = extractEntityPhrase(message);
         const matches = term ? await lookupLead(term) : [];
         const only = matches.length === 1 ? matches[0] : null;
+
+        // An open-ended question about the ONE lead the policy-scoped lookup resolved may be answered
+        // by the AI, from the server's own re-authorised profile of that lead (PO decision D1). An
+        // exact phrasing, every other lead intent, no match or several, a quick action, and any AI
+        // failure all keep the rule-based reply below. Only free text sets `leadAi`.
+        const leadId = only ? leadIdForAi(only.id) : null;
+        if (leadAi && leadId !== null && isLeadAiEligible(intent, message, matches.length)) {
+          const answer = await askAi(message, leadId);
+          if (answer !== null) {
+            const userMessage = makeMessage("user", [{ type: "text", text: userText }]);
+            const aiMessage: Message = { ...makeMessage("ai", [{ type: "text", text: answer }]), aiAssisted: true };
+            setMessages((prev) => [...prev, userMessage, aiMessage]);
+            return;
+          }
+        }
 
         turnCtx = {
           ...ctx,
@@ -183,7 +198,7 @@ export function useCopilot() {
       setMessages((prev) => [...prev, userMessage, aiMessage]);
       runAction(result.action, (href) => router.push(href));
     },
-    [ctx, makeMessage, router, lookupLead, lookupLastActivity, lookupOverdueFollowUps, lookupRecentActivity],
+    [ctx, makeMessage, router, lookupLead, lookupLastActivity, lookupOverdueFollowUps, lookupRecentActivity, askAi],
   );
 
   /**
@@ -215,13 +230,15 @@ export function useCopilot() {
       const match = matchIntentWithEntity(text, INTENT_CONFIG);
       const { intent } = match;
       // AI only for a genuine fallback or a knowledge-article match; every real intent and direct
-      // request for help takes the unchanged rule-based turn. Unless the server says AI is available
-      // this branch never runs.
+      // request for help takes the rule-based turn — except an open-ended question about one
+      // resolved lead, which `runTurn` may offer to the AI (see isLeadAiEligible). Unless the server
+      // says AI is available neither branch runs.
       if (aiAvailable && isAiEligible(match, INTENT_CONFIG)) {
         void runAiFallback(text, intent);
         return;
       }
-      void runTurn(text, intent, text);
+      // With AI off `aiAvailable` is false, so a lead question takes exactly the rule-based turn.
+      void runTurn(text, intent, text, aiAvailable);
     },
     [runTurn, runAiFallback, aiAvailable],
   );
