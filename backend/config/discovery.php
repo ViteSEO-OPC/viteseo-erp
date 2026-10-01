@@ -30,6 +30,19 @@ return [
      * overridable for any other host.
      */
     'python' => env('DISCOVERY_PYTHON_BIN', '/opt/scraper-venv/bin/python'),
+
+    /*
+     * WHETHER A DEDICATED `discovery` WORKER IS RUNNING ON THIS HOST. Discovery runs are dispatched
+     * to the `discovery` queue, which the general worker deliberately does not consume: one run may
+     * hold a worker for 15 minutes, and sharing it would stall auto-replies, reminders and mail
+     * behind a paid sweep. Without a dedicated worker a run would sit "queued" forever with nothing
+     * to say why, so starting one is refused (503) until the deployment declares the worker present
+     * — see the `discovery` connection in config/queue.php for how that worker must be started.
+     *
+     * STRICT boolean, off by default: an unset or unrecognised value refuses runs rather than
+     * enqueueing them into silence.
+     */
+    'worker_enabled' => filter_var(env('DISCOVERY_WORKER_ENABLED', false), FILTER_VALIDATE_BOOLEAN),
     'path' => env('DISCOVERY_SCRAPER_PATH', '/scraper'),
 
     /*
@@ -241,6 +254,18 @@ return [
      * less complete.
      */
     'enrichment' => [
+        /*
+         * THE KILL SWITCH, OFF UNLESS A DEPLOYMENT TURNS IT ON. A tick is real outbound traffic to
+         * other people's servers, and its first run on a host provisions the NERBY service account
+         * and mints a token per tenant. Neither should begin merely because code was deployed, so the
+         * schedule entry is skipped and the command exits before touching anything until an operator
+         * sets this.
+         *
+         * STRICT, like `AI_AUTO_REPLY_ENABLED`: only true/1/on/yes enable it. A plain `(bool)` cast
+         * would read "off", "no" or "disabled" as true and fail open.
+         */
+        'enabled' => filter_var(env('DISCOVERY_ENRICHMENT_ENABLED', false), FILTER_VALIDATE_BOOLEAN),
+
         /*
          * HOW MUCH ONE TICK DOES. Both numbers are ceilings measured against this pool rather than
          * chosen: an audit costs 2.6-8.2s per lead (one page fetch each) and a search 9.2-12.7s (DNS

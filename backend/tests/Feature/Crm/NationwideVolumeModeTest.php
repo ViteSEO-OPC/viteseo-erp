@@ -22,6 +22,7 @@ use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Queue;
 use Laravel\Sanctum\Sanctum;
 use Tests\Concerns\ActsAsNerbyService;
+use Tests\Concerns\EnablesDiscoveryRuntime;
 use Tests\TestCase;
 
 /**
@@ -39,6 +40,7 @@ use Tests\TestCase;
 class NationwideVolumeModeTest extends TestCase
 {
     use ActsAsNerbyService;
+    use EnablesDiscoveryRuntime;
     use RefreshDatabase;
 
     /** @var list<array<string, mixed>> */

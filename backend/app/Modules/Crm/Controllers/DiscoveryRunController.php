@@ -38,6 +38,17 @@ class DiscoveryRunController extends Controller
     /** Start a run, or hand back the one this click already started. */
     public function store(StoreDiscoveryRunRequest $request): JsonResponse
     {
+        // NO WORKER, NO RUN. The `discovery` queue is consumed only by a dedicated worker; on a host
+        // without one, a run accepted here would sit "queued" forever with nothing to say why.
+        // Refusing up front — before any row is written — tells the person now, and a run cannot be
+        // half-created. Every run starts here: continuations and enrichment slices are dispatched by
+        // the worker itself, so they only ever exist where a worker does.
+        if (! config('discovery.worker_enabled')) {
+            return response()->json([
+                'message' => 'Discovery runs are not available on this server yet: no discovery worker is configured.',
+            ], Response::HTTP_SERVICE_UNAVAILABLE);
+        }
+
         $orgId = CurrentOrg::id();
         $userId = (int) $request->user()->id;
         $key = $request->string('idempotency_key')->value() ?: null;

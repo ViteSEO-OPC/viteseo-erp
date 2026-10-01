@@ -100,8 +100,23 @@ cd apps/scraper
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt      # runtime
 .venv/bin/python -m pip install -r requirements-dev.txt  # + pytest
-cp .env.example .env    # then set CRM_TOKEN (a Sanctum token for an Admin/Super Admin user)
+cp .env.example .env    # then set CRM_TOKEN — a NERBY service token, see below
 ```
+
+`CRM_TOKEN` must be an **org-bound NERBY service token**, never a person's token and never an admin's:
+
+```bash
+php artisan crm:nerby-service-token <org-id> --hours=720     # shown once; lifetime 1–720 h
+php artisan crm:nerby-service-token-check < token-file        # read-only: is it AUTHORIZED? (0 ok, 10 expiring, 11 not)
+php artisan crm:nerby-service-token --revoke-operator-except=<new-token-id>   # rotation: drop the old ones
+```
+
+It acts for exactly one org, reaches only the scraper callback routes, and expires. Any other token is
+refused by the discovery callbacks (403) — including one that `GET /auth/me` still accepts, so `/me` is
+not a valid health check for it (a NERBY token is refused by `/me` by design), and neither is
+`/discovery/config`, which humans can read too. Check a token with `crm:nerby-service-token-check`, or
+probe `GET …/api/v1/crm/website-enrichment/queue?limit=1` (read-only, service identity only) for a 200.
+`--revoke-all` is for incidents only: it also revokes the short-lived tokens of runs in flight.
 
 > On Debian/Ubuntu without `ensurepip`, bootstrap pip once:
 > `curl -sS https://bootstrap.pypa.io/get-pip.py | .venv/bin/python`
@@ -255,7 +270,7 @@ provider supplies one — it is the audit's input, not a verdict.
 |---|---|---|
 | `DISCOVERY_PROVIDER` | Active provider | `openstreetmap` |
 | `CRM_BASE_URL` | CRM API base (unified platform: `…/api/v1/crm`) | `http://localhost:8001/api/v1/crm` |
-| `CRM_TOKEN` | Sanctum token (user with `import` permission) | — |
+| `CRM_TOKEN` | Org-bound NERBY service token (`crm:nerby-service-token`) — never a personal or admin token | — |
 | `OVERPASS_URL` | Overpass endpoint | `https://overpass-api.de/api/interpreter` |
 | `NOMINATIM_URL` | Nominatim endpoint | `https://nominatim.openstreetmap.org` |
 | `USER_AGENT` | HTTP User-Agent | `CRM-Enterprise-Scraper/1.0` |

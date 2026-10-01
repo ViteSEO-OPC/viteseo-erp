@@ -21,6 +21,7 @@ use Illuminate\Testing\TestResponse;
 use Laravel\Sanctum\Sanctum;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Concerns\ActsAsNerbyService;
+use Tests\Concerns\EnablesDiscoveryRuntime;
 use Tests\TestCase;
 
 /**
@@ -39,6 +40,7 @@ use Tests\TestCase;
 class AiHardeningTest extends TestCase
 {
     use ActsAsNerbyService;
+    use EnablesDiscoveryRuntime;
     use RefreshDatabase;
 
     private const AI_KEY = 'sk-or-v1-test-not-a-real-credential-0000abcd';
