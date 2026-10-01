@@ -1,4 +1,4 @@
-import { normalize, type MatchResult } from "@/modules/crm/features/copilot/engine/matcher";
+import { extractEntityPhrase, normalize, type MatchResult } from "@/modules/crm/features/copilot/engine/matcher";
 import type { Intent, IntentConfig } from "@/modules/crm/features/copilot/engine/types";
 
 /**
@@ -60,3 +60,63 @@ export function leadIdForAi(id: string | number): number | null {
   const n = typeof id === "number" ? id : Number(id);
   return Number.isSafeInteger(n) && n > 0 ? n : null;
 }
+
+/**
+ * The lead whose detail page is open — `/zerem/leads/{id}` exactly — as the server accepts it, or
+ * null on any other page. Read from the URL at send time, so it is always the page in view. The URL
+ * is untrusted: the server re-authorises this id exactly as any other `lead_id` (Slice 1).
+ */
+export function pageLeadId(pathname: string): number | null {
+  const match = /^\/zerem\/leads\/(\d+)\/?$/.exec(pathname);
+  return match ? leadIdForAi(match[1]) : null;
+}
+
+/** "this lead" and its equivalents — the question points at a lead instead of naming one. */
+const PAGE_LEAD_REFERENCE =
+  /\b(?:this (?:lead|one|company|business|client|account|prospect)|(?:itong|ang|yung) (?:lead|company|kliyente|client)(?: na (?:ito|to))?|lead na (?:ito|to))\b/;
+
+/** An open-ended ask about the whole lead. */
+const PAGE_LEAD_OPEN =
+  /\b(?:tell me about|how is|how s|hows|what about|kamusta|kumusta|summari[sz]e|summary of|overview of|update on|what do you know about|describe)\b/;
+
+/**
+ * One exact field. These keep their rule-based reply, unchanged (PO decision D-a, 2026-10-01): the
+ * page's lead is never attached to them in this slice.
+ */
+const PAGE_LEAD_EXACT =
+  /\b(?:status|activity|activities|contact|contacted|follow|followup|followups|meeting|meetings|next action|next step|susunod|kailan|huling)\b/;
+
+/** Question words the entity extractor does not already drop. */
+const PAGE_LEAD_FILLER = new Set([
+  "summarize", "summarise", "summary", "overview", "describe", "know", "you", "can", "could",
+  "please", "pls", "quick", "brief", "s", "hows", "kumusta", "yung", "itong", "to",
+]);
+
+/**
+ * An open-ended question about "this lead" that names no lead of its own: "Tell me about this
+ * lead", "how is this one doing", "kamusta ang lead na ito". Only such a question may be answered
+ * from the open lead page; a question that names a company ("tell me about Kopi") keeps the
+ * name-lookup path, so the page's lead is never put in place of a lead the user named. Exact
+ * fields (status, last activity, follow-ups, meetings, next action) are never page-lead questions.
+ */
+export function isPageLeadQuestion(message: string): boolean {
+  const text = normalize(message);
+  if (!PAGE_LEAD_REFERENCE.test(text) || !PAGE_LEAD_OPEN.test(text) || PAGE_LEAD_EXACT.test(text)) return false;
+  const rest = text
+    .replace(new RegExp(PAGE_LEAD_REFERENCE.source, "g"), " ")
+    .split(" ")
+    .filter((word) => word !== "" && !PAGE_LEAD_FILLER.has(word))
+    .join(" ");
+  return extractEntityPhrase(rest) === "";
+}
+
+/** Shown when the open lead page's AI answer is unavailable (PO decision D-c, 2026-10-01). */
+export const PAGE_LEAD_FALLBACK = "I couldn't summarize this lead. Please open its Timeline for more details.";
+
+/**
+ * Shown for a "this lead" question asked away from a lead page, which has no lead to point at
+ * (PO decision D-b, 2026-10-01) — instead of an answer about the whole portfolio.
+ */
+export const NO_PAGE_LEAD_REPLY =
+  "I can't tell which lead you mean here. Open the lead's page and ask again, or name the company in your question.";
+
