@@ -27,6 +27,10 @@
  *     exactly ONE resolved lead may reach the AI; exact phrasings, every other lead intent, no or
  *     several matches, and every non-lead intent never do; the lead id must be a strict positive
  *     integer.
+ * H11 PAGE LEAD RULE (Phase 2 Slice 3, PO decisions D-a/D-b/D-c, 2026-10-01) — only
+ *     `/zerem/leads/{id}` yields a page lead id; only an open-ended "this lead" question that names
+ *     no lead of its own is a page-lead question; exact fields, named leads, every quick-action
+ *     label and every intent keyword never are.
  *
  * Exits non-zero if any gate fails.
  */
@@ -35,7 +39,9 @@ import { matchIntentWithEntity, findIntent, normalize } from "@/modules/crm/feat
 import {
   isAiEligible,
   isLeadAiEligible,
+  isPageLeadQuestion,
   leadIdForAi,
+  pageLeadId,
   LEAD_AI_INTENT_ID,
   LEAD_EXACT_PHRASES,
 } from "@/modules/crm/features/copilot/engine/ai-fallback";
@@ -164,7 +170,12 @@ function report(gate: string, ok: number, total: number, detail: string[] = []) 
     ["quick actions never call AI directly", !quickAction.includes("runAiFallback") && !quickAction.includes("askAi") && !quickAction.includes("aiAvailable")],
     ["lead AI only behind the lead rule and a valid resolved id", hook.includes("if (leadAi && leadId !== null && isLeadAiEligible(intent, message, matches.length)) {")],
     ["lead AI sends only the resolved lead's id", hook.includes("const leadId = only ? leadIdForAi(only.id) : null;") && hook.includes("await askAi(message, leadId);")],
-    ["exactly two AI requests in the hook (fallback, lead)", (hook.match(/askAi\(/g) ?? []).length === 2],
+    ["exactly three AI requests in the hook (fallback, lead, page lead)", (hook.match(/askAi\(/g) ?? []).length === 3],
+    ["page-lead branch only behind availability and the page-lead rule", hook.includes("if (aiAvailable && isPageLeadQuestion(text)) {")],
+    ["page-lead branch sends only the open page's lead id, read at send time", hook.includes("void runPageLeadTurn(text, pageLeadId(pathname));") && hook.includes("const answer = leadId === null ? null : await askAi(text, leadId);")],
+    ["page-lead failure shows the fixed lead fallback, never a second AI request or article", hook.includes("const reply = answer ?? (leadId === null ? NO_PAGE_LEAD_REPLY : PAGE_LEAD_FALLBACK);") && !hook.slice(hook.indexOf("const runPageLeadTurn"), hook.indexOf("const send")).includes("runTurn") && !hook.slice(hook.indexOf("const runPageLeadTurn"), hook.indexOf("const send")).includes("runAiFallback")],
+    ["page-lead branch runs before the matcher", hook.indexOf("isPageLeadQuestion(text)") < hook.indexOf("matchIntentWithEntity(text, INTENT_CONFIG)")],
+    ["quick actions never use the page lead", !quickAction.includes("pageLeadId") && !quickAction.includes("runPageLeadTurn")],
     ["lead AI failure falls through to the rule-based lead reply", hook.includes("if (answer !== null) {")],
     ["lead_id is sent only as a number", aiHook.includes('typeof leadId === "number" ? { question, lead_id: leadId } : { question }')],
   ];
@@ -249,6 +260,55 @@ function report(gate: string, ok: number, total: number, detail: string[] = []) 
     else bad.push(`leadIdForAi(${JSON.stringify(input)}) = ${leadIdForAi(input)}, want ${want}`);
   }
   report("H10 lead AI only for one open-ended lead question", ok, total, bad);
+}
+
+// ── H11 ──
+{
+  const bad: string[] = [];
+  let ok = 0;
+  let total = 0;
+  const expect = (label: string, actual: unknown, expected: unknown) => {
+    total++;
+    if (actual === expected) ok++;
+    else bad.push(`${label}: got ${JSON.stringify(actual)}, want ${JSON.stringify(expected)}`);
+  };
+
+  // Only a lead's own detail page yields an id, and only a strict positive integer.
+  const paths: [string, number | null][] = [
+    ["/zerem/leads/41", 41], ["/zerem/leads/41/", 41], ["/zerem/leads/1", 1],
+    ["/zerem/leads", null], ["/zerem/leads/", null], ["/zerem/leads/import", null], ["/zerem/leads/41/edit", null],
+    ["/zerem/leads/0", null], ["/zerem/leads/-1", null], ["/zerem/leads/1.5", null], ["/zerem/leads/9007199254740993", null],
+    ["/zerem/leads/41?tab=notes", null], ["/zerem/dashboard", null], ["/zerem/follow-ups", null], ["/leads/41", null], ["", null],
+  ];
+  for (const [path, want] of paths) expect(`pageLeadId(${JSON.stringify(path)})`, pageLeadId(path), want);
+
+  // Open-ended "this lead" questions that name no lead.
+  for (const q of [
+    "Tell me about this lead", "tell me about this lead?", "how is this lead doing", "How's this lead doing?",
+    "what about this one", "tell me about this company", "summarize this lead", "give me an overview of this lead",
+    "what do you know about this client", "kamusta ang lead na ito", "kumusta itong lead", "kamusta yung lead na to",
+  ]) expect(`<<${q}>> is a page-lead question`, isPageLeadQuestion(q), true);
+
+  // Never: a named lead, an exact field (D-a), no pointer, or no open-ended ask.
+  for (const q of [
+    "tell me about Kopi Roasters", "tell me about Kopi Roasters, this lead", "how is Kopi doing", "what about Kopi",
+    "status of this lead", "what is the status of this lead", "last activity on this lead", "when did I last contact this lead",
+    "any follow up for this lead", "do I have a meeting with this lead", "next action with this lead", "ano status ng lead na ito",
+    "kailan huling activity ng lead na ito", "tell me about the status of this lead", "how is this lead's follow up",
+    "tell me about the last activity of this lead", "kamusta ang status ng lead na ito", "what about the next action for this one",
+    "what about Kopi, this one", "tell me about my leads", "tell me about leads", "how is my pipeline doing",
+    "this lead", "delete this lead", "assign this lead to me", "tell me about scoring", "help", "",
+  ]) expect(`<<${q}>> is not a page-lead question`, isPageLeadQuestion(q), false);
+
+  // Every quick-action label, and every intent keyword, keeps its own path.
+  const modules = (quickActionData as { modules: Record<string, { id: string; label?: string }[]> }).modules;
+  for (const action of Object.values(modules).flat()) {
+    if (action.label) expect(`quick action <<${action.label}>>`, isPageLeadQuestion(action.label), false);
+  }
+  for (const intent of CONFIG.intents) {
+    for (const kw of intent.keywords) expect(`${intent.id} <<${kw}>>`, isPageLeadQuestion(kw), false);
+  }
+  report("H11 page lead only for an open-ended \"this lead\" question", ok, total, bad);
 }
 
 console.log(failed === 0 ? "\nAll AI gates passed." : `\n${failed} gate(s) FAILED.`);

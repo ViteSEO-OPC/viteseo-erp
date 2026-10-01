@@ -11,7 +11,15 @@ import type { Intent, IntentConfig, CopilotContext } from "@/modules/crm/feature
 import { matchIntentWithEntity, findIntent, extractEntityPhrase } from "@/modules/crm/features/copilot/engine/matcher";
 import { buildResponse } from "@/modules/crm/features/copilot/engine/response-engine";
 import { runAction } from "@/modules/crm/features/copilot/engine/action-engine";
-import { isAiEligible, isLeadAiEligible, leadIdForAi } from "@/modules/crm/features/copilot/engine/ai-fallback";
+import {
+  isAiEligible,
+  isLeadAiEligible,
+  isPageLeadQuestion,
+  leadIdForAi,
+  NO_PAGE_LEAD_REPLY,
+  PAGE_LEAD_FALLBACK,
+  pageLeadId,
+} from "@/modules/crm/features/copilot/engine/ai-fallback";
 import { useCopilotContext } from "@/modules/crm/features/copilot/hooks/use-copilot-context";
 import { useCopilotData } from "@/modules/crm/features/copilot/hooks/use-copilot-data";
 import { usePermissions } from "@/modules/crm/providers/permissions-provider";
@@ -222,11 +230,34 @@ export function useCopilot() {
     [askAi, makeMessage, runTurn],
   );
 
+  /**
+   * A "this lead" question with AI available (Phase 2 Slice 3). On a lead's page, the page's lead id
+   * is sent and the server re-authorises it like any other; an answer that does not come back shows
+   * the fixed lead fallback, never a help article or a second AI request (PO decision D-c). Away from
+   * a lead page there is no lead to point at, so the reply says so, with no AI request (D-b).
+   */
+  const runPageLeadTurn = useCallback(
+    async (text: string, leadId: number | null) => {
+      const answer = leadId === null ? null : await askAi(text, leadId);
+      const reply = answer ?? (leadId === null ? NO_PAGE_LEAD_REPLY : PAGE_LEAD_FALLBACK);
+      const userMessage = makeMessage("user", [{ type: "text", text }]);
+      const aiMessage = makeMessage("ai", [{ type: "text", text: reply }]);
+      setMessages((prev) => [...prev, userMessage, answer === null ? aiMessage : { ...aiMessage, aiAssisted: true }]);
+    },
+    [askAi, makeMessage],
+  );
+
   // Free-text entry from the input bar — resolve the intent via the matcher.
   const send = useCallback(
     (raw: string) => {
       const text = raw.trim();
       if (!text) return;
+      // "Tell me about this lead": answered about the open lead page's lead, never the portfolio.
+      // With AI off this branch never runs and the turn is exactly the rule-based one below.
+      if (aiAvailable && isPageLeadQuestion(text)) {
+        void runPageLeadTurn(text, pageLeadId(pathname));
+        return;
+      }
       const match = matchIntentWithEntity(text, INTENT_CONFIG);
       const { intent } = match;
       // AI only for a genuine fallback or a knowledge-article match; every real intent and direct
@@ -240,7 +271,7 @@ export function useCopilot() {
       // With AI off `aiAvailable` is false, so a lead question takes exactly the rule-based turn.
       void runTurn(text, intent, text, aiAvailable);
     },
-    [runTurn, runAiFallback, aiAvailable],
+    [runTurn, runAiFallback, runPageLeadTurn, aiAvailable, pathname],
   );
 
   // Suggested-prompt chip — bind straight to its intent (deterministic, skips the matcher).
