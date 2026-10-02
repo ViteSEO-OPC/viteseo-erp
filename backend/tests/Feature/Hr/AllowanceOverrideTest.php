@@ -103,7 +103,7 @@ class AllowanceOverrideTest extends HrTestCase
     /** An amount is not a way onto an allowance — membership is the eligibility rule. */
     public function test_an_amount_is_refused_for_someone_the_rule_does_not_cover(): void
     {
-        $program = $this->allowance(2000, 'status', ['part_time']);
+        $program = $this->allowance(2000, 'status', ['seasonal']);
 
         $this->actingAsHr()->putJson($this->url($this->employee, $program), ['amount' => 3000])
             ->assertStatus(422);

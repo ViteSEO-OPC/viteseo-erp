@@ -23,7 +23,8 @@ class RecruitmentService
 
     public const PIPELINES = ['standard', 'ojt'];
 
-    public const EMPLOYMENT_TYPES = ['full_time', 'part_time', 'contract', 'ojt', 'temporary'];
+    /** The same set as the employee record, so a hire lands on the type the role was opened for. */
+    public const EMPLOYMENT_TYPES = EmployeeService::STATUSES;
 
     /** How an OJT allowance is quoted. */
     public const ALLOWANCE_PERIODS = ['per_day', 'per_hour', 'per_month'];
@@ -34,6 +35,20 @@ class RecruitmentService
         'per_hour' => 'per_hour',
         'per_month' => 'fixed_monthly',
     ];
+
+    /** The employment type a hire from this requisition starts on. */
+    private function hireTypeFor(Requisition $requisition): string
+    {
+        if ($requisition->pipeline === 'ojt') {
+            return 'ojt';
+        }
+
+        $type = $requisition->employment_type;
+
+        return $type === null || $type === 'regular' || ! in_array($type, EmployeeService::STATUSES, true)
+            ? 'probationary'
+            : $type;
+    }
 
     /** Employment type decides the candidate pipeline (OJT gets the OJT flow). */
     public static function pipelineForEmployment(?string $employmentType): string
@@ -353,8 +368,12 @@ class RecruitmentService
                  * role-assignment stages -- handed over someone the rest of HR then treated
                  * as a probationary employee: wrong leave allotment, and no way to tell an
                  * intern from a new hire on the directory.
+                 *
+                 * Otherwise the hire takes the requisition's type — except a regular opening,
+                 * which starts on probation as the Labor Code allows. An untyped requisition
+                 * keeps the old probationary default.
                  */
-                'employment_status' => $requisition->pipeline === 'ojt' ? 'ojt' : 'probationary',
+                'employment_status' => $this->hireTypeFor($requisition),
                 // Carried from the application. The school goes into the education field the
                 // record already has rather than a second column saying the same thing.
                 'university' => $candidate->school,

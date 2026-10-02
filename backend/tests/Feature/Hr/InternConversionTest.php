@@ -143,7 +143,7 @@ class InternConversionTest extends HrTestCase
     /** The other pipeline is untouched: a standard hire is still a probationary employee. */
     public function test_hiring_from_a_standard_requisition_still_creates_a_probationary_employee(): void
     {
-        $req = $this->requisition('full_time');
+        $req = $this->requisition('regular');
         // School and hours are OJT paperwork — the service drops them for a standard role,
         // so there is nothing to carry over here.
         $candidate = $this->candidate($req, ['name' => 'Jon Park', 'email' => 'jon.park@example.com']);
@@ -153,6 +153,20 @@ class InternConversionTest extends HrTestCase
         $this->assertSame('probationary', $employee->employment_status);
         $this->assertNull($employee->ojt_required_hours);
         $this->assertNull($employee->university);
+    }
+
+    /** Requisitions share the employee's type set, so a non-regular opening hires as that type. */
+    public function test_hiring_from_a_typed_requisition_lands_on_that_type(): void
+    {
+        foreach (['fixed_term', 'project_based', 'seasonal'] as $i => $type) {
+            $candidate = $this->candidate($this->requisition($type), [
+                'name' => "Hire {$i}", 'email' => "hire{$i}@example.com",
+            ]);
+
+            $employee = Employee::findOrFail($this->recruitment()->hire($candidate)->hired_employee_id);
+
+            $this->assertSame($type, $employee->employment_status);
+        }
     }
 
     // --- the conversion -------------------------------------------------------------------------

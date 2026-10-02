@@ -62,7 +62,7 @@ export function EligibilityPicker({
 
       {mode === "status" && (
         <div className="space-y-1.5">
-          <Label htmlFor="elig-statuses">Employment statuses</Label>
+          <Label htmlFor="elig-statuses">Employment types</Label>
           <MultiCombobox
             id="elig-statuses"
             options={EMPLOYMENT_STATUSES.map((s) => ({ value: s, label: statusLabel(s) }))}

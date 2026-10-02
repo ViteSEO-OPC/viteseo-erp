@@ -256,7 +256,7 @@ class EmployeeDirectoryPagingTest extends HrTestCase
     /** Four fields — id and name to render, plus the two the eligibility picker filters on. */
     public function test_the_options_payload_carries_only_what_a_picker_needs(): void
     {
-        $this->makeEmployee('Ana Reyes', ['is_management' => true, 'employment_status' => 'contract']);
+        $this->makeEmployee('Ana Reyes', ['is_management' => true, 'employment_status' => 'fixed_term']);
 
         $option = $this->actingAs($this->hrUser())
             ->getJson('/api/v1/hr/employees/options')

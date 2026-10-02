@@ -1,3 +1,5 @@
+import { EMPLOYMENT_STATUSES, statusLabel } from "@/modules/hr/types/employee";
+
 export const CANDIDATE_SOURCES = [
   "referral",
   "linkedin",
@@ -13,13 +15,14 @@ export const PIPELINES = [
   { value: "ojt", label: "OJT" },
 ] as const;
 
-export const EMPLOYMENT_TYPES = [
-  { value: "full_time", label: "Full-time" },
-  { value: "part_time", label: "Part-time" },
-  { value: "contract", label: "Contract" },
-  { value: "ojt", label: "OJT / Internship" },
-  { value: "temporary", label: "Temporary" },
-] as const;
+// The same set as the employee record (RecruitmentService::EMPLOYMENT_TYPES mirrors
+// EmployeeService::STATUSES), so a hire lands on the type the role was opened for.
+// Short labels ("Fixed Term", not "Fixed Term Employment") — the requisition form's
+// type field sits in a three-column row.
+export const EMPLOYMENT_TYPES = EMPLOYMENT_STATUSES.map((value) => ({
+  value,
+  label: statusLabel(value).replace(/ Employment$/, ""),
+}));
 
 /** How an OJT allowance is quoted. */
 export const ALLOWANCE_PERIODS = [

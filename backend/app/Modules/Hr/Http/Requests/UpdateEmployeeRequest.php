@@ -38,6 +38,8 @@ class UpdateEmployeeRequest extends FormRequest
             'manager_id' => ['nullable', 'integer', 'exists:hr_employees,id', Rule::notIn([$this->route('employee')->id])],
             'job_title' => ['sometimes', 'required', 'string', 'max:255'],
             'employment_status' => ['sometimes', 'required', Rule::in(EmployeeService::STATUSES)],
+            // Separated is not settable here — it goes through the separation flow.
+            'work_status' => ['sometimes', 'required', Rule::in(EmployeeService::WORK_STATUSES)],
             'onboarding_status' => ['nullable', Rule::in(['pending', 'complete'])],
             'hire_date' => ['sometimes', 'required', 'date'],
             'base_salary' => ['sometimes', 'required', 'numeric', 'min:0', 'max:99999999.99'],

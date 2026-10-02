@@ -28,19 +28,19 @@ class RecruitmentDemoSeeder extends Seeder
         )->value('id');
 
         $backend = Requisition::create([
-            'title' => 'Senior Backend Engineer', 'pipeline' => 'standard', 'employment_type' => 'full_time',
+            'title' => 'Senior Backend Engineer', 'pipeline' => 'standard', 'employment_type' => 'regular',
             'salary_range' => '₱140,000 - 180,000', 'location' => 'Manila', 'department_id' => $dept('ENG'),
             'hiring_manager_id' => $mgr('marco@viteseo.ph'), 'openings' => 2,
             'stage' => 'active', 'opened_at' => '2026-05-12', 'target_start_date' => '2026-08-01',
         ]);
         Requisition::create([
-            'title' => 'Product Designer', 'pipeline' => 'standard', 'employment_type' => 'full_time',
+            'title' => 'Product Designer', 'pipeline' => 'standard', 'employment_type' => 'regular',
             'salary_range' => '₱110,000 - 150,000', 'location' => 'Remote', 'department_id' => $dept('PRD'),
             'hiring_manager_id' => $mgr('employee@viteseo.ph'), 'openings' => 1,
             'stage' => 'active', 'opened_at' => '2026-05-28',
         ]);
         Requisition::create([
-            'title' => 'People Ops Coordinator', 'pipeline' => 'standard', 'employment_type' => 'full_time',
+            'title' => 'People Ops Coordinator', 'pipeline' => 'standard', 'employment_type' => 'regular',
             'salary_range' => '₱55,000 - 75,000', 'location' => 'Manila', 'department_id' => $dept('HR'),
             'hiring_manager_id' => $mgr('hr@viteseo.ph'), 'openings' => 1,
             'stage' => 'active', 'opened_at' => '2026-04-30',
@@ -53,7 +53,7 @@ class RecruitmentDemoSeeder extends Seeder
             'stage' => 'active', 'opened_at' => '2026-06-10',
         ]);
         Requisition::create([
-            'title' => 'Account Executive', 'pipeline' => 'standard', 'employment_type' => 'full_time',
+            'title' => 'Account Executive', 'pipeline' => 'standard', 'employment_type' => 'regular',
             'salary_range' => '₱45,000 - 70,000 + commission', 'location' => 'Cebu', 'department_id' => $dept('SAL'),
             'hiring_manager_id' => null, 'openings' => 3,
             'stage' => 'draft', 'opened_at' => '2026-06-24',

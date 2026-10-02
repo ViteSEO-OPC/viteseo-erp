@@ -100,7 +100,7 @@ const schema = z
     department_id: z.string().min(1, "Select a department"),
     manager_id: z.string(),
     job_title: requiredText("Job title"),
-    employment_status: requiredChoice(EMPLOYMENT_STATUSES, "Employment status"),
+    employment_status: requiredChoice(EMPLOYMENT_STATUSES, "Employment type"),
     work_location: optionalText(),
     employee_role: optionalText(),
     hire_date: requiredDate("Hire date"),
@@ -542,7 +542,7 @@ export function EmployeeFormDialog({
                   )}
                 />
               </Field>
-              <Field label="Employment status" error={errors.employment_status?.message}>
+              <Field label="Employment type" error={errors.employment_status?.message}>
                 <Controller
                   control={control}
                   name="employment_status"

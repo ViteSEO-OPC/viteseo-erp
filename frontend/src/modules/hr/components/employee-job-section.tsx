@@ -22,7 +22,9 @@ import {
 import { useRecordSection } from "@/modules/hr/lib/use-record-section";
 import {
   EMPLOYMENT_STATUSES,
+  WORK_STATUSES,
   statusLabel,
+  workStatusLabel,
   type Employee,
   type EmployeeUpdateInput,
 } from "@/modules/hr/types/employee";
@@ -38,7 +40,8 @@ const schema = z.object({
   job_title: requiredText("Job title"),
   department_id: z.string().min(1, "Department is required"),
   manager_id: z.string(),
-  employment_status: requiredChoice(EMPLOYMENT_STATUSES, "Employment status"),
+  employment_status: requiredChoice(EMPLOYMENT_STATUSES, "Employment type"),
+  work_status: requiredChoice(WORK_STATUSES, "Employment status"),
   work_location: optionalText(),
   employee_role: optionalText(),
   hire_date: requiredDate("Start date"),
@@ -55,6 +58,8 @@ function toValues(employee: Employee): Values {
     department_id: employee.department ? String(employee.department.id) : "",
     manager_id: employee.manager ? String(employee.manager.id) : "",
     employment_status: employee.employment_status,
+    // An archived record never reaches edit mode, so "separated" never lands in the form.
+    work_status: employee.work_status === "separated" ? "active" : employee.work_status,
     work_location: employee.work_location ?? "",
     employee_role: employee.employee_role ?? "",
     hire_date: employee.hire_date,
@@ -70,6 +75,7 @@ function toPayload(v: Values): EmployeeUpdateInput {
     department_id: Number(v.department_id),
     manager_id: v.manager_id ? Number(v.manager_id) : null,
     employment_status: v.employment_status,
+    work_status: v.work_status as (typeof WORK_STATUSES)[number],
     work_location: orNull(v.work_location),
     employee_role: orNull(v.employee_role),
     hire_date: v.hire_date,
@@ -128,9 +134,17 @@ export function EmployeeJobSection({
     },
     {
       name: "employment_status",
-      label: "Employment status",
+      label: "Employment type",
       kind: "select",
       options: EMPLOYMENT_STATUSES.map((s) => ({ value: s, label: statusLabel(s) })),
+    },
+    {
+      name: "work_status",
+      label: "Employment status",
+      kind: "select",
+      options: WORK_STATUSES.map((s) => ({ value: s, label: workStatusLabel(s) })),
+      // Separated is set by the separation flow, so it only ever shows here read-only.
+      display: workStatusLabel(employee.work_status),
     },
     { name: "work_location", label: "Location", placeholder: "Manila HQ · Hybrid" },
     {

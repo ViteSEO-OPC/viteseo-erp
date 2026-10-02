@@ -14,7 +14,9 @@ import { useDebouncedValue } from "@/core/use-debounced-value";
 import { useDepartments } from "@/modules/hr/hooks/use-departments";
 import {
   EMPLOYMENT_STATUSES,
+  WORK_STATUSES,
   statusLabel,
+  workStatusLabel,
 } from "@/modules/hr/types/employee";
 import { SimpleSelect } from "@/modules/hr/ui/select";
 
@@ -25,14 +27,15 @@ const PAGE_SIZE = 12;
 export default function EmployeesPage() {
   // Which roster to fetch. A former employee is soft-deleted, so the default query cannot
   // return them at all and there was no way to find somebody to rehire. Separate from the
-  // `status` filter, which is employment_status (regular / probationary / …) and a different
-  // question entirely.
+  // `status` filter, which is the employment TYPE (regular / probationary / …) and a different
+  // question entirely — as is `workStatus` (active / floating / suspended).
   const [roster, setRoster] = useState<"active" | "former" | "all">("active");
   const { data: departments } = useDepartments();
 
   const [search, setSearch] = useState("");
   const [dept, setDept] = useState("all");
   const [status, setStatus] = useState("all");
+  const [workStatus, setWorkStatus] = useState("all");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [page, setPage] = useState(1);
 
@@ -49,6 +52,7 @@ export default function EmployeesPage() {
     status: roster,
     department: dept,
     employment_status: status,
+    work_status: workStatus,
     page,
     per_page: PAGE_SIZE,
   });
@@ -98,7 +102,7 @@ export default function EmployeesPage() {
           />
         </div>
         <SimpleSelect
-          className="w-56"
+          className="w-48"
           value={dept}
           onValueChange={(v) => { setDept(v); setPage(1); }}
           options={[
@@ -107,12 +111,21 @@ export default function EmployeesPage() {
           ]}
         />
         <SimpleSelect
-          className="w-40"
+          className="w-52"
           value={status}
           onValueChange={(v) => { setStatus(v); setPage(1); }}
           options={[
-            { value: "all", label: "All Statuses" },
+            { value: "all", label: "All Employment Types" },
             ...EMPLOYMENT_STATUSES.map((s) => ({ value: s, label: statusLabel(s) })),
+          ]}
+        />
+        <SimpleSelect
+          className="w-44"
+          value={workStatus}
+          onValueChange={(v) => { setWorkStatus(v); setPage(1); }}
+          options={[
+            { value: "all", label: "All Statuses" },
+            ...WORK_STATUSES.map((s) => ({ value: s, label: workStatusLabel(s) })),
           ]}
         />
         {/* Former staff are archived, so finding one to rehire needs its own switch. */}

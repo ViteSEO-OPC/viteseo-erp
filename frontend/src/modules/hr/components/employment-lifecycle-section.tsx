@@ -158,8 +158,8 @@ export function EmploymentLifecycleSection({ employee }: { employee: Employee })
           },
         });
         toast.success(
-          `${employee.name} is now ${statusLabel(convertStatus).toLowerCase()}`,
-          "Their internship is closed on the timeline and leave credits are set for the new status.",
+          `${employee.name} is now on ${statusLabel(convertStatus)}`,
+          "Their internship is closed on the timeline and leave credits are set for the new type.",
         );
       }
       close();
@@ -333,7 +333,7 @@ export function EmploymentLifecycleSection({ employee }: { employee: Employee })
                     </span>
                   </p>
                   <p className="text-xs text-foreground">
-                    Leave credits for this year are set from the defaults for their employment status
+                    Leave credits for this year are set from the defaults for their employment type
                     — days already taken or paid out are not handed back.
                   </p>
                   <p className="text-xs text-foreground">
@@ -349,7 +349,7 @@ export function EmploymentLifecycleSection({ employee }: { employee: Employee })
               <>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <div className="space-y-1.5">
-                    <Label htmlFor="convert-status">New employment status</Label>
+                    <Label htmlFor="convert-status">New employment type</Label>
                     <SimpleSelect
                       id="convert-status"
                       value={convertStatus}

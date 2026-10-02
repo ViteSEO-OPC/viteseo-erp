@@ -46,7 +46,13 @@ class EmployeeService
     /** Ceiling on `per_page`, so the directory endpoint can never be asked for the whole table. */
     private const MAX_PER_PAGE = 100;
 
-    public const STATUSES = ['regular', 'probationary', 'contract', 'part_time', 'project_based', 'ojt'];
+    public const STATUSES = ['regular', 'probationary', 'fixed_term', 'project_based', 'seasonal', 'ojt'];
+
+    /**
+     * Where the employee stands right now, independent of their type. "separated" is
+     * not stored — it is derived from the separation flow (see EmployeeResource).
+     */
+    public const WORK_STATUSES = ['active', 'floating', 'suspended'];
 
     /**
      * Accepted values for the record's picklist fields. These mirror the option lists
@@ -196,7 +202,7 @@ class EmployeeService
     /** Job columns written explicitly rather than as part of the profile blob. */
     private const CORE_COLUMNS = [
         'department_id', 'manager_id', 'job_title',
-        'employment_status', 'onboarding_status', 'hire_date', 'base_salary',
+        'employment_status', 'work_status', 'onboarding_status', 'hire_date', 'base_salary',
         // An intern's own allowance. Core, not profile: pay is HR's to set, and profile
         // columns are also what an employee's change request may write.
         'allowance_amount',
@@ -424,7 +430,7 @@ class EmployeeService
      * below counts everyone who matches, not everyone who was downloaded.
      *
      * @param  array<string, mixed>  $filters  search, status (roster), department,
-     *                                         employment_status, per_page
+     *                                         employment_status, work_status, per_page
      */
     public function list(array $filters = []): LengthAwarePaginator
     {
@@ -432,6 +438,7 @@ class EmployeeService
         $status = $filters['status'] ?? 'active';
         $department = $filters['department'] ?? null;
         $employmentStatus = $filters['employment_status'] ?? null;
+        $workStatus = $filters['work_status'] ?? null;
 
         // Bounded both ways: a page is a page. Without the ceiling `?per_page=100000` turns the
         // directory back into the whole-table read this exists to stop.
@@ -446,6 +453,10 @@ class EmployeeService
             ->when(
                 $employmentStatus && in_array($employmentStatus, self::STATUSES, true),
                 fn ($q) => $q->where('employment_status', $employmentStatus),
+            )
+            ->when(
+                $workStatus && in_array($workStatus, self::WORK_STATUSES, true),
+                fn ($q) => $q->where('work_status', $workStatus),
             )
             // Only what the directory projection reads. `user.roles` and `manager.user` went with
             // `is_hr_officer` and `manager` when the list stopped shipping the full record —
@@ -557,6 +568,7 @@ class EmployeeService
                 'employee_no' => 'EMP' . str_pad((string) $user->id, 4, '0', STR_PAD_LEFT),
                 'job_title' => $data['job_title'],
                 'employment_status' => $data['employment_status'] ?? 'regular',
+                'work_status' => $data['work_status'] ?? 'active',
                 'onboarding_status' => $data['onboarding_status'] ?? null,
                 'hire_date' => $data['hire_date'],
                 'base_salary' => $data['base_salary'] ?? 0,
@@ -1081,6 +1093,8 @@ class EmployeeService
             $employee->update([
                 'separation_type' => null,
                 'separation_date' => null,
+                // Whatever they were on before leaving (floating, suspended) ended with it.
+                'work_status' => 'active',
             ]);
 
             $this->reopenTimelineOnReinstatement($employee);
@@ -1135,6 +1149,8 @@ class EmployeeService
             $employee->update([
                 'separation_type' => null,
                 'separation_date' => null,
+                // Whatever they were on before leaving (floating, suspended) ended with it.
+                'work_status' => 'active',
                 'previous_hire_date' => $previousHire,
                 'hire_date' => $hireDate,
             ]);

@@ -220,8 +220,8 @@ export function LeaveTypeFormDialog({
           <DialogTitle>{isEdit ? "Edit Leave Type" : "Add Leave Type"}</DialogTitle>
           <DialogDescription>
             {isEdit
-              ? "Update this leave type. Set its default credits per employment status in the allotment defaults table below."
-              : "Create a new leave type for employees. Set its default credits per employment status in the allotment defaults table below."}
+              ? "Update this leave type. Set its default credits per employment type in the allotment defaults table below."
+              : "Create a new leave type for employees. Set its default credits per employment type in the allotment defaults table below."}
           </DialogDescription>
         </DialogHeader>
 
@@ -412,7 +412,7 @@ export function LeaveTypeFormDialog({
               />
               <p className="text-xs text-muted-foreground">
                 Runs on the 1st of each month. The yearly figure comes from this type&apos;s allotment
-                for the employee&apos;s employment status.
+                for the employee&apos;s employment type.
               </p>
             </div>
 

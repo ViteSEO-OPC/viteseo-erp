@@ -66,14 +66,14 @@ class BenefitAssignmentGapsTest extends HrTestCase
     public function test_a_status_rule_covers_exactly_those_statuses(): void
     {
         $regular = $this->employee('E-REG', 'regular');
-        $partTime = $this->employee('E-PT', 'part_time');
+        $seasonal = $this->employee('E-SN', 'seasonal');
         $probationary = $this->employee('E-PROB', 'probationary');
 
-        $allowance = $this->allowance(eligibility: 'status', statuses: ['regular', 'part_time']);
+        $allowance = $this->allowance(eligibility: 'status', statuses: ['regular', 'seasonal']);
         $service = app(BenefitProgramService::class);
 
         $this->assertTrue($service->covers($allowance, $regular));
-        $this->assertTrue($service->covers($allowance, $partTime), 'multi-select, not one status');
+        $this->assertTrue($service->covers($allowance, $seasonal), 'multi-select, not one status');
         $this->assertFalse($service->covers($allowance, $probationary));
         $this->assertSame(2, $service->eligibleCount($allowance));
     }
@@ -154,11 +154,11 @@ class BenefitAssignmentGapsTest extends HrTestCase
     {
         app(BenefitProgramService::class)->create([
             'name' => 'Field Allowance', 'kind' => 'allowance', 'amount' => 1000,
-            'eligibility' => 'status', 'eligibility_statuses' => ['regular', 'part_time'],
+            'eligibility' => 'status', 'eligibility_statuses' => ['regular', 'seasonal'],
         ]);
 
         $log = AuditLog::where('action', 'created')->latest('id')->first();
-        $this->assertStringContainsString('regular, part_time', $log->description);
+        $this->assertStringContainsString('regular, seasonal', $log->description);
     }
 
     // --- 6. dropping and re-adding must not destroy the pivot ------------------------

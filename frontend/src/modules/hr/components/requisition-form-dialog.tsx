@@ -71,7 +71,7 @@ type FormValues = z.infer<typeof schema>;
 const labelClass = "text-label font-semibold uppercase tracking-wide text-muted-foreground";
 
 const EMPTY: FormValues = {
-  title: "", employment_type: "full_time", salary_range: "",
+  title: "", employment_type: "regular", salary_range: "",
   allowance_amount: "", allowance_period: "per_day", department_id: "",
   hiring_manager_id: "", openings: "1", stage: "active", target_start_date: "",
   location: "", job_description: "",
@@ -111,7 +111,7 @@ export function RequisitionFormDialog({
       requisition
         ? {
             title: requisition.title,
-            employment_type: requisition.employment_type ?? "full_time",
+            employment_type: requisition.employment_type ?? "regular",
             salary_range: requisition.salary_range ?? "",
             allowance_amount:
               requisition.allowance_amount != null ? String(requisition.allowance_amount) : "",

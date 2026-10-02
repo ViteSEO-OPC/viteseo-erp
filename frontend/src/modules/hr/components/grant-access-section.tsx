@@ -49,7 +49,7 @@ const MODULES: { feature: string; label: string; roles: { value: string; label: 
  * Employment statuses whose tier is not a choice — they may only hold the
  * narrowest role a module offers. Kept in step with GrantableRoles::NARROW_STATUSES.
  */
-const NARROW_STATUSES = ["ojt", "part_time", "project_based"];
+const NARROW_STATUSES = ["ojt", "project_based", "seasonal"];
 
 export function GrantAccessSection({
   value,

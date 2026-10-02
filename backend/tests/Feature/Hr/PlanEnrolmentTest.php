@@ -93,7 +93,7 @@ class PlanEnrolmentTest extends HrTestCase
 
     public function test_an_ineligible_employee_is_rejected_by_name_not_silently_enrolled(): void
     {
-        $plan = $this->plan('status', ['part_time']);
+        $plan = $this->plan('status', ['seasonal']);
 
         $body = $this->actingAsHr()->putJson($this->url($plan), [
             'enrollments' => [['employee_id' => $this->employee->id, 'tier' => 'Self']],

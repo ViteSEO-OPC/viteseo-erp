@@ -76,8 +76,8 @@ class EmployeeDemoSeeder extends Seeder
             ['name' => 'Bea Ramos', 'email' => 'bea@viteseo.ph', 'dept' => 'PRD', 'title' => 'UX Designer', 'status' => 'regular', 'hire' => '2023-01-20', 'salary' => 58000, 'manager' => $maya->id],
             ['name' => 'Carlo Diaz', 'email' => 'carlo@viteseo.ph', 'dept' => 'SAL', 'title' => 'Sales Executive', 'status' => 'regular', 'hire' => '2021-11-11', 'salary' => 52000, 'manager' => null],
             ['name' => 'Nina Flores', 'email' => 'nina@viteseo.ph', 'dept' => 'FIN', 'title' => 'Accountant', 'status' => 'regular', 'hire' => '2022-09-15', 'salary' => 55000, 'manager' => null],
-            ['name' => 'Paolo Mendoza', 'email' => 'paolo@viteseo.ph', 'dept' => 'HR', 'title' => 'Recruiter', 'status' => 'contract', 'hire' => '2024-02-01', 'salary' => 45000, 'manager' => $dana->id],
-            ['name' => 'Ella Reyes', 'email' => 'ella@viteseo.ph', 'dept' => 'SAL', 'title' => 'Sales Associate', 'status' => 'part_time', 'hire' => '2025-07-01', 'salary' => 30000, 'manager' => null],
+            ['name' => 'Paolo Mendoza', 'email' => 'paolo@viteseo.ph', 'dept' => 'HR', 'title' => 'Recruiter', 'status' => 'fixed_term', 'hire' => '2024-02-01', 'salary' => 45000, 'manager' => $dana->id],
+            ['name' => 'Ella Reyes', 'email' => 'ella@viteseo.ph', 'dept' => 'SAL', 'title' => 'Sales Associate', 'status' => 'fixed_term', 'hire' => '2025-07-01', 'salary' => 30000, 'manager' => null],
         ];
 
         foreach ($reports as $r) {
@@ -109,7 +109,7 @@ class EmployeeDemoSeeder extends Seeder
         // expanded employee record shows content instead of dashes.
         $typeLabel = [
             'regular' => 'Full-time Regular', 'probationary' => 'Full-time Probationary',
-            'contract' => 'Contract', 'part_time' => 'Part-time',
+            'fixed_term' => 'Fixed-term',
         ];
         foreach (Employee::with('user')->get() as $e) {
             $parts = preg_split('/\s+/', trim((string) $e->user->name));
@@ -123,9 +123,10 @@ class EmployeeDemoSeeder extends Seeder
                 'employee_role' => $e->job_title,
                 // Compensation defaults. A couple of non-default pay frequencies so
                 // the payroll pay-groups feature has more than one group to show.
-                'pay_frequency' => match ($e->employment_status) {
-                    'part_time' => 'weekly',
-                    'contract' => 'monthly',
+                // Ella is part-time, which is a fixed-term arrangement here.
+                'pay_frequency' => match (true) {
+                    $e->user->email === 'ella@viteseo.ph' => 'weekly',
+                    $e->employment_status === 'fixed_term' => 'monthly',
                     default => 'semi_monthly',
                 },
                 'currency' => 'PHP',

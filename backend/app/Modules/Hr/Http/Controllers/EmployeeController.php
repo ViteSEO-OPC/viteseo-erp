@@ -42,6 +42,7 @@ class EmployeeController extends Controller
             'status' => $status,
             'department' => $request->query('department'),
             'employment_status' => $request->query('employment_status'),
+            'work_status' => $request->query('work_status'),
             'per_page' => $request->query('per_page'),
         ]);
 

@@ -28,6 +28,7 @@ class Employee extends Model
         'photo_path',
         'job_title',
         'employment_status',
+        'work_status',
         'ojt_required_hours',
         // Interns only — their own allowance, overriding the company default.
         'allowance_amount',
