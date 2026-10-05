@@ -68,6 +68,37 @@ class PayrollService
     ) {}
 
     /**
+     * Work statuses under which nobody is owed basic pay for a day they did not work: floating
+     * status (a bona fide suspension of operations) and suspension (preventive or disciplinary).
+     * No work, no pay — for management too. Allowances are a fixed rate and are not affected.
+     */
+    private const OFF_WORK_STATUSES = ['floating', 'suspended'];
+
+    /** Floating or suspended: paid strictly for the days attendance shows they worked. */
+    private function isOffWork(Employee $employee): bool
+    {
+        return in_array($employee->work_status, self::OFF_WORK_STATUSES, true);
+    }
+
+    /**
+     * Who attendance prices for this payslip. Management is on a fixed salary that attendance
+     * never prorates — right while they are working, wrong while they are floating or suspended,
+     * when only the days they actually worked are owed. An unsaved copy without the management
+     * flag gets them priced by attendance like everyone else; the record itself is untouched.
+     */
+    private function attendanceSubjectFor(Employee $employee): Employee
+    {
+        if (! $this->isOffWork($employee) || ! $employee->isManagement()) {
+            return $employee;
+        }
+
+        $subject = clone $employee;
+        $subject->is_management = false;
+
+        return $subject;
+    }
+
+    /**
      * The canonical daily rate, honoring the attendance policy's daily-rate basis:
      *   - fixed_divisor   → base × 12 ÷ annual_divisor (constant all year, DOLE-style)
      *   - period_workdays → this period's pay ÷ its scheduled workdays (the default)
@@ -4415,7 +4446,9 @@ class PayrollService
                     // That was invisible while the two were always the same object; now that the
                     // policy is dated, omitting it would price every deduction at today's rules and
                     // silently defeat asOf() for the one part of the payslip it matters most to.
-                    $unpaidDetail = $this->attendance->unpaidDaysDetailFor($employee, $cycleStart, $cycleEnd, $policy, $salaryFrom);
+                    // A floating or suspended manager is priced by attendance too — see
+                    // attendanceSubjectFor(). Everyone else is passed through unchanged.
+                    $unpaidDetail = $this->attendance->unpaidDaysDetailFor($this->attendanceSubjectFor($employee), $cycleStart, $cycleEnd, $policy, $salaryFrom);
 
                     // Premium for working on a (non-working) holiday in this cycle, plus the days
                     // behind it for the payslip to print.
