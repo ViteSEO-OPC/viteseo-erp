@@ -7,7 +7,6 @@ use App\Models\User;
 use App\Modules\Crm\Services\Discovery\NerbyDatasetImporter;
 use App\Modules\Crm\Services\Discovery\NerbyServiceIdentity;
 use Illuminate\Console\Command;
-use Illuminate\Support\Facades\Storage;
 
 /**
  * Import an existing NERBY dataset (JSONL) into ONE org, without calling any discovery provider.
@@ -97,34 +96,11 @@ class ImportNerbyDatasetCommand extends Command
         }
 
         $manifest = $importer->run($path, $orgId, $sources, $aiFilter, $write ? (string) $confirm : null, $actorId);
-        $manifestPath = $this->writeManifest($manifest);
+        $manifestPath = $importer->storeManifest($manifest, $this->option('manifest'));
 
         $this->report($manifest, $manifestPath);
 
         return $manifest['status'] === 'ok' ? self::SUCCESS : self::FAILURE;
-    }
-
-    /** @param  array<string, mixed>  $manifest */
-    private function writeManifest(array $manifest): string
-    {
-        $json = json_encode($manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
-
-        $explicit = $this->option('manifest');
-        if ($explicit !== null && $explicit !== '') {
-            file_put_contents((string) $explicit, $json.PHP_EOL);
-
-            return (string) $explicit;
-        }
-
-        $name = sprintf('nerby-imports/%s-org%d-%s-%s.json',
-            now()->utc()->format('Ymd\THis\Z'),
-            $manifest['target']['org_id'],
-            $manifest['mode'],
-            substr((string) $manifest['input']['sha256'], 0, 12),
-        );
-        Storage::disk('local')->put($name, $json.PHP_EOL);
-
-        return Storage::disk('local')->path($name);
     }
 
     /** @param  array<string, mixed>  $manifest */
