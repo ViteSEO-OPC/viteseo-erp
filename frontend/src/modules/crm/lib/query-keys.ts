@@ -106,6 +106,12 @@ export const queryKeys = {
     // Nearby Clients — target-area registry + leads-in-target summary.
     list: () => [...queryKeys.serviceAreas.all, "list"] as const,
   },
+  // Settings → NERBY → Dataset Import: one queued import's polled state, by job id. Not under
+  // `integrations` — it is a one-off job, not a provider's configuration.
+  nerbyDatasetImport: {
+    all: ["nerby-dataset-import"] as const,
+    job: (jobId: string) => [...queryKeys.nerbyDatasetImport.all, "job", jobId] as const,
+  },
   nearbyClients: {
     all: ["nearby-clients"] as const,
     // Discovered-business prospect pool (GET /nearby-clients).

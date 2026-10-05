@@ -10,6 +10,7 @@ use App\Modules\Crm\Services\LeadImportService;
 use App\Support\CurrentOrg;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
 use RuntimeException;
@@ -183,6 +184,37 @@ class NerbyDatasetImporter
 
             return $this->finish($manifest);
         });
+    }
+
+    /**
+     * Persist a manifest as the audit record of one run and return where it was written.
+     *
+     * ONE writer for every entry point — the operator command and the Settings screen — so an audit
+     * reads the same file format whichever door an import came through. Default location is the
+     * private local disk, `nerby-imports/<utc>-org<id>-<mode>-<sha12>.json`; `$explicitPath` is the
+     * command's `--manifest` override.
+     *
+     * @param  array<string, mixed>  $manifest
+     */
+    public function storeManifest(array $manifest, ?string $explicitPath = null): string
+    {
+        $json = json_encode($manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+
+        if ($explicitPath !== null && $explicitPath !== '') {
+            file_put_contents($explicitPath, $json.PHP_EOL);
+
+            return $explicitPath;
+        }
+
+        $name = sprintf('nerby-imports/%s-org%d-%s-%s.json',
+            now()->utc()->format('Ymd\THis\Z'),
+            $manifest['target']['org_id'],
+            $manifest['mode'],
+            substr((string) $manifest['input']['sha256'], 0, 12),
+        );
+        Storage::disk('local')->put($name, $json.PHP_EOL);
+
+        return Storage::disk('local')->path($name);
     }
 
     /**

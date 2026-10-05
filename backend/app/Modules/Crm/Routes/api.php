@@ -33,6 +33,7 @@ use App\Modules\Crm\Controllers\DiscoveryKnownPlacesController;
 use App\Modules\Crm\Controllers\DiscoveryRunController;
 use App\Modules\Crm\Controllers\GmailOAuthController;
 use App\Modules\Crm\Controllers\MetaConnectController;
+use App\Modules\Crm\Controllers\NerbyDatasetImportController;
 use App\Modules\Crm\Controllers\NerbyProviderSettingController;
 use App\Modules\Crm\Controllers\LeadAttachmentController;
 use App\Modules\Crm\Controllers\LeadController;
@@ -287,6 +288,25 @@ Route::middleware(['auth:sanctum', 'set-current-org', 'subscription-active', 'fe
         // Stops the NEXT search. It cannot refund a provider call already made, and everything
         // already discovered stays in the CRM — the controller says so in its response.
         Route::post('/discovery/runs/{discoveryRun}/cancel', [DiscoveryRunController::class, 'cancel'])
+            ->can('import', Lead::class)
+            ->middleware(['role:super_admin|crm_admin', 'throttle:60,1']);
+
+        // Settings → NERBY → Dataset Import: an admin lands an EXISTING NERBY dataset (JSONL) into
+        // their own org through NerbyDatasetImporter, the engine `crm:nerby-import` uses. No provider
+        // is called. Same gate as the discovery runs above, for the same reason: `crm.leads.import`
+        // alone is held by BDs. NOT under the super-admin-only `settings/integrations/nerby` group —
+        // that guards ViteSEO's global API keys, while an import only ever writes the caller's org.
+        //
+        // The dry run writes no lead. The import needs the SHA-256 the dry run reported and is queued;
+        // the GET polls it. Starts are throttled in their own buckets: each one parses the whole file.
+        Route::post('/settings/nerby/dataset-import/dry-run', [NerbyDatasetImportController::class, 'dryRun'])
+            ->can('import', Lead::class)
+            ->middleware(['role:super_admin|crm_admin', 'throttle:10,1,crm-nerby-dataset-dry-run:']);
+        Route::post('/settings/nerby/dataset-import', [NerbyDatasetImportController::class, 'store'])
+            ->can('import', Lead::class)
+            ->middleware(['role:super_admin|crm_admin', 'throttle:5,1,crm-nerby-dataset-import:']);
+        Route::get('/settings/nerby/dataset-import/{jobId}', [NerbyDatasetImportController::class, 'show'])
+            ->whereUuid('jobId')
             ->can('import', Lead::class)
             ->middleware(['role:super_admin|crm_admin', 'throttle:60,1']);
         Route::get('/leads/{lead}/activities', [LeadController::class, 'activities'])->can('view', 'lead');

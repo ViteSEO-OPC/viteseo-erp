@@ -11,6 +11,7 @@ import {
   Gauge,
   Mail,
   Palette,
+  DatabaseZap,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/modules/crm/lib/utils";
@@ -27,6 +28,15 @@ const GROUPS: NavGroup[] = [
       // Single consolidated Archive Management surface (replaces the former Lead Archive /
       // Recycle Bin / Restore Archived Leads stubs). One archive state: SoftDeletes (deleted_at).
       { label: "Archive Management", href: "/zerem/settings/archive", icon: Archive },
+    ],
+  },
+  {
+    heading: "NERBY",
+    items: [
+      // Dataset Import — lands an existing NERBY dataset (JSONL) in the admin's own org. No
+      // `permission` gate, like Integrations: the settings area is minRole crm_admin and every
+      // endpoint behind the page is role:super_admin|crm_admin server-side, so a BD never reaches it.
+      { label: "Dataset Import", href: "/zerem/settings/nerby/dataset-import", icon: DatabaseZap },
     ],
   },
   {
