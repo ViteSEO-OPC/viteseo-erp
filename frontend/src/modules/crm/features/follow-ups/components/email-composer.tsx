@@ -1,11 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronDown, Zap } from "lucide-react";
+import { ChevronDown, Info, Zap } from "lucide-react";
 import { cn } from "@/modules/crm/lib/utils";
 import { FormField } from "@/modules/crm/components/forms/form-field/form-field";
 import { Input } from "@/modules/crm/components/ui/input";
 import { Textarea } from "@/modules/crm/components/ui/textarea";
+import { Badge } from "@/modules/crm/components/ui/badge";
 import {
   Select,
   SelectTrigger,
@@ -27,6 +28,13 @@ type EmailComposerProps = {
   toneOptions?: string[];
   onSelectPurpose?: (value: string) => void;
   onSelectTone?: (value: string) => void;
+  /**
+   * The selected template's format — its own design (set in Settings), never chosen here. Null when the
+   * current Purpose + Tone match no template.
+   */
+  templateFormat?: { isDesigned: boolean; designName: string | null } | null;
+  /** Why a designed template will go out as plain text this time, or null. */
+  designNotice?: string | null;
   /** Re-render Subject + Body from the current Purpose + Tone. Omitted when no template matches. */
   onRegenerate?: () => void;
   onToggleSchedule: () => void;
@@ -49,6 +57,8 @@ export function EmailComposer({
   toneOptions,
   onSelectPurpose,
   onSelectTone,
+  templateFormat,
+  designNotice,
   onRegenerate,
   onToggleSchedule,
   onSaveDraft,
@@ -160,6 +170,30 @@ export function EmailComposer({
           <p className="-mt-1 text-xs text-muted-foreground">
             Templates need a linked lead — this follow-up has none.
           </p>
+        ) : null}
+
+        {/*
+          The selected template's format. A designed template carries its own design (Settings → Email
+          Templates); the composer only reports it — there is deliberately no design picker. The notice
+          explains the existing edited-text rule, it does not add one.
+        */}
+        {templateFormat ? (
+          <div className="-mt-1 flex flex-col gap-1.5">
+            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+              <span>Format</span>
+              <Badge variant={templateFormat.isDesigned ? "secondary" : "outline"}>
+                {templateFormat.isDesigned
+                  ? `Designed · ${templateFormat.designName ?? "Email design"}`
+                  : "Plain text"}
+              </Badge>
+            </div>
+            {designNotice ? (
+              <p role="status" className="flex items-start gap-1.5 text-xs text-foreground">
+                <Info className="mt-px h-3.5 w-3.5 shrink-0 text-warning" aria-hidden />
+                {designNotice}
+              </p>
+            ) : null}
+          </div>
         ) : null}
 
         {/*

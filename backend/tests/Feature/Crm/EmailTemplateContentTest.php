@@ -585,7 +585,10 @@ class EmailTemplateContentTest extends TestCase
             ->firstWhere('id', (string) $template->id);
 
         // Same shape as every other template; the body is the derived text with the lead's values filled in.
-        $this->assertSame(['id', 'purpose', 'tone', 'subject', 'body'], array_keys($row));
+        // `isDesigned` / `designName` are additive: they report the template's own design to the composer.
+        $this->assertSame(['id', 'purpose', 'tone', 'subject', 'body', 'isDesigned', 'designName'], array_keys($row));
+        $this->assertTrue($row['isDesigned']);
+        $this->assertSame($template->design->name, $row['designName']);
         $this->assertSame(
             str_replace(['{{first_name}}', '{{business_name}}', '{{sender_name}}'], ['Maria', 'Santos Bakery', 'Alex Reyes'], self::DERIVED_BODY),
             $row['body'],
