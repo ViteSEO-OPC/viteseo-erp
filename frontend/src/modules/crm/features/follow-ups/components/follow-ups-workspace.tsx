@@ -53,6 +53,8 @@ export function FollowUpsWorkspace({ leadId }: FollowUpsWorkspaceProps) {
     canRegenerate,
     isDraftEdited,
     sendableTemplateId,
+    templateFormat,
+    designNotice,
   } = useFollowUpsData(leadId);
 
   const sendEmail = useSendEmail();
@@ -246,6 +248,8 @@ export function FollowUpsWorkspace({ leadId }: FollowUpsWorkspaceProps) {
               toneOptions={toneOptions}
               onSelectPurpose={selectPurpose}
               onSelectTone={selectTone}
+              templateFormat={templateFormat}
+              designNotice={designNotice}
               onRegenerate={canRegenerate ? handleRegenerate : undefined}
               onToggleSchedule={handleToggleSchedule}
               // Withheld when the item has no lead: the draft endpoint is POST

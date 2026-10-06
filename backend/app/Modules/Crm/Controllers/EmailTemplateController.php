@@ -43,6 +43,9 @@ class EmailTemplateController extends Controller
 
         $data = EmailTemplate::query()
             ->active()
+            // Only what the composer's "Designed · {name}" label needs. The design itself is applied by the
+            // send path from the template's own `email_design_id`; the composer never chooses one.
+            ->with('design:id,name')
             ->orderBy('purpose')
             ->orderBy('tone')
             ->get()
@@ -64,6 +67,11 @@ class EmailTemplateController extends Controller
                     'tone' => $template->tone,
                     'subject' => $rendered['subject'],
                     'body' => $rendered['body'],
+                    // Additive. Whether this template is built with the visual designer — so an UNEDITED
+                    // send carries its design — and that design's name, for the composer to say so.
+                    // Plain-text templates have no design: false / null.
+                    'isDesigned' => $template->isDesigned(),
+                    'designName' => $template->isDesigned() ? $template->design?->name : null,
                 ];
             });
 

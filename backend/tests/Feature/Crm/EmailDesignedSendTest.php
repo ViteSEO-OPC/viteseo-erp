@@ -3,6 +3,7 @@
 namespace Tests\Feature\Crm;
 
 use App\Models\User;
+use App\Modules\Crm\Jobs\SendScheduledEmailsJob;
 use App\Modules\Crm\Models\Email;
 use App\Modules\Crm\Models\EmailDesign;
 use App\Modules\Crm\Models\EmailTemplate;
@@ -16,6 +17,8 @@ use App\Modules\Crm\Services\Outreach\EmailTemplateDesignService;
 use App\Modules\Crm\Services\Outreach\OutreachEmailService;
 use App\Modules\Crm\Services\Outreach\TemplateRenderer;
 use App\Modules\Crm\Support\EmailDesign\EmailDesignRenderer;
+use App\Services\OrgOnboardingService;
+use App\Support\CurrentOrg;
 use Database\Seeders\RolesAndPermissionsSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Mail;
@@ -877,5 +880,238 @@ class EmailDesignedSendTest extends TestCase
 
         $this->assertNull(Email::query()->latest('id')->first()->body_html);
         $this->assertNull($this->lastSent()->getHtmlBody());
+    }
+
+    // ── 11. COMPOSER FEED: the template's own design, reported ──────────────────────────────
+    //
+    // The design is a property of the template (Settings), never chosen per send. The composer feed only
+    // reports it, so the composer can say "Designed · {name}" or "Plain text".
+
+    /** @return array<string, mixed> the feed entry for a template */
+    private function feedEntry(Lead $lead, EmailTemplate $template): array
+    {
+        $entry = collect($this->getJson("/api/v1/crm/leads/{$lead->id}/email-templates")->assertOk()->json('data'))
+            ->firstWhere('id', (string) $template->id);
+        $this->assertIsArray($entry, 'The template should be in the composer feed.');
+
+        return $entry;
+    }
+
+    public function test_the_composer_feed_reports_a_designed_templates_design(): void
+    {
+        $sender = $this->admin();
+        Sanctum::actingAs($sender);
+        $lead = $this->lead();
+        $template = $this->designedTemplate();
+
+        $entry = $this->feedEntry($lead, $template);
+
+        $this->assertTrue($entry['isDesigned']);
+        $this->assertSame('Brand design', $entry['designName']);
+        // The existing fields are unchanged: subject and the lead-rendered plain-text body.
+        $this->assertSame($this->asOffered($template, $lead, $sender), $entry['body']);
+        $this->assertSame('A quick idea for Acme Bakery', $entry['subject']);
+        $this->assertSame(['id', 'purpose', 'tone', 'subject', 'body', 'isDesigned', 'designName'], array_keys($entry));
+    }
+
+    public function test_the_composer_feed_reports_a_plain_template_as_plain(): void
+    {
+        Sanctum::actingAs($this->admin());
+        $lead = $this->lead();
+        $plain = EmailTemplate::create([
+            'purpose' => 'Follow-up', 'tone' => 'Casual', 'subject' => 'Checking in',
+            'body' => 'Hi {{first_name}}, just checking in.', 'is_active' => true,
+        ]);
+
+        $entry = $this->feedEntry($lead, $plain);
+
+        $this->assertFalse($entry['isDesigned']);
+        $this->assertNull($entry['designName']);
+        $this->assertSame('Hi Maria, just checking in.', $entry['body']);
+    }
+
+    public function test_the_composer_feed_never_shows_another_organizations_template_or_design(): void
+    {
+        $theirOrg = app(OrgOnboardingService::class)->createOrg(
+            'Org theirs', 'Owner theirs', 'owner-theirs@client.ph', 'password-123', ['crm' => 'full'],
+        )['org'];
+        CurrentOrg::runAs($theirOrg->id, function (): void {
+            $design = EmailDesign::create(['name' => 'Their secret design', 'is_default' => false, 'layout' => $this->layout()]);
+            EmailTemplate::create([
+                'purpose' => 'Follow-up', 'tone' => 'Their tone', 'subject' => 'Theirs', 'body' => 'Theirs',
+                'content' => $this->content([$this->heading(['text' => 'Theirs'])]),
+                'email_design_id' => $design->id, 'is_active' => true,
+            ]);
+        });
+        CurrentOrg::clear();
+
+        Sanctum::actingAs($this->admin());
+        $lead = $this->lead();
+        $feed = $this->getJson("/api/v1/crm/leads/{$lead->id}/email-templates")->assertOk()->json('data');
+
+        $this->assertNotContains('Their tone', array_column($feed, 'tone'));
+        $this->assertNotContains('Their secret design', array_column($feed, 'designName'));
+    }
+
+    public function test_the_composer_feed_keeps_its_existing_rbac(): void
+    {
+        $bd = User::factory()->create(['status' => 'active']);
+        $bd->assignRole('crm_bd');
+        $own = $this->lead(['assigned_to' => $bd->id]);
+        $other = $this->lead(['assigned_to' => $this->admin()->id, 'email' => 'other@acme.test']);
+        $template = $this->designedTemplate();
+
+        Sanctum::actingAs($bd);
+        $this->assertTrue($this->feedEntry($own, $template)['isDesigned']);
+        $this->getJson("/api/v1/crm/leads/{$other->id}/email-templates")->assertForbidden();
+        // Design management stays admin-only: the composer feed is not a way into it.
+        $this->getJson('/api/v1/crm/settings/email-designs')->assertForbidden();
+    }
+
+    // ── 12. SCHEDULED DESIGNED SENDS ─────────────────────────────────────────────────────────
+    //
+    // A scheduled email used to drop its template id, so a designed template scheduled for later went
+    // out as plain text. It is now recorded and rendered at delivery by the same sendExisting() path.
+
+    private function scheduleDesigned(Lead $lead, string $body, EmailTemplate $template): Email
+    {
+        $id = $this->send($lead, [
+            'subject' => 'A quick idea',
+            'body' => $body,
+            'email_template_id' => (string) $template->id,
+            'scheduled_at' => now()->addDay()->toIso8601String(),
+        ])->assertCreated()->assertJsonPath('data.status', 'scheduled')->json('data.id');
+
+        return Email::query()->findOrFail($id);
+    }
+
+    private function deliverDue(): void
+    {
+        $this->travel(2)->days();
+        SendScheduledEmailsJob::dispatchSync();
+    }
+
+    public function test_a_scheduled_designed_email_is_delivered_in_its_design(): void
+    {
+        $sender = $this->admin();
+        Sanctum::actingAs($sender);
+        $lead = $this->lead();
+        $template = $this->designedTemplate();
+
+        $email = $this->scheduleDesigned($lead, $this->asOffered($template, $lead, $sender), $template);
+
+        $this->assertSame($template->id, $email->email_template_id, 'Scheduling must keep the template id.');
+        $this->assertNull($email->body_html, 'Nothing is rendered or stored before delivery.');
+        $this->assertCount(0, Mail::mailer()->getSymfonyTransport()->messages(), 'Scheduling must not send.');
+
+        $this->deliverDue();
+
+        $sentHtml = (string) $this->lastSent()->getHtmlBody();
+        $expected = app(EmailDesignRenderer::class)->toHtml(
+            $template->design->layout,
+            $template->content,
+            app(EmailTemplateDesignService::class)->sendContext($lead, $sender),
+        );
+
+        $this->assertSame($expected, $sentHtml, 'Delivery must use the existing design renderer and send context.');
+        $this->assertStringContainsString('Book a call', $sentHtml);
+        $delivered = Email::withoutGlobalScopes()->findOrFail($email->id);
+        $this->assertSame('sent', $delivered->status);
+        $this->assertSame($sentHtml, $delivered->body_html, 'The snapshot is byte-identical to what the transport received.');
+        $this->assertSame((string) $delivered->body, (string) $this->lastSent()->getTextBody(), 'The plain-text part is still the stored body.');
+    }
+
+    public function test_send_now_on_a_scheduled_designed_email_sends_its_design(): void
+    {
+        $sender = $this->admin();
+        Sanctum::actingAs($sender);
+        $lead = $this->lead();
+        $template = $this->designedTemplate();
+
+        $email = $this->scheduleDesigned($lead, $this->asOffered($template, $lead, $sender), $template);
+        $this->postJson("/api/v1/crm/emails/{$email->id}/send-now")->assertOk();
+
+        $sentHtml = (string) $this->lastSent()->getHtmlBody();
+        $this->assertStringContainsString('Book a call', $sentHtml);
+        $this->assertSame($sentHtml, $email->fresh()->body_html);
+    }
+
+    public function test_a_scheduled_email_with_an_edited_body_is_delivered_as_plain_text(): void
+    {
+        $sender = $this->admin();
+        Sanctum::actingAs($sender);
+        $lead = $this->lead();
+        $template = $this->designedTemplate();
+
+        $email = $this->scheduleDesigned($lead, "Hi Maria,\n\nI rewrote this myself.", $template);
+        $this->assertSame($template->id, $email->email_template_id, 'The id is recorded; the edit check decides at delivery.');
+
+        $this->deliverDue();
+
+        $message = $this->lastSent();
+        $this->assertNull($message->getHtmlBody(), 'The existing edit check must still refuse the design.');
+        $this->assertStringContainsString('I rewrote this myself.', (string) $message->getTextBody());
+        $this->assertNull(Email::withoutGlobalScopes()->findOrFail($email->id)->body_html);
+    }
+
+    public function test_a_template_edited_while_scheduled_falls_back_to_plain_text(): void
+    {
+        $sender = $this->admin();
+        Sanctum::actingAs($sender);
+        $lead = $this->lead();
+        $template = $this->designedTemplate();
+
+        $email = $this->scheduleDesigned($lead, $this->asOffered($template, $lead, $sender), $template);
+
+        // An admin rewrites the template before the email is due: its derived body no longer matches what
+        // the BD scheduled, so the edit check refuses the design — the BD's scheduled text goes out plain.
+        $content = $this->content([$this->heading(['text' => 'A different message entirely'])]);
+        $template->forceFill([
+            'content' => $content,
+            'body' => app(EmailTemplateDesignService::class)->plainTextBody($template->design->layout, $content),
+        ])->save();
+
+        $this->deliverDue();
+
+        $this->assertNull($this->lastSent()->getHtmlBody());
+        $this->assertStringNotContainsString('A different message entirely', $this->lastSent()->toString());
+        $this->assertNull(Email::withoutGlobalScopes()->findOrFail($email->id)->body_html);
+    }
+
+    public function test_a_scheduled_plain_email_is_unchanged(): void
+    {
+        Sanctum::actingAs($this->admin());
+        $lead = $this->lead();
+
+        $id = $this->send($lead, [
+            'subject' => 'Later', 'body' => 'Plain later', 'scheduled_at' => now()->addDay()->toIso8601String(),
+        ])->assertCreated()->json('data.id');
+        $this->assertNull(Email::query()->findOrFail($id)->email_template_id);
+
+        $this->deliverDue();
+
+        $this->assertNull($this->lastSent()->getHtmlBody());
+        $this->assertNull(Email::withoutGlobalScopes()->findOrFail($id)->body_html);
+    }
+
+    /** Delivering a later email never touches an earlier email's snapshot, even after a template edit. */
+    public function test_a_scheduled_delivery_never_rewrites_an_earlier_snapshot(): void
+    {
+        $sender = $this->admin();
+        Sanctum::actingAs($sender);
+        $lead = $this->lead();
+        $template = $this->designedTemplate();
+
+        $this->sendDesigned($lead, $sender, $template);
+        $first = Email::query()->latest('id')->firstOrFail();
+        $firstHtml = (string) $first->body_html;
+        $this->assertNotSame('', $firstHtml);
+
+        $template->design->forceFill(['layout' => $this->layout(styles: ['background_color' => '#123456'])])->save();
+        $this->scheduleDesigned($lead, $this->asOffered($template, $lead, $sender), $template);
+        $this->deliverDue();
+
+        $this->assertStringContainsString('#123456', (string) $this->lastSent()->getHtmlBody(), 'The later send uses the edited design.');
+        $this->assertSame($firstHtml, Email::withoutGlobalScopes()->findOrFail($first->id)->body_html, 'The earlier snapshot is untouched.');
     }
 }

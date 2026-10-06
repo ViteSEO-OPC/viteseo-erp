@@ -14,6 +14,14 @@ export type EmailTemplateOption = {
   tone: string;
   subject: string;
   body: string;
+  /**
+   * Whether the template is built with the visual designer. An UNEDITED send of a designed template
+   * goes out in its design; the design is the template's own (Settings), never chosen per send.
+   * Optional so an older payload without the field reads as plain text.
+   */
+  isDesigned?: boolean;
+  /** The name of that design, for the composer's "Designed · {name}" label; null for plain text. */
+  designName?: string | null;
 };
 
 /**

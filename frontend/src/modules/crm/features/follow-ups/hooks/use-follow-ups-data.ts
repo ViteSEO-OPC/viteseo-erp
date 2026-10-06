@@ -308,6 +308,36 @@ export function useFollowUpsData(leadId?: string) {
     [activeTemplate, draft.body],
   );
 
+  /**
+   * What the composer says about the selected template's format: "Designed · {name}" or "Plain text".
+   * Null when no template matches the current Purpose + Tone. Read straight from the template — the
+   * design belongs to the template (Settings → Email Templates), so there is nothing to choose here.
+   */
+  const templateFormat = useMemo(
+    () =>
+      activeTemplate === null
+        ? null
+        : { isDesigned: activeTemplate.isDesigned === true, designName: activeTemplate.designName ?? null },
+    [activeTemplate],
+  );
+
+  /**
+   * Why a designed template will NOT go out in its design, or null when it will (or is plain anyway).
+   * It describes the rule that already decides the send, and adds none: edited text →
+   * `sendableTemplateId` is null, the composer sends no template id, and the server's own edit check
+   * would refuse the design regardless. A blank body is not "edited": nothing has been generated or
+   * written yet.
+   */
+  const designNotice = useMemo(() => {
+    if (activeTemplate?.isDesigned !== true) {
+      return null;
+    }
+    if (draft.body.trim() !== "" && sendableTemplateId === null) {
+      return "Editing the text sends this as plain text.";
+    }
+    return null;
+  }, [activeTemplate, draft.body, sendableTemplateId]);
+
   /** Existing templates available for the tone the BD currently has selected. */
   const templatesForTone = useMemo(
     () => templates.filter((t) => t.tone === draft.tone),
@@ -374,6 +404,8 @@ export function useFollowUpsData(leadId?: string) {
     canRegenerate: templatesForTone.length > 0,
     isDraftEdited,
     sendableTemplateId,
+    templateFormat,
+    designNotice,
     isLoading,
     isError,
   };
