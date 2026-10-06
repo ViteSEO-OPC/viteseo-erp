@@ -7,7 +7,7 @@ import { queryKeys } from "@/modules/crm/lib/query-keys";
 import type { EmailThreadMessage } from "@/modules/crm/features/leads/types/lead-detail-types";
 
 /**
- * The Email API shape returned by GET /leads/{lead}/emails (EmailResource). Only the fields the
+ * The Email API shape returned by GET /leads/{lead}/emails (LeadThreadEmailResource). Only the fields the
  * read-only thread renders are typed here.
  */
 type EmailApi = {

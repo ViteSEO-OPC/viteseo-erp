@@ -21,9 +21,9 @@ use App\Modules\Crm\Requests\StoreLeadRequest;
 use App\Modules\Crm\Requests\UpdateLeadRequest;
 use App\Modules\Crm\Resources\ActivityResource;
 use App\Modules\Crm\Resources\ArchivedLeadResource;
-use App\Modules\Crm\Resources\EmailResource;
 use App\Modules\Crm\Resources\LeadPickerResource;
 use App\Modules\Crm\Resources\LeadResource;
+use App\Modules\Crm\Resources\LeadThreadEmailResource;
 use App\Modules\Crm\Services\ConversationLinkCapability;
 use App\Modules\Crm\Services\Discovery\GooglePlacesAttestation;
 use App\Modules\Crm\Services\Import\LeadImportInProgressException;
@@ -974,8 +974,9 @@ class LeadController extends Controller
     /**
      * The full email conversation with this lead (outbound + inbound), chronologically ordered — the
      * read-only source for the Lead Details "Email Thread" panel. Reuses the existing Email model +
-     * EmailResource (no duplicated mapping) and eager-loads the sender to avoid N+1. Ownership is
-     * enforced by the route (`can:view,lead`); the relation carries the chronological order.
+     * EmailResource mapping (LeadThreadEmailResource adds only the sent HTML) and eager-loads the
+     * sender to avoid N+1. Ownership is enforced by the route (`can:view,lead`); the relation carries
+     * the chronological order.
      */
     public function emails(Lead $lead): AnonymousResourceCollection
     {
@@ -983,7 +984,7 @@ class LeadController extends Controller
             ->with('sender')
             ->paginate(20);
 
-        return EmailResource::collection($emails);
+        return LeadThreadEmailResource::collection($emails);
     }
 
     /**
