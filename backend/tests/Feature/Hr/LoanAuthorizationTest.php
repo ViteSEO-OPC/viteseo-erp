@@ -205,7 +205,7 @@ class LoanAuthorizationTest extends HrTestCase
     /** Who may borrow is the policy's eligibility rule — the same one allowances use. */
     public function test_an_employee_the_policy_does_not_cover_cannot_borrow(): void
     {
-        $policy = $this->policy(eligibility: 'status', statuses: ['part_time']);
+        $policy = $this->policy(eligibility: 'status', statuses: ['seasonal']);
 
         $this->actingAs($this->employee->user)
             ->postJson('/api/v1/hr/me/loans', $this->loanBody($policy))

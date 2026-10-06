@@ -16,9 +16,9 @@ import {
 
 import { cn } from "@/lib/utils";
 import { notify as toast } from "@/core/lib/notify";
-import { StatusBadge } from "@/core/components/status-badge";
 import { EmployeeLoans } from "@/modules/hr/components/employee-loans";
 import { EmployeeAvatar } from "@/modules/hr/ui/employee-avatar";
+import { EmployeeStatusBadge } from "@/modules/hr/components/employee-status-badge";
 import { EmployeePersonalSection } from "@/modules/hr/components/employee-personal-section";
 import { EmployeeJobSection } from "@/modules/hr/components/employee-job-section";
 import { EmploymentLifecycleSection } from "@/modules/hr/components/employment-lifecycle-section";
@@ -104,18 +104,7 @@ export function EmployeeRecord({
             {employee.department ? ` · ${employee.department.name}` : ""}
           </p>
           <div className="mt-2">
-            {archived ? (
-              // Never "Active" for someone who has left — the same grey `archived` key the
-              // directory card uses, so the two surfaces agree.
-              <StatusBadge
-                status="archived"
-                label={employee.separation_date ? `Left ${employee.separation_date}` : "Former"}
-              />
-            ) : employee.onboarding_status === "pending" ? (
-              <StatusBadge status="pending" label="Onboarding" />
-            ) : (
-              <StatusBadge status="active" label="Active" />
-            )}
+            <EmployeeStatusBadge employee={employee} />
           </div>
         </div>
 

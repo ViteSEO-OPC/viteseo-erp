@@ -40,6 +40,7 @@ class StoreEmployeeRequest extends FormRequest
             'manager_id' => ['nullable', 'integer', 'exists:hr_employees,id'],
             'job_title' => ['required', 'string', 'max:255'],
             'employment_status' => ['required', Rule::in(EmployeeService::STATUSES)],
+            'work_status' => ['sometimes', 'required', Rule::in(EmployeeService::WORK_STATUSES)],
             'hire_date' => ['required', 'date'],
             'base_salary' => ['required', 'numeric', 'min:0', 'max:99999999.99'],
             // Interns only (checked in after()). Null means the company default.

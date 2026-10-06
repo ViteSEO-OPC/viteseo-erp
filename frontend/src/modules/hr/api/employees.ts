@@ -20,6 +20,8 @@ export interface EmployeeDirectoryParams {
   /** Department id, as a string from the select. */
   department?: string;
   employment_status?: string;
+  /** active | floating | suspended — where current staff stand. */
+  work_status?: string;
   page?: number;
   per_page?: number;
 }
@@ -42,13 +44,14 @@ export interface EmployeeDirectoryPage {
 export async function getEmployees(
   params: EmployeeDirectoryParams = {},
 ): Promise<EmployeeDirectoryPage> {
-  const { search, status, department, employment_status, page, per_page } = params;
+  const { search, status, department, employment_status, work_status, page, per_page } = params;
   const res = await apiClient.get("/hr/employees", {
     params: {
       ...(search ? { search } : {}),
       ...(status && status !== "active" ? { status } : {}),
       ...(department && department !== "all" ? { department } : {}),
       ...(employment_status && employment_status !== "all" ? { employment_status } : {}),
+      ...(work_status && work_status !== "all" ? { work_status } : {}),
       ...(page && page > 1 ? { page } : {}),
       ...(per_page ? { per_page } : {}),
     },

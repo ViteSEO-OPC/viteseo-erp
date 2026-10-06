@@ -52,6 +52,7 @@ export type EmployeeListItem = Pick<
   | "email"
   | "job_title"
   | "employment_status"
+  | "work_status"
   | "onboarding_status"
   | "is_management"
   | "hire_date"
@@ -84,7 +85,8 @@ export interface Employee {
   photo_url: string | null; // profile picture; null falls back to initials
 
   job_title: string;
-  employment_status: string;
+  employment_status: string; // the employment TYPE (see EMPLOYMENT_STATUSES)
+  work_status: WorkStatus;
   /** Interns only — the practicum hours their school requires. */
   ojt_required_hours: number | null;
   /** Interns only — their own allowance, overriding the company default. Null = the default. */
@@ -207,6 +209,7 @@ export interface EmployeeInput {
   manager_id?: number | null;
   job_title: string;
   employment_status: string;
+  work_status?: (typeof WORK_STATUSES)[number];
   hire_date: string;
   base_salary: number;
   /** Interns only — their own allowance in the company's calculation unit. Null = the default. */
@@ -343,28 +346,46 @@ export interface SalaryHistoryEntry {
   changed_by: string | null;
 }
 
-// Mirrors the backend EmployeeService::STATUSES. This is the single employment
-// classification on the record — leave allotments and benefits eligibility are
-// keyed on it, and the Job tab shows it.
+// Mirrors the backend EmployeeService::STATUSES. This is the employment TYPE — the
+// column is still called `employment_status` because leave allotments and benefits
+// eligibility are keyed on it. The Job tab shows it as "Employment type".
 export const EMPLOYMENT_STATUSES = [
   "regular",
   "probationary",
-  "contract",
-  "part_time",
+  "fixed_term",
   "project_based",
+  "seasonal",
   "ojt",
 ] as const;
 
 const STATUS_LABELS: Record<string, string> = {
-  regular: "Regular",
-  probationary: "Probationary",
-  contract: "Contract",
-  part_time: "Part-time",
-  project_based: "Project-based",
-  ojt: "Internship/OJT",
+  regular: "Regular Employment",
+  probationary: "Probationary Employment",
+  fixed_term: "Fixed Term Employment",
+  project_based: "Project Employment",
+  seasonal: "Seasonal Employment",
+  ojt: "Internship",
 };
 
-/** Display label for an employment_status, e.g. part_time -> "Part-time". */
+// Mirrors EmployeeService::WORK_STATUSES — what HR can set on the record. "separated"
+// is derived by the API from the separation flow and is never set directly.
+export const WORK_STATUSES = ["active", "floating", "suspended"] as const;
+
+export type WorkStatus = (typeof WORK_STATUSES)[number] | "separated";
+
+const WORK_STATUS_LABELS: Record<WorkStatus, string> = {
+  active: "Active",
+  floating: "Floating Status",
+  suspended: "Suspended",
+  separated: "Separated/Terminated",
+};
+
+/** Display label for a work_status, e.g. floating -> "Floating Status". */
+export function workStatusLabel(status: string): string {
+  return WORK_STATUS_LABELS[status as WorkStatus] ?? status;
+}
+
+/** Display label for an employment_status, e.g. fixed_term -> "Fixed Term Employment". */
 export function statusLabel(status: string): string {
   return (
     STATUS_LABELS[status] ??

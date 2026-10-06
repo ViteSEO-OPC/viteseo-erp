@@ -57,7 +57,7 @@ final class GrantableRoles
      *
      * @var list<string>
      */
-    public const NARROW_STATUSES = ['ojt', 'part_time', 'project_based'];
+    public const NARROW_STATUSES = ['ojt', 'project_based', 'seasonal'];
 
     /** Every grantable role, flat. */
     public static function all(): array

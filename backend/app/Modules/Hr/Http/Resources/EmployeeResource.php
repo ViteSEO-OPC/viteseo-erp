@@ -61,7 +61,13 @@ class EmployeeResource extends JsonResource
             'name' => $this->user?->name,
             'email' => $this->user?->email,
             'job_title' => $this->job_title,
+            // The TYPE (regular, probationary, fixed_term, …) — the column predates the split.
             'employment_status' => $this->employment_status,
+            // Where they stand now. "separated" is derived from the separation flow, never
+            // stored, so it cannot disagree with separation_date.
+            'work_status' => ($this->separation_date !== null || $this->deleted_at !== null)
+                ? 'separated'
+                : ($this->work_status ?? 'active'),
             // Interns only — the practicum hours their school requires.
             'ojt_required_hours' => $this->ojt_required_hours,
             // Set once an intern is converted: the date they became staff.

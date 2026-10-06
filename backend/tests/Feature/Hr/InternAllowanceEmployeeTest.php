@@ -117,7 +117,7 @@ class InternAllowanceEmployeeTest extends HrTestCase
 
     public function test_a_standard_hire_has_no_allowance(): void
     {
-        $employee = $this->hireFrom($this->requisition('full_time'));
+        $employee = $this->hireFrom($this->requisition('regular'));
 
         $this->assertNull($employee->allowance_amount);
     }

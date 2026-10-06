@@ -296,14 +296,14 @@ class ConcernAndLedgerPagingTest extends HrTestCase
         foreach (range(1, 24) as $i) {
             Requisition::create([
                 'title' => "Backend Engineer {$i}", 'pipeline' => 'standard',
-                'employment_type' => 'full_time', 'department_id' => $dept->id,
+                'employment_type' => 'regular', 'department_id' => $dept->id,
                 'openings' => 1, 'stage' => 'sourcing', 'opened_at' => "2026-06-01",
                 'location' => 'Manila',
             ]);
         }
         Requisition::create([
             'title' => 'Distinctive Designer', 'pipeline' => 'standard',
-            'employment_type' => 'full_time', 'department_id' => $dept->id,
+            'employment_type' => 'regular', 'department_id' => $dept->id,
             'openings' => 1, 'stage' => 'offer', 'opened_at' => '2026-06-02',
             'location' => 'Cebu',
         ]);

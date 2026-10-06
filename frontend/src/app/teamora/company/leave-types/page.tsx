@@ -214,7 +214,7 @@ function AllotmentDefaults({ types }: { types: LeaveType[] }) {
         <div>
           <h2 className="text-h3 font-bold text-foreground">Allotment defaults</h2>
           <p className="text-sm text-muted-foreground">
-            Starting credits for a new hire, by employment status. Editing these only
+            Starting credits for a new hire, by employment type. Editing these only
             affects future hires — existing employees keep their own credits.
           </p>
         </div>

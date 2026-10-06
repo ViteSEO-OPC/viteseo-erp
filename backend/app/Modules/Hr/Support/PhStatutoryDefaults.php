@@ -218,9 +218,9 @@ final class PhStatutoryDefaults
     public const LEAVE_ALLOTMENT_FACTORS = [
         'regular' => 1.0,
         'probationary' => 0.5,
-        'contract' => 0.75,
-        'part_time' => 0.5,
+        'fixed_term' => 0.75,
         'project_based' => 0.75,
+        'seasonal' => 0.75,
         // Interns start with none; HR grants credits per person where warranted.
         'ojt' => 0.0,
     ];
