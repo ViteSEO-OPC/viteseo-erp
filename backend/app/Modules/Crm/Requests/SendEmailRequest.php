@@ -3,7 +3,9 @@
 namespace App\Modules\Crm\Requests;
 
 use App\Modules\Crm\Services\Mail\EmailDocument;
+use App\Support\CurrentOrg;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\Validator;
 
 class SendEmailRequest extends FormRequest
@@ -39,9 +41,20 @@ class SendEmailRequest extends FormRequest
             // on this request accepts HTML, and the server remains the only thing that renders any.
             //
             // Optional and additive. Absent — every existing caller — sends plain text exactly as
-            // before. Present but edited, deleted or undesigned is not an error either: the send path
-            // checks all three and falls back to the plain-text body it already carries.
-            'email_template_id' => ['sometimes', 'nullable', 'integer', 'exists:crm_email_templates,id'],
+            // before. Present but edited or undesigned is not an error either: the send path checks
+            // both, and a template deleted after the row was stored, and falls back to the plain-text
+            // body it already carries.
+            //
+            // Scoped to THIS organization's live templates, as SaveDraftRequest is: `exists` reads the
+            // table directly, past the BelongsToOrg and SoftDeletes scopes, so without the two constraints
+            // another organization's id (or a deleted one) would validate and be stored on the row.
+            'email_template_id' => [
+                'sometimes',
+                'nullable',
+                'integer',
+                Rule::exists('crm_email_templates', 'id')
+                    ->where(fn ($query) => $query->where('org_id', CurrentOrg::id())->whereNull('deleted_at')),
+            ],
         ];
     }
 

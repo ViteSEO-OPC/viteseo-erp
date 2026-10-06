@@ -1114,4 +1114,297 @@ class EmailDesignedSendTest extends TestCase
         $this->assertStringContainsString('#123456', (string) $this->lastSent()->getHtmlBody(), 'The later send uses the edited design.');
         $this->assertSame($firstHtml, Email::withoutGlobalScopes()->findOrFail($first->id)->body_html, 'The earlier snapshot is untouched.');
     }
+
+    // ── 13. DRAFTS KEEP THEIR TEMPLATE ───────────────────────────────────────────────────────
+    //
+    // A draft composed from a template records it, so sending the draft later renders that template's
+    // design through the same sendExisting() path, edit check included. Nothing about the design is stored
+    // on the draft: only the id, scoped to this organization's live templates.
+
+    /** @param array<string, mixed> $payload */
+    private function saveDraft(Lead $lead, array $payload)
+    {
+        return $this->postJson("/api/v1/crm/leads/{$lead->id}/emails/drafts", $payload);
+    }
+
+    private function draftFrom(Lead $lead, string $body, ?EmailTemplate $template): Email
+    {
+        $id = $this->saveDraft($lead, [
+            'subject' => 'A quick idea',
+            'body' => $body,
+            'email_template_id' => $template !== null ? (string) $template->id : null,
+        ])->assertCreated()->json('data.id');
+
+        return Email::query()->findOrFail($id);
+    }
+
+    private function plainTemplate(): EmailTemplate
+    {
+        return EmailTemplate::create([
+            'purpose' => 'Follow-up', 'tone' => 'Casual', 'subject' => 'Checking in',
+            'body' => 'Hi {{first_name}}, just checking in.', 'is_active' => true,
+        ]);
+    }
+
+    /** Another organization's designed template, created in its own tenant. */
+    private function theirTemplate(): EmailTemplate
+    {
+        $theirOrg = app(OrgOnboardingService::class)->createOrg(
+            'Org theirs', 'Owner theirs', 'owner-theirs@client.ph', 'password-123', ['crm' => 'full'],
+        )['org'];
+        $template = CurrentOrg::runAs($theirOrg->id, fn (): EmailTemplate => EmailTemplate::create([
+            'purpose' => 'Introduction', 'tone' => 'Their tone', 'subject' => 'Theirs', 'body' => 'Theirs',
+            'content' => $this->content([$this->heading(['text' => 'Theirs'])]),
+            'email_design_id' => EmailDesign::create(['name' => 'Their design', 'is_default' => false, 'layout' => $this->layout()])->id,
+            'is_active' => true,
+        ]));
+        CurrentOrg::clear();
+
+        return $template;
+    }
+
+    public function test_a_draft_saved_from_a_designed_template_keeps_the_template(): void
+    {
+        $sender = $this->admin();
+        Sanctum::actingAs($sender);
+        $lead = $this->lead();
+        $template = $this->designedTemplate();
+
+        $response = $this->saveDraft($lead, [
+            'subject' => 'A quick idea',
+            'body' => $this->asOffered($template, $lead, $sender),
+            'email_template_id' => (string) $template->id,
+        ])->assertCreated();
+
+        $response->assertJsonPath('data.status', 'draft')->assertJsonPath('data.emailTemplateId', (string) $template->id);
+        $this->assertSame($template->id, Email::query()->findOrFail($response->json('data.id'))->email_template_id);
+        $this->assertCount(0, Mail::mailer()->getSymfonyTransport()->messages(), 'Saving a draft never sends.');
+    }
+
+    public function test_a_draft_from_a_plain_template_has_no_design_to_carry(): void
+    {
+        $sender = $this->admin();
+        Sanctum::actingAs($sender);
+        $lead = $this->lead();
+        $plain = $this->plainTemplate();
+
+        // The composer names a plain template exactly as a send does; it identifies the template, not a design.
+        $draft = $this->draftFrom($lead, $this->asOffered($plain, $lead, $sender), $plain);
+        $this->assertSame($plain->id, $draft->email_template_id);
+        $this->assertFalse($this->feedEntry($lead, $plain)['isDesigned']);
+
+        $this->postJson("/api/v1/crm/emails/{$draft->id}/send")->assertOk();
+
+        $this->assertNull($this->lastSent()->getHtmlBody(), 'A plain template has no design to render.');
+        $this->assertNull($draft->fresh()->body_html);
+
+        // A draft composed without any template records none.
+        $this->assertNull($this->draftFrom($lead, 'Written from scratch', null)->email_template_id);
+    }
+
+    public function test_a_reopened_draft_names_its_template_so_the_composer_can_restore_it(): void
+    {
+        $sender = $this->admin();
+        Sanctum::actingAs($sender);
+        $lead = $this->lead();
+        $template = $this->designedTemplate();
+        $draft = $this->draftFrom($lead, $this->asOffered($template, $lead, $sender), $template);
+
+        $reopened = collect($this->getJson('/api/v1/crm/emails?status=draft')->assertOk()->json('data'))
+            ->firstWhere('id', (string) $draft->id);
+
+        $this->assertIsArray($reopened);
+        $this->assertSame((string) $template->id, $reopened['emailTemplateId']);
+        $this->assertArrayNotHasKey('bodyHtml', $reopened);
+
+        // What the composer looks that id up in: the same feed, which gives its Purpose + Tone and design.
+        $entry = $this->feedEntry($lead, $template);
+        $this->assertSame(['Introduction', 'Warm & professional'], [$entry['purpose'], $entry['tone']]);
+        $this->assertTrue($entry['isDesigned']);
+        $this->assertSame('Brand design', $entry['designName']);
+        $this->assertSame($entry['body'], $reopened['body'], 'Unedited, the reopened body still matches the template.');
+    }
+
+    public function test_sending_an_unedited_designed_draft_renders_its_design(): void
+    {
+        $sender = $this->admin();
+        Sanctum::actingAs($sender);
+        $lead = $this->lead();
+        $template = $this->designedTemplate();
+        $draft = $this->draftFrom($lead, $this->asOffered($template, $lead, $sender), $template);
+
+        $this->postJson("/api/v1/crm/emails/{$draft->id}/send")->assertOk()->assertJsonPath('data.status', 'sent');
+
+        $sentHtml = (string) $this->lastSent()->getHtmlBody();
+        $expected = app(EmailDesignRenderer::class)->toHtml(
+            $template->design->layout,
+            $template->content,
+            app(EmailTemplateDesignService::class)->sendContext($lead, $sender),
+        );
+        $this->assertSame($expected, $sentHtml, 'The draft goes through the existing renderer and send context.');
+        $this->assertSame($sentHtml, $draft->fresh()->body_html, 'The snapshot is what the transport received.');
+        $this->assertSame((string) $draft->fresh()->body, (string) $this->lastSent()->getTextBody());
+        $this->assertSame(1, Email::query()->count(), 'The draft row itself became the sent email.');
+    }
+
+    public function test_an_edited_designed_draft_sends_plain_text(): void
+    {
+        $sender = $this->admin();
+        Sanctum::actingAs($sender);
+        $lead = $this->lead();
+        $template = $this->designedTemplate();
+
+        // What the composer does: edited text is no longer sendable as the template, so it names none.
+        $cleared = $this->draftFrom($lead, "Hi Maria,\n\nI rewrote this myself.", null);
+        $this->postJson("/api/v1/crm/emails/{$cleared->id}/send")->assertOk();
+        $this->assertNull($this->lastSent()->getHtmlBody());
+        $this->assertNull($cleared->fresh()->body_html);
+
+        // A client that kept the id anyway: the existing edit check still refuses the design.
+        $kept = $this->draftFrom($lead, "Hi Maria,\n\nI rewrote this too.", $template);
+        $this->assertSame($template->id, $kept->email_template_id);
+        $this->postJson("/api/v1/crm/emails/{$kept->id}/send")->assertOk();
+        $this->assertNull($this->lastSent()->getHtmlBody());
+        $this->assertStringContainsString('I rewrote this too.', (string) $this->lastSent()->getTextBody());
+        $this->assertNull($kept->fresh()->body_html);
+    }
+
+    public function test_updating_a_draft_keeps_a_valid_template_and_clears_one_it_no_longer_names(): void
+    {
+        $sender = $this->admin();
+        Sanctum::actingAs($sender);
+        $lead = $this->lead();
+        $template = $this->designedTemplate();
+        $offered = $this->asOffered($template, $lead, $sender);
+        $draft = $this->draftFrom($lead, $offered, $template);
+
+        // Re-saved unedited, naming the template: kept.
+        $this->patchJson("/api/v1/crm/emails/{$draft->id}", [
+            'subject' => 'A quick idea', 'body' => $offered, 'email_template_id' => (string) $template->id,
+        ])->assertOk()->assertJsonPath('data.emailTemplateId', (string) $template->id);
+        $this->assertSame($template->id, $draft->fresh()->email_template_id);
+
+        // Re-saved after an edit with an explicit null: cleared.
+        $this->patchJson("/api/v1/crm/emails/{$draft->id}", [
+            'subject' => 'A quick idea', 'body' => 'Edited', 'email_template_id' => null,
+        ])->assertOk()->assertJsonPath('data.emailTemplateId', null);
+        $this->assertNull($draft->fresh()->email_template_id);
+
+        // Re-associated, then re-saved by a client that omits the field: the server clears it, so a stale
+        // association never outlives the save it was valid for.
+        $this->patchJson("/api/v1/crm/emails/{$draft->id}", [
+            'subject' => 'A quick idea', 'body' => $offered, 'email_template_id' => (string) $template->id,
+        ])->assertOk();
+        $this->patchJson("/api/v1/crm/emails/{$draft->id}", ['subject' => 'A quick idea', 'body' => 'Edited again'])
+            ->assertOk()->assertJsonPath('data.emailTemplateId', null);
+        $this->assertNull($draft->fresh()->email_template_id);
+
+        $this->postJson("/api/v1/crm/emails/{$draft->id}/send")->assertOk();
+        $this->assertNull($this->lastSent()->getHtmlBody());
+    }
+
+    public function test_a_draft_cannot_name_another_organizations_template(): void
+    {
+        $theirs = $this->theirTemplate();
+
+        $sender = $this->admin();
+        Sanctum::actingAs($sender);
+        $lead = $this->lead();
+
+        $this->saveDraft($lead, ['subject' => 'Draft', 'body' => 'x', 'email_template_id' => (string) $theirs->id])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('email_template_id');
+        $this->assertSame(0, Email::withoutGlobalScopes()->count(), 'No draft is created.');
+
+        // Nor can an existing draft be pointed at it.
+        $draft = $this->draftFrom($lead, 'Mine', null);
+        $this->patchJson("/api/v1/crm/emails/{$draft->id}", ['subject' => 'Draft', 'body' => 'Mine', 'email_template_id' => (string) $theirs->id])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('email_template_id');
+        $this->assertNull(Email::withoutGlobalScopes()->findOrFail($draft->id)->email_template_id);
+    }
+
+    public function test_a_draft_cannot_name_a_deleted_or_unknown_template(): void
+    {
+        $sender = $this->admin();
+        Sanctum::actingAs($sender);
+        $lead = $this->lead();
+        $deleted = $this->designedTemplate();
+        $deleted->delete();
+
+        foreach ([(string) $deleted->id, '999999', 'not-a-number'] as $id) {
+            $this->saveDraft($lead, ['subject' => 'Draft', 'body' => 'x', 'email_template_id' => $id])
+                ->assertUnprocessable()
+                ->assertJsonValidationErrors('email_template_id');
+        }
+        $this->assertSame(0, Email::withoutGlobalScopes()->count());
+    }
+
+    /** A template deleted after the draft was saved: the draft still sends, as the plain text it holds. */
+    public function test_a_draft_whose_template_was_deleted_later_sends_plain_text(): void
+    {
+        $sender = $this->admin();
+        Sanctum::actingAs($sender);
+        $lead = $this->lead();
+        $template = $this->designedTemplate();
+        $draft = $this->draftFrom($lead, $this->asOffered($template, $lead, $sender), $template);
+
+        $template->delete();
+
+        $this->postJson("/api/v1/crm/emails/{$draft->id}/send")->assertOk()->assertJsonPath('data.status', 'sent');
+        $this->assertNull($this->lastSent()->getHtmlBody());
+        $this->assertNull($draft->fresh()->body_html);
+    }
+
+    // ── 14. A SEND NAMES ONLY THIS ORGANIZATION'S LIVE TEMPLATES ─────────────────────────────
+    //
+    // The same scope SaveDraftRequest applies: another organization's id, or a soft-deleted one, is
+    // refused at the request boundary — nothing is stored and nothing is sent.
+
+    public function test_a_send_cannot_name_another_organizations_template(): void
+    {
+        $theirs = $this->theirTemplate();
+
+        $sender = $this->admin();
+        Sanctum::actingAs($sender);
+        $lead = $this->lead();
+
+        $this->send($lead, ['subject' => 'A quick idea', 'body' => 'Theirs', 'email_template_id' => (string) $theirs->id])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('email_template_id');
+
+        $this->assertSame(0, Email::withoutGlobalScopes()->count(), 'No email row is created.');
+        $this->assertCount(0, Mail::mailer()->getSymfonyTransport()->messages(), 'Nothing is sent.');
+    }
+
+    public function test_a_send_cannot_name_a_soft_deleted_template(): void
+    {
+        $sender = $this->admin();
+        Sanctum::actingAs($sender);
+        $lead = $this->lead();
+        $template = $this->designedTemplate();
+        $offered = $this->asOffered($template, $lead, $sender);
+        $template->delete();
+
+        $this->send($lead, ['subject' => 'A quick idea', 'body' => $offered, 'email_template_id' => (string) $template->id])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('email_template_id');
+
+        $this->assertCount(0, Mail::mailer()->getSymfonyTransport()->messages(), 'Nothing is sent.');
+    }
+
+    public function test_a_send_naming_this_organizations_template_still_sends_its_design(): void
+    {
+        $sender = $this->admin();
+        Sanctum::actingAs($sender);
+        $lead = $this->lead();
+        $template = $this->designedTemplate();
+
+        $this->send($lead, ['subject' => 'A quick idea', 'body' => $this->asOffered($template, $lead, $sender), 'email_template_id' => (string) $template->id])
+            ->assertCreated()
+            ->assertJsonPath('data.status', 'sent');
+
+        $this->assertNotNull($this->lastSent()->getHtmlBody(), 'A valid same-organization template still renders its design.');
+        $this->assertSame($template->id, Email::query()->latest('id')->firstOrFail()->email_template_id);
+    }
 }
