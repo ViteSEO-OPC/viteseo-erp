@@ -154,9 +154,10 @@ class OutreachEmailService
 
         $toEmail = $this->resolveRecipient($lead, $email->to_email);
         $subject = (string) $email->subject;
-        $sent = $this->dispatch($lead, $toEmail, $subject, (string) $email->body, $this->htmlFor($email, $sender));
+        $html = $this->htmlFor($email, $sender);
+        $sent = $this->dispatch($lead, $toEmail, $subject, (string) $email->body, $html);
 
-        $email = DB::transaction(function () use ($email, $lead, $sender, $subject, $toEmail, $sent): Email {
+        $email = DB::transaction(function () use ($email, $lead, $sender, $subject, $toEmail, $sent, $html): Email {
             $email->update([
                 'from_email' => $this->sender()->address,
                 'from_name' => $this->sender()->name,
@@ -167,6 +168,12 @@ class OutreachEmailService
                 'message_id' => $sent->messageId,
                 'status' => $sent->status,   // draft/scheduled → sent (or failed)
                 'sent_at' => now(),
+                // THE SNAPSHOT OF WHAT WENT OUT: the very string handed to the transport above, so Lead
+                // Details shows the sender what the recipient received rather than a re-render of
+                // whatever the template, design, lead or logo look like later. Kept only when the send
+                // succeeded — a message that never left must not read as a delivered design — and null
+                // whenever the email went out as plain text, which is what it then was.
+                'body_html' => $sent->status === 'sent' ? $html : null,
             ]);
 
             $this->logSent($lead, $sender, $email, $subject, $toEmail);

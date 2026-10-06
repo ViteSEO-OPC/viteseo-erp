@@ -245,16 +245,62 @@ export const QUOTED_HISTORY_SELECTOR = [
  * objects and media, so the only thing that ever varies is whether remote IMAGES may load — and they
  * may not until the viewer asks. A blocked image is never requested, so a tracking pixel learns nothing.
  * `http:` images stay blocked even after the opt-in: the CRM is served over https.
+ *
+ * `trustedImageSources` are exact path prefixes (see {@see emailAssetImageSource}) that load without the
+ * opt-in. The thread passes one only for a message the CRM itself sent, so the email design's logo —
+ * served from the CRM's own public asset route — shows the way the recipient sees it. A received
+ * email never gets one: its images stay behind "Show images", wherever they point.
  */
-export function emailFrameCsp(showRemoteImages: boolean): string {
+export function emailFrameCsp(showRemoteImages: boolean, trustedImageSources: readonly string[] = []): string {
+  const trusted = trustedImageSources.filter(isCspPathSource);
+
   return [
     "default-src 'none'",
     "style-src 'unsafe-inline'",
-    showRemoteImages ? "img-src https: data:" : "img-src data:",
+    ["img-src", ...(showRemoteImages ? ["https:"] : []), "data:", ...trusted].join(" "),
     "font-src data:",
     "form-action 'none'",
     "base-uri 'none'",
   ].join("; ");
+}
+
+/**
+ * A CSP source that names one http(s) PATH, never a whole host or scheme: an absolute URL whose path
+ * ends in "/" (CSP then matches that prefix only), with nothing that could close the attribute or add
+ * a directive. Anything else is dropped, so a malformed value can only ever trust less.
+ */
+function isCspPathSource(source: string): boolean {
+  if (/[\s;,'"<>]/.test(source)) return false;
+  try {
+    const url = new URL(source);
+    return (
+      (url.protocol === "https:" || url.protocol === "http:") &&
+      url.href === source &&
+      url.pathname.length > 1 &&
+      url.pathname.endsWith("/") &&
+      url.search === "" &&
+      url.hash === "" &&
+      url.username === "" &&
+      url.password === ""
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The CRM's public email-asset route (`GET {crm}/email-assets/{uuid}.png`, the logo a designed email
+ * links to), as a CSP path source — or null when the API base is not a usable http(s) URL. Derived from
+ * the same API base URL the CRM's requests use, so it is the CRM's own server and nothing else.
+ */
+export function emailAssetImageSource(crmApiBaseUrl: string): string | null {
+  try {
+    const base = crmApiBaseUrl.endsWith("/") ? crmApiBaseUrl : `${crmApiBaseUrl}/`;
+    const source = new URL("email-assets/", base).href;
+    return isCspPathSource(source) ? source : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -289,13 +335,17 @@ const FRAME_BASE_CSS = [
  * in <body>, where the parser can no longer add to the head. Their own <meta> tags are removed first:
  * a `refresh` pragma would otherwise still navigate the frame.
  */
-export function buildEmailSrcDoc(html: string, options: { showRemoteImages: boolean }): string {
+export function buildEmailSrcDoc(
+  html: string,
+  options: { showRemoteImages: boolean; trustedImageSources?: readonly string[] },
+): string {
   const content = html.replace(/<meta\b[^>]*>/gi, "");
+  const csp = emailFrameCsp(options.showRemoteImages, options.trustedImageSources);
 
   return (
     "<!doctype html><html><head>" +
     '<base href="about:blank" target="_blank">' +
-    `<meta http-equiv="Content-Security-Policy" content="${emailFrameCsp(options.showRemoteImages)}">` +
+    `<meta http-equiv="Content-Security-Policy" content="${csp}">` +
     '<meta name="referrer" content="no-referrer">' +
     `<style>${FRAME_BASE_CSS}</style>` +
     "</head><body>" +
@@ -315,7 +365,14 @@ const REMOTE_REFERENCE = [
 /**
  * Whether the email references anything the frame blocks. UX only — a false positive shows a button
  * that loads nothing new; the policy, not this check, is what keeps remote images from loading.
+ *
+ * References under a trusted source already load, so they do not count — otherwise every designed email
+ * the CRM sent would offer "Show images" for the logo it is already showing.
  */
-export function hasRemoteContent(html: string): boolean {
-  return REMOTE_REFERENCE.some((pattern) => pattern.test(html));
+export function hasRemoteContent(html: string, trustedImageSources: readonly string[] = []): boolean {
+  const untrusted = trustedImageSources
+    .filter(isCspPathSource)
+    .reduce((text, source) => text.split(source).join("data:"), html);
+
+  return REMOTE_REFERENCE.some((pattern) => pattern.test(untrusted));
 }

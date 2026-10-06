@@ -4,6 +4,8 @@ import { useState } from "react";
 import type { Editor } from "@tiptap/react";
 import { Send } from "lucide-react";
 import { cn } from "@/modules/crm/lib/utils";
+import { apiClient } from "@/modules/crm/lib/axios";
+import { emailAssetImageSource } from "@/modules/crm/lib/email-body";
 import { formatActivityTimestamp } from "@/modules/crm/lib/formatters";
 import { useLeadEmails } from "@/modules/crm/features/leads/hooks/use-lead-emails";
 import { useSendEmail } from "@/modules/crm/features/follow-ups/hooks/use-outreach-mutations";
@@ -13,6 +15,16 @@ import { ErrorState } from "@/modules/crm/components/shared/error-state/error-st
 import { EmailBody } from "@/modules/crm/components/shared/email-body/email-body";
 import { EmailRichEditor } from "@/modules/crm/features/leads/components/email-rich-editor";
 import type { EmailThreadMessage } from "@/modules/crm/features/leads/types/lead-detail-types";
+
+/**
+ * The CRM's own email-asset route, which a designed email's logo points at. Trusted ONLY for messages the
+ * CRM sent (their HTML is the server's own render, stored as sent); a received email's images stay behind
+ * "Show images" wherever they point.
+ */
+function ownAssetSources(): string[] {
+  const source = emailAssetImageSource(apiClient.defaults.baseURL ?? "");
+  return source === null ? [] : [source];
+}
 
 /** Human label for the delivery/lifecycle state stored on the email row. */
 function deliveryLabel(status: string): string {
@@ -95,12 +107,13 @@ function MessageCard({ message }: { message: EmailThreadMessage }) {
         {message.subject || "(no subject)"}
       </p>
       {/* A formatted reply still renders through NoteBody (ProseMirror from JSON); a received HTML
-          email renders in a sandboxed frame; everything else as structured plain text. There is no
-          dangerouslySetInnerHTML anywhere in the thread. */}
+          email, or a designed email exactly as it was sent, renders in a sandboxed frame; everything
+          else as structured plain text. There is no dangerouslySetInnerHTML anywhere in the thread. */}
       <EmailBody
         body={message.body}
         bodyDoc={message.bodyDoc}
         bodyHtml={message.bodyHtml}
+        trustedImageSources={inbound ? undefined : ownAssetSources()}
         className="mt-1"
       />
     </li>

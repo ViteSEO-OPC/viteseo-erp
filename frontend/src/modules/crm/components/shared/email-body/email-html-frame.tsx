@@ -64,7 +64,16 @@ function hasCollapsibleHistory(doc: Document): boolean {
  * Remote images stay blocked until the viewer clicks "Show images", which rebuilds the document with
  * images allowed. Quoted history is hidden by toggling a class on the frame's <html> — no reload.
  */
-export function EmailHtmlFrame({ html, className }: { html: string; className?: string }) {
+export function EmailHtmlFrame({
+  html,
+  trustedImageSources,
+  className,
+}: {
+  html: string;
+  /** Path sources whose images load without "Show images" — see `emailFrameCsp`. */
+  trustedImageSources?: readonly string[];
+  className?: string;
+}) {
   const frameRef = useRef<HTMLIFrameElement>(null);
   const observerRef = useRef<ResizeObserver | null>(null);
   const frameId = useId();
@@ -74,8 +83,15 @@ export function EmailHtmlFrame({ html, className }: { html: string; className?: 
   const [hasQuotedHistory, setHasQuotedHistory] = useState(false);
   const [quotedExpanded, setQuotedExpanded] = useState(false);
 
-  const remoteContent = useMemo(() => hasRemoteContent(html), [html]);
-  const srcDoc = useMemo(() => buildEmailSrcDoc(html, { showRemoteImages }), [html, showRemoteImages]);
+  // Keyed by value, not identity, so a caller passing a fresh array each render does not rebuild the
+  // document (which would reload the frame).
+  const trustedKey = trustedImageSources?.join(" ") ?? "";
+  const trusted = useMemo(() => (trustedKey === "" ? [] : trustedKey.split(" ")), [trustedKey]);
+  const remoteContent = useMemo(() => hasRemoteContent(html, trusted), [html, trusted]);
+  const srcDoc = useMemo(
+    () => buildEmailSrcDoc(html, { showRemoteImages, trustedImageSources: trusted }),
+    [html, showRemoteImages, trusted],
+  );
 
   useEffect(() => () => observerRef.current?.disconnect(), []);
 

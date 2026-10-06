@@ -7,6 +7,11 @@ use App\Modules\Crm\Models\Email;
 use App\Modules\Crm\Models\EmailDesign;
 use App\Modules\Crm\Models\EmailTemplate;
 use App\Modules\Crm\Models\Lead;
+use App\Modules\Crm\Services\Mail\Contracts\EmailProvider;
+use App\Modules\Crm\Services\Mail\EmailDocument;
+use App\Modules\Crm\Services\Mail\EmailMessage;
+use App\Modules\Crm\Services\Mail\SentEmail;
+use App\Modules\Crm\Services\Outreach\EmailBrandingService;
 use App\Modules\Crm\Services\Outreach\EmailTemplateDesignService;
 use App\Modules\Crm\Services\Outreach\OutreachEmailService;
 use App\Modules\Crm\Services\Outreach\TemplateRenderer;
@@ -537,5 +542,340 @@ class EmailDesignedSendTest extends TestCase
             $this->lastSent()->getHtmlBody(),
             'An email over the Gmail clipping guard must be sent as plain text, not clipped HTML.',
         );
+    }
+
+    // ── 10. THE SENT SNAPSHOT (crm_emails.body_html) ─────────────────────────────────────────
+    //
+    // Lead Details shows the sender what the recipient received. The only exact record of that is the
+    // HTML string the transport was handed, so it is stored at send time and never re-rendered.
+
+    /** A designed send as the composer makes it. */
+    private function sendDesigned(Lead $lead, User $sender, EmailTemplate $template)
+    {
+        return $this->send($lead, [
+            'subject' => 'A quick idea',
+            'body' => $this->asOffered($template, $lead, $sender),
+            'email_template_id' => (string) $template->id,
+        ])->assertCreated();
+    }
+
+    /** The branding logo every render resolves, without needing a stored asset. */
+    private function brandLogo(string $url): void
+    {
+        $this->mock(EmailBrandingService::class, function ($mock) use ($url): void {
+            $mock->shouldReceive('logoForRender')->andReturn(['url' => $url, 'png' => 'png-bytes', 'alt' => 'Acme']);
+        });
+    }
+
+    private function thread(Lead $lead): array
+    {
+        return $this->getJson("/api/v1/crm/leads/{$lead->id}/emails")->assertOk()->json('data');
+    }
+
+    public function test_a_successful_designed_send_stores_exactly_the_html_that_was_sent(): void
+    {
+        $sender = $this->admin();
+        Sanctum::actingAs($sender);
+        $lead = $this->lead();
+        $template = $this->designedTemplate();
+
+        $this->sendDesigned($lead, $sender, $template);
+
+        $sentHtml = (string) $this->lastSent()->getHtmlBody();
+        $this->assertStringContainsString('Book a call', $sentHtml, 'The provider must have received the design.');
+        $this->assertSame($sentHtml, Email::query()->latest('id')->first()->body_html);
+    }
+
+    public function test_the_lead_thread_returns_the_stored_html(): void
+    {
+        $sender = $this->admin();
+        Sanctum::actingAs($sender);
+        $lead = $this->lead();
+        $template = $this->designedTemplate();
+
+        $this->sendDesigned($lead, $sender, $template);
+        $sentHtml = (string) $this->lastSent()->getHtmlBody();
+
+        $message = collect($this->thread($lead))->firstWhere('direction', 'outbound');
+
+        $this->assertSame($sentHtml, $message['bodyHtml']);
+        $this->assertNull($message['bodyDoc'], 'A designed send is not a formatted reply.');
+        // The plain-text part is still there for the text/plain view and every other consumer.
+        $this->assertStringContainsString('Book a call', $message['body']);
+    }
+
+    /**
+     * The snapshot is history, not a render: every input to the design can change after the send, and
+     * none of it may reach what Lead Details shows for that message.
+     */
+    public function test_the_stored_html_survives_every_later_change_to_its_inputs(): void
+    {
+        $this->brandLogo('https://crm.viteseo.test/api/v1/crm/email-assets/aaaaaaaa-1111-4111-8111-111111111111.png');
+        $sender = $this->admin();
+        Sanctum::actingAs($sender);
+        $lead = $this->lead();
+        $template = $this->designedTemplate();
+
+        $this->sendDesigned($lead, $sender, $template);
+        $sentHtml = (string) $this->lastSent()->getHtmlBody();
+        $this->assertStringContainsString('aaaaaaaa-1111', $sentHtml, 'The logo must have been part of the send.');
+
+        // Change everything the renderer reads.
+        $template->forceFill(['content' => $this->content([$this->heading(['text' => 'A completely new heading'])])])->save();
+        $template->design->forceFill(['layout' => $this->layout(styles: ['background_color' => '#ff0000'])])->save();
+        $lead->forceFill(['business_name' => 'Renamed Bakery', 'contact_name' => 'Someone Else'])->save();
+        $sender->forceFill(['name' => 'Renamed Sender'])->save();
+        $this->brandLogo('https://crm.viteseo.test/api/v1/crm/email-assets/bbbbbbbb-2222-4222-8222-222222222222.png');
+
+        $message = collect($this->thread($lead))->firstWhere('direction', 'outbound');
+
+        $this->assertSame($sentHtml, $message['bodyHtml'], 'Lead Details must show what was sent, not a re-render.');
+        $this->assertStringNotContainsString('A completely new heading', $message['bodyHtml']);
+        $this->assertStringNotContainsString('bbbbbbbb-2222', $message['bodyHtml']);
+        $this->assertStringContainsString('Acme Bakery', $message['bodyHtml']);
+    }
+
+    public function test_a_soft_deleted_template_does_not_lose_the_stored_html(): void
+    {
+        $sender = $this->admin();
+        Sanctum::actingAs($sender);
+        $lead = $this->lead();
+        $template = $this->designedTemplate();
+
+        $this->sendDesigned($lead, $sender, $template);
+        $sentHtml = (string) $this->lastSent()->getHtmlBody();
+        $template->delete();
+
+        $this->assertSame($sentHtml, collect($this->thread($lead))->firstWhere('direction', 'outbound')['bodyHtml']);
+    }
+
+    public function test_a_plain_text_send_stores_no_html(): void
+    {
+        Sanctum::actingAs($this->admin());
+        $lead = $this->lead();
+
+        $this->send($lead, ['subject' => 'Hello', 'body' => 'Just a plain note.'])->assertCreated();
+
+        $this->assertNull($this->lastSent()->getHtmlBody());
+        $this->assertNull(Email::query()->latest('id')->first()->body_html);
+        $this->assertNull(collect($this->thread($lead))->firstWhere('direction', 'outbound')['bodyHtml']);
+    }
+
+    public function test_an_edited_designed_body_sends_plain_text_and_stores_no_html(): void
+    {
+        $sender = $this->admin();
+        Sanctum::actingAs($sender);
+        $lead = $this->lead();
+        $template = $this->designedTemplate();
+
+        $this->send($lead, [
+            'subject' => 'A quick idea',
+            'body' => "Hi Maria,\n\nI rewrote this one myself.",
+            'email_template_id' => (string) $template->id,
+        ])->assertCreated();
+
+        $this->assertNull($this->lastSent()->getHtmlBody());
+        $email = Email::query()->latest('id')->first();
+        $this->assertNull($email->body_html);
+        $this->assertSame((string) $template->id, (string) $email->email_template_id, 'The id is recorded unchanged; only the render is refused.');
+    }
+
+    /**
+     * A formatted reply keeps rendering from its document in the thread (bodyDoc wins on the frontend);
+     * the snapshot is simply the HTML it was sent with, which is still EmailDocument's.
+     */
+    public function test_a_formatted_reply_keeps_its_document_and_stores_the_html_it_was_sent_with(): void
+    {
+        Sanctum::actingAs($this->admin());
+        $lead = $this->lead();
+        $doc = ['type' => 'doc', 'content' => [['type' => 'paragraph', 'content' => [
+            ['type' => 'text', 'text' => 'Hi '],
+            ['type' => 'text', 'text' => 'Maria', 'marks' => [['type' => 'bold']]],
+        ]]]];
+
+        $this->send($lead, ['subject' => 'Re: Proposal', 'body' => 'Hi Maria', 'body_doc' => $doc])->assertCreated();
+
+        $sentHtml = (string) $this->lastSent()->getHtmlBody();
+        $this->assertSame(EmailDocument::toHtml($doc), $sentHtml);
+
+        $message = collect($this->thread($lead))->firstWhere('direction', 'outbound');
+        $this->assertSame($doc, $message['bodyDoc']);
+        $this->assertSame('Hi Maria', $message['body']);
+        $this->assertSame($sentHtml, $message['bodyHtml']);
+    }
+
+    public function test_real_lead_tokens_are_substituted_in_the_stored_html(): void
+    {
+        $sender = $this->admin();
+        Sanctum::actingAs($sender);
+        $lead = $this->lead(['contact_name' => 'Jose Rizal', 'business_name' => 'Noli Press']);
+        $template = $this->designedTemplate();
+
+        $this->sendDesigned($lead, $sender, $template);
+
+        $stored = (string) Email::query()->latest('id')->first()->body_html;
+        $this->assertStringContainsString('Hello Jose', $stored);
+        $this->assertStringContainsString('Noli Press', $stored);
+        $this->assertStringNotContainsString('{{', $stored);
+    }
+
+    /** Markup in lead data or template text reaches the snapshot escaped, never as live markup. */
+    public function test_markup_in_tokens_and_template_text_is_stored_escaped(): void
+    {
+        $sender = $this->admin();
+        Sanctum::actingAs($sender);
+        $lead = $this->lead([
+            'contact_name' => '<img src=x onerror=alert(1)> Maria',
+            'business_name' => '"><script>alert(1)</script>',
+        ]);
+        $template = $this->designedTemplate($this->content([
+            $this->heading(['text' => 'Hi {{first_name}} <script>alert(2)</script>']),
+            $this->textBlock(['content' => $this->doc($this->para($this->text('For {{business_name}} <svg onload=alert(3)>')))]),
+        ]));
+
+        $this->sendDesigned($lead, $sender, $template);
+        $stored = (string) Email::query()->latest('id')->first()->body_html;
+
+        $this->assertNotSame('', $stored, 'The design must have been sent for this to test anything.');
+        $this->assertStringNotContainsString('<script', $stored);
+        $this->assertStringNotContainsString('<img src=x', $stored);
+        $this->assertStringNotContainsString('<svg', $stored);
+        $this->assertDoesNotMatchRegularExpression('/<[^>]+\son(error|load)\s*=/i', $stored, 'An event handler survived as markup.');
+        $this->assertStringContainsString('&lt;script&gt;', $stored);
+    }
+
+    /** A stored design with an unsafe link is never rendered, so nothing unsafe can be stored either. */
+    public function test_an_unsafe_link_in_a_stored_design_sends_plain_text_and_stores_no_html(): void
+    {
+        $sender = $this->admin();
+        Sanctum::actingAs($sender);
+        $lead = $this->lead();
+        $template = $this->designedTemplate();
+
+        // Corrupted at rest (a hand-edit or a bad migration) — the save path would have refused it.
+        $content = $template->content;
+        $content['blocks'][] = $this->button(['id' => 'evil', 'label' => 'Click', 'url' => 'javascript:alert(1)']);
+        $template->forceFill(['content' => $content])->save();
+
+        $this->sendDesigned($lead, $sender, $template);
+
+        $this->assertNull($this->lastSent()->getHtmlBody());
+        $this->assertNull(Email::query()->latest('id')->first()->body_html);
+        $this->assertStringNotContainsString('javascript:', $this->lastSent()->toString());
+    }
+
+    public function test_a_failed_send_stores_no_html(): void
+    {
+        $sender = $this->admin();
+        Sanctum::actingAs($sender);
+        $lead = $this->lead();
+        $template = $this->designedTemplate();
+
+        $this->app->instance(EmailProvider::class, new class implements EmailProvider
+        {
+            public function send(EmailMessage $message): SentEmail
+            {
+                throw new \RuntimeException('SMTP down');
+            }
+        });
+
+        $this->send($lead, [
+            'subject' => 'A quick idea',
+            'body' => $this->asOffered($template, $lead, $sender),
+            'email_template_id' => (string) $template->id,
+        ])->assertStatus(500);
+
+        $email = Email::query()->latest('id')->first();
+        $this->assertSame('failed', $email->status);
+        $this->assertNull($email->body_html, 'A message that never left must not read as a delivered design.');
+    }
+
+    public function test_a_provider_reporting_failure_stores_no_html(): void
+    {
+        $sender = $this->admin();
+        Sanctum::actingAs($sender);
+        $lead = $this->lead();
+        $template = $this->designedTemplate();
+
+        $this->app->instance(EmailProvider::class, new class implements EmailProvider
+        {
+            public function send(EmailMessage $message): SentEmail
+            {
+                return new SentEmail(provider: 'fake', status: 'failed');
+            }
+        });
+
+        $this->sendDesigned($lead, $sender, $template);
+
+        $email = Email::query()->latest('id')->first();
+        $this->assertSame('failed', $email->status);
+        $this->assertNull($email->body_html);
+    }
+
+    /** Drafts and scheduled sends reach the same pipeline, and so the same snapshot rule. */
+    public function test_drafts_and_scheduled_sends_store_the_html_they_were_sent_with(): void
+    {
+        $sender = $this->admin();
+        Sanctum::actingAs($sender);
+        $lead = $this->lead();
+
+        // A draft is plain text: sent through /send, it stores no HTML.
+        $draftId = $this->postJson("/api/v1/crm/leads/{$lead->id}/emails/drafts", ['subject' => 'Draft', 'body' => 'Plain draft'])
+            ->assertCreated()->json('data.id');
+        $this->postJson("/api/v1/crm/emails/{$draftId}/send")->assertOk();
+        $this->assertNull($this->lastSent()->getHtmlBody());
+        $this->assertNull(Email::query()->findOrFail($draftId)->body_html);
+
+        // A scheduled formatted reply, sent now: the HTML rendered at that moment is what is stored.
+        $doc = ['type' => 'doc', 'content' => [['type' => 'paragraph', 'content' => [['type' => 'text', 'text' => 'Later, formatted']]]]];
+        $scheduledId = $this->send($lead, [
+            'subject' => 'Scheduled',
+            'body' => 'Later, formatted',
+            'body_doc' => $doc,
+            'scheduled_at' => now()->addDay()->toIso8601String(),
+        ])->assertCreated()->json('data.id');
+        $this->assertNull(Email::query()->findOrFail($scheduledId)->body_html, 'Nothing is stored before the send.');
+
+        $this->postJson("/api/v1/crm/emails/{$scheduledId}/send-now")->assertOk();
+        $sentHtml = (string) $this->lastSent()->getHtmlBody();
+        $this->assertSame(EmailDocument::toHtml($doc), $sentHtml);
+        $this->assertSame($sentHtml, Email::query()->findOrFail($scheduledId)->body_html);
+    }
+
+    /** The snapshot travels only to the Lead Details thread — never the drafts list or send responses. */
+    public function test_only_the_lead_thread_exposes_body_html(): void
+    {
+        $sender = $this->admin();
+        Sanctum::actingAs($sender);
+        $lead = $this->lead();
+        $template = $this->designedTemplate();
+
+        $sendResponse = $this->sendDesigned($lead, $sender, $template);
+        $this->assertArrayNotHasKey('bodyHtml', $sendResponse->json('data'));
+
+        $this->postJson("/api/v1/crm/leads/{$lead->id}/emails/drafts", ['subject' => 'Draft', 'body' => 'x'])->assertCreated();
+        $drafts = $this->getJson('/api/v1/crm/emails?status=draft')->assertOk()->json('data');
+        $this->assertNotEmpty($drafts);
+        foreach ($drafts as $draft) {
+            $this->assertArrayNotHasKey('bodyHtml', $draft);
+        }
+
+        $this->assertArrayHasKey('bodyHtml', $this->thread($lead)[0]);
+    }
+
+    /** A request can never write the snapshot: no field accepts markup. */
+    public function test_a_client_supplied_body_html_is_ignored(): void
+    {
+        Sanctum::actingAs($this->admin());
+        $lead = $this->lead();
+
+        $this->send($lead, [
+            'subject' => 'Hello',
+            'body' => 'Plain note',
+            'body_html' => '<script>alert(1)</script>',
+        ])->assertCreated();
+
+        $this->assertNull(Email::query()->latest('id')->first()->body_html);
+        $this->assertNull($this->lastSent()->getHtmlBody());
     }
 }

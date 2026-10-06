@@ -23,6 +23,7 @@ use Illuminate\Support\Carbon;
  * @property Carbon|null $failed_at Cast to datetime; declared so static analysis applies the cast.
  * @property Carbon|null $cancelled_at Cast to datetime; declared so static analysis applies the cast.
  * @property array<string, mixed>|null $body_doc Tiptap document of a formatted reply; null = plain text.
+ * @property string|null $body_html The text/html part as sent; null = sent as plain text, or not sent.
  */
 #[Fillable([
     'lead_id',
@@ -39,6 +40,10 @@ use Illuminate\Support\Carbon;
     // part is rendered from at send time. Null for every other email — `body` stays canonical.
     'body_doc',
     'email_template_id',
+    // The text/html part exactly as it was sent, written once by OutreachEmailService::sendExisting()
+    // on a successful send. Null when the email went out as plain text (or did not go out at all).
+    // Never accepted from a request: no request field carries markup.
+    'body_html',
     // RC3 Outreach Automation Pack — business purpose of the send (e.g. proposal, introduction,
     // thank_you). Nullable; set only by the automation send path. Drives the `proposal.sent` event.
     'purpose',
