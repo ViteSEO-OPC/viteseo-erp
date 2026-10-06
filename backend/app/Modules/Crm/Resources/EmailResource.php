@@ -27,6 +27,9 @@ class EmailResource extends JsonResource
             'direction' => $this->direction,
             // RC3 Outreach Automation Pack — business purpose of the send (null for user-composed / inbound).
             'purpose' => $this->purpose,
+            // Additive. The template the email was composed from, so a saved draft reopens on that
+            // template's Purpose + Tone and its design. An id only; null when it was not.
+            'emailTemplateId' => $this->email_template_id !== null ? (string) $this->email_template_id : null,
             'provider' => $this->provider,
             'sentAt' => $this->sent_at?->toIso8601String(),
             'updatedAt' => $this->updated_at?->toIso8601String(),

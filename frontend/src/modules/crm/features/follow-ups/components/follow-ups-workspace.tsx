@@ -155,6 +155,8 @@ export function FollowUpsWorkspace({ leadId }: FollowUpsWorkspaceProps) {
   };
 
   // Save Draft: update the loaded draft in place, or create a new one for the selected lead.
+  // The draft keeps the template it was composed from by the same rule a send uses — `sendableTemplateId`,
+  // null once the text is edited — so sending it later carries that template's design, or does not.
   const handleSaveDraft = () => {
     if (activeDraftId) {
       updateDraftMutation.mutate({
@@ -162,6 +164,7 @@ export function FollowUpsWorkspace({ leadId }: FollowUpsWorkspaceProps) {
         subject: draft.subject,
         body: draft.body,
         to: selectedItem?.email || undefined,
+        emailTemplateId: sendableTemplateId,
       });
       return;
     }
@@ -172,6 +175,7 @@ export function FollowUpsWorkspace({ leadId }: FollowUpsWorkspaceProps) {
         subject: draft.subject,
         body: draft.body,
         to: selectedItem.email || undefined,
+        emailTemplateId: sendableTemplateId,
       },
       { onSuccess: (created) => setActiveDraftId(created.id) },
     );

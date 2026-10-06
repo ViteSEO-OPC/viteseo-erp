@@ -95,6 +95,9 @@ export function useFollowUpsData(leadId?: string) {
   // The id of the saved draft currently loaded in the composer, or null when composing fresh.
   // Drives whether Save updates-vs-creates and whether Send transitions an existing draft.
   const [activeDraftId, setActiveDraftId] = useState<string | null>(null);
+  // The template a just-opened draft was composed from, held until the opened lead's templates have
+  // loaded and its Purpose + Tone can be restored from them. See the block after useEmailTemplates.
+  const [pendingDraftTemplateId, setPendingDraftTemplateId] = useState<string | null>(null);
   // The selected-item id the composer currently holds content for. See the re-hydration effect below.
   const hydratedFor = useRef<string | null>(null);
 
@@ -189,6 +192,7 @@ export function useFollowUpsData(leadId?: string) {
     // A saved draft belongs to the item it was opened on; carrying its id over would make Send
     // transition the wrong stored row.
     setActiveDraftId(null);
+    setPendingDraftTemplateId(null);
   }, [selectedItemId]);
 
   // Mark Done: complete the follow-up through Planner's existing update flow. `completed` fails the
@@ -204,7 +208,13 @@ export function useFollowUpsData(leadId?: string) {
   );
 
   // Load a saved draft back into the composer for editing/sending.
-  const loadDraft = useCallback((d: { id: string; leadId: string | null; subject: string; body: string }) => {
+  const loadDraft = useCallback((d: {
+    id: string;
+    leadId: string | null;
+    subject: string;
+    body: string;
+    emailTemplateId?: string | null;
+  }) => {
     if (d.leadId) {
       // Select the pending follow-up for this lead, if one is in the inbox.
       const match = items.find((i) => i.leadId === d.leadId);
@@ -219,6 +229,7 @@ export function useFollowUpsData(leadId?: string) {
     }
     setDraft((prev) => ({ ...prev, subject: d.subject, body: d.body }));
     setActiveDraftId(d.id);
+    setPendingDraftTemplateId(d.emailTemplateId ?? null);
   }, [items]);
 
   const updateDraft = useCallback((updates: Partial<EmailDraft>) => {
@@ -237,7 +248,26 @@ export function useFollowUpsData(leadId?: string) {
   // draw their options from the active templates; picking a combination populates Subject + Body from
   // the matching rendered template (the BD can then edit before sending). No AI — the backend renders
   // {{token}} placeholders deterministically.
-  const { templates } = useEmailTemplates(selectedItem?.leadId ?? null);
+  const { templates, isLoading: templatesLoading } = useEmailTemplates(selectedItem?.leadId ?? null);
+
+  /**
+   * Reopening a draft restores the Purpose + Tone of the template it was saved from, which is what makes
+   * the composer show that template's format again. Only those two fields: Subject and Body stay the
+   * draft's own. Waits for the opened lead's templates, because opening a draft can change the selected
+   * lead. A template that is no longer offered (deleted, deactivated, another organization's) restores
+   * nothing — the composer keeps its current Purpose + Tone, and the server's own checks send the draft
+   * as plain text.
+   *
+   * Adjusted during render rather than in an effect (React's "adjusting state when a prop changes"):
+   * clearing the pending id first makes it run once, and the composer never paints the old Purpose + Tone.
+   */
+  if (pendingDraftTemplateId !== null && !templatesLoading) {
+    const saved = templates.find((t) => t.id === pendingDraftTemplateId);
+    setPendingDraftTemplateId(null);
+    if (saved) {
+      setDraft((prev) => ({ ...prev, purpose: saved.purpose, tone: saved.tone }));
+    }
+  }
   const purposeOptions = useMemo(
     () => Array.from(new Set(templates.map((t) => t.purpose))),
     [templates],

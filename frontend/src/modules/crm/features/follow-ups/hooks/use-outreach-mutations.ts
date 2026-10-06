@@ -51,6 +51,20 @@ export type DraftEmail = {
   body: string;
   status: string;
   updatedAt: string | null;
+  /**
+   * The template the draft was composed from, so reopening it restores that template's Purpose + Tone
+   * (and with them its design). Null when it was not composed from one, or its text was edited.
+   */
+  emailTemplateId?: string | null;
+};
+
+/** What Save Draft writes. `emailTemplateId` follows the same rule as a send's: null once edited. */
+type SaveDraftVars = {
+  leadId: string;
+  subject: string;
+  body: string;
+  to?: string;
+  emailTemplateId: string | null;
 };
 
 // Drafts live under the existing follow-ups query namespace (no new key registry needed).
@@ -123,9 +137,14 @@ export function useDrafts() {
 export function useSaveDraft() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ leadId, subject, body, to }: SendEmailVars) =>
+    mutationFn: ({ leadId, subject, body, to, emailTemplateId }: SaveDraftVars) =>
       apiClient
-        .post(`/leads/${leadId}/emails/drafts`, { subject, body, ...(to ? { to } : {}) })
+        .post(`/leads/${leadId}/emails/drafts`, {
+          subject,
+          body,
+          ...(to ? { to } : {}),
+          email_template_id: emailTemplateId,
+        })
         .then((r) => r.data.data as DraftEmail),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: draftsKey });
@@ -141,9 +160,11 @@ export function useSaveDraft() {
 export function useUpdateDraft() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, subject, body, to }: { id: string; subject: string; body: string; to?: string }) =>
+    mutationFn: ({ id, subject, body, to, emailTemplateId }: Omit<SaveDraftVars, "leadId"> & { id: string }) =>
       apiClient
-        .patch(`/emails/${id}`, { subject, body, ...(to ? { to } : {}) })
+        // `email_template_id` is always sent: the server replaces it on every save, so null is what
+        // clears an association the edited text no longer matches.
+        .patch(`/emails/${id}`, { subject, body, ...(to ? { to } : {}), email_template_id: emailTemplateId })
         .then((r) => r.data.data as DraftEmail),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: draftsKey });

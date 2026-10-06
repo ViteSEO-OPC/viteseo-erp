@@ -298,7 +298,7 @@ export function EmailTemplateContentEditor({ template, seed, catalog, onClose }:
                 <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden />
                 {kind === "automation"
                   ? "Until HTML sending is switched on, automated emails from this template use its plain-text version, which the server generates from its content and design."
-                  : "Until HTML sending is switched on, the Outreach composer offers this template's plain-text version, which the server generates from its content and design."}
+                  : "Sent from the Outreach composer, this template goes out in its design as long as its text is not edited. Edited text is sent as plain text, using the plain-text version the server generates from its content and design."}
               </p>
 
               <section aria-labelledby="template-details" className="flex flex-col gap-4">

@@ -113,6 +113,9 @@ class EmailController extends Controller
             'to_name' => $lead->contact_name,
             'subject' => (string) ($data['subject'] ?? ''),
             'body' => (string) ($data['body'] ?? ''),
+            // The template the draft was composed from, if any. Sending the draft goes through
+            // sendExisting(), whose own edit check still decides whether its design renders.
+            'email_template_id' => isset($data['email_template_id']) ? (int) $data['email_template_id'] : null,
             'status' => 'draft',
         ]);
 
@@ -130,6 +133,9 @@ class EmailController extends Controller
                 : $email->to_email,
             'subject' => (string) ($data['subject'] ?? ''),
             'body' => (string) ($data['body'] ?? ''),
+            // Replaced on every save, like subject and body: an update that names no template clears
+            // it, so an association from an earlier save can never outlive the text it was valid for.
+            'email_template_id' => isset($data['email_template_id']) ? (int) $data['email_template_id'] : null,
         ]);
 
         return (new EmailResource($email))->response();
