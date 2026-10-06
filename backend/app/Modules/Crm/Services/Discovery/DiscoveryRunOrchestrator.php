@@ -457,6 +457,13 @@ class DiscoveryRunOrchestrator
             return $result['errorReason'];
         }
 
+        // THE ENGINE'S OWN WORDS when it said which niche it refused. The generic sentence below
+        // cannot name the niche or the words that would have worked; the engine's line does both.
+        $unknownCategory = $this->unknownCategory($result);
+        if ($unknownCategory !== null) {
+            return $unknownCategory;
+        }
+
         return match ($result['exitCode']) {
             2 => 'The engine refused this search (unsupported niche for this provider, or a configuration problem).',
             3 => 'The provider did not complete the search, so nothing was retrieved. This is a failed search, not an empty area.',
@@ -464,6 +471,71 @@ class DiscoveryRunOrchestrator
                 ? $result['stderrTail']
                 : 'The search failed for an unknown reason.',
         };
+    }
+
+    /**
+     * The engine's "Unknown category …" refusal, or null when this search failed for another reason.
+     *
+     * Exit 2 plus the engine's own `ERROR: Unknown category '<niche>'. Use a known word (…)` line on
+     * stderr: the provider has no selector for this niche, so every search for it will be refused the
+     * same way. Read from the captured stderr tail, never guessed from the exit code alone — exit 2
+     * also covers configuration refusals that say nothing about the niche.
+     *
+     * @param  array{exitCode: int, stderrTail?: string}  $result
+     */
+    private function unknownCategory(array $result): ?string
+    {
+        if ($result['exitCode'] !== 2) {
+            return null;
+        }
+
+        return preg_match("/^ERROR: (Unknown category '.*)$/m", (string) ($result['stderrTail'] ?? ''), $m) === 1
+            ? trim($m[1])
+            : null;
+    }
+
+    /**
+     * Niches this run's searches have already been refused for as unknown categories.
+     *
+     * Read from the persisted targets so it survives a slice boundary exactly as the targets do —
+     * `explain()` stores the engine's "Unknown category" line as the target's reason.
+     *
+     * @return list<string>
+     */
+    private function refusedNiches(DiscoveryRun $run): array
+    {
+        return $run->targets()
+            ->where('status', DiscoveryRunTarget::STATUS_FAILED)
+            ->where('exit_code', 2)
+            ->where('error_reason', 'like', 'Unknown category %')
+            ->distinct()
+            ->pluck('category')
+            ->all();
+    }
+
+    /**
+     * Stop a nationwide run whose every niche the engine has refused as an unknown category.
+     *
+     * The refusal is a fact about the niche, not about a cell, so every remaining cell would be
+     * refused identically: running them would spend the budget to record the same failure hundreds
+     * of times (run 119: 60 of 60). FAILED, with the engine's own message, so the user learns which
+     * niche to change instead of reading a full budget as work done.
+     */
+    private function stopForUnknownCategory(DiscoveryRun $run, string $engineMessage): void
+    {
+        $run->refresh();
+        if ($run->isTerminal()) {
+            return;
+        }
+
+        $this->skipRemaining($run);
+
+        $run->forceFill([
+            'status' => DiscoveryRun::STATUS_FAILED,
+            'error_message' => 'The search engine does not support this niche on the selected provider, so the run '
+                .'was stopped after its first refused search instead of spending the rest of its budget. '
+                .$engineMessage,
+        ])->save();
     }
 
     private function isCancelled(DiscoveryRun $run): bool
@@ -535,7 +607,8 @@ class DiscoveryRunOrchestrator
      *   2. THE BUDGET RUNS OUT. A spending fence, not a discovery boundary. Recorded, and reported as
      *      the reason, so a short result is never mistaken for a fact about the Philippines.
      *   3. CANCELLATION, between searches.
-     *   4. THE PROVIDER FAILS in a way that makes continuing pointless (a rejected credential).
+     *   4. THE PROVIDER FAILS in a way that makes continuing pointless (a rejected credential, or
+     *      the engine refusing every niche of the run as an unknown category).
      *
      * A CELL ITSELF stops for one of two reasons, and they are recorded separately because they mean
      * opposite things: it came back with FEWER results than it was allowed (exhausted — there is
@@ -719,6 +792,9 @@ class DiscoveryRunOrchestrator
         $limit = (int) (($run->scope)['limitPerTask'] ?? config('discovery.nationwide.limit_per_task', 20));
         $searchesThisSlice = 0;
         $spendLimited = false;
+        // Niches the engine has refused as unknown categories. Never searched again in this run: the
+        // refusal would repeat in every cell and spend a budget unit each time.
+        $refused = $this->refusedNiches($run);
 
         while ($queue !== []) {
             if ($spendLimited) {
@@ -754,7 +830,7 @@ class DiscoveryRunOrchestrator
             $startAt = max(0, (int) ($cell['nichesDone'] ?? 0));
 
             foreach ($niches as $index => $niche) {
-                if ($index < $startAt) {
+                if ($index < $startAt || in_array($niche, $refused, true)) {
                     continue;
                 }
                 if ($this->budgetSpent($run) || $this->aiCreditExhausted($run)) {
@@ -803,6 +879,18 @@ class DiscoveryRunOrchestrator
                     $spendLimited = true;
 
                     break;
+                }
+
+                // FAIL FAST ON A REFUSED NICHE. Once every niche of the run has been refused, no cell
+                // has anything left to search, so the run stops here — budget_used counts only the
+                // searches actually attempted. A run with another niche still left carries on with it.
+                if ($result['unknownCategory'] !== null) {
+                    $refused[] = $niche;
+                    if (array_diff($niches, $refused) === []) {
+                        $this->stopForUnknownCategory($run, $result['unknownCategory']);
+
+                        return null;
+                    }
                 }
 
                 if (! $result['ok']) {
@@ -1127,6 +1215,8 @@ class DiscoveryRunOrchestrator
             // Did this search actually run? A failed one (rate-limited after its retries, provider
             // error, engine refusal) returned zero businesses without looking — see workQueue().
             'ok' => $result['exitCode'] === 0,
+            // The engine refused the NICHE, not this cell — see workQueue().
+            'unknownCategory' => $this->unknownCategory($result),
             'discovered' => $result['discovered'],
             'inserted' => $result['inserted'],
             'duplicates' => $result['duplicates'],

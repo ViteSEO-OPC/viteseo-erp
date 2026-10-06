@@ -756,14 +756,27 @@ function RunPanel({ run }: { run: DiscoveryRun }) {
         <RunProgress percent={progress.percent} failed={failed} />
         {nationwide && !planning && (
           <div className="flex flex-wrap items-center justify-between gap-2 text-caption text-muted-foreground">
-            <span>
-              {progress.cellsSearched} searched
-              {progress.cellsSubdivided > 0
-                ? ` · ${progress.cellsSubdivided} split for a closer look`
-                : ""}
-              {" · "}
-              {progress.targetsTotal} search{progress.targetsTotal === 1 ? "" : "es"} run
-            </span>
+            {/* FAILED SEARCHES ARE NAMED, never folded into "searched" / "run": a run whose 60
+                searches were all refused must not read as 60 searches done. */}
+            {progress.targetsFailed > 0 ? (
+              <span>
+                {progress.cellsSearched} map area{progress.cellsSearched === 1 ? "" : "s"} tried
+                {progress.cellsSubdivided > 0
+                  ? ` · ${progress.cellsSubdivided} split for a closer look`
+                  : ""}
+                {" · "}
+                {progress.targetsTotal} attempted · {progress.targetsFailed} failed
+              </span>
+            ) : (
+              <span>
+                {progress.cellsSearched} searched
+                {progress.cellsSubdivided > 0
+                  ? ` · ${progress.cellsSubdivided} split for a closer look`
+                  : ""}
+                {" · "}
+                {progress.targetsTotal} search{progress.targetsTotal === 1 ? "" : "es"} run
+              </span>
+            )}
             {/* The budget, stated while it is being spent — so a run that stops early has already
                 explained why, instead of leaving its result to look like a fact about the country. */}
             <span>
@@ -829,7 +842,10 @@ function RunPanel({ run }: { run: DiscoveryRun }) {
       {nationwide && !planning && progress.cellsPlanned > 0 && (
         <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <Stat label="Map areas planned" value={progress.cellsPlanned} />
-          <Stat label="Areas searched" value={progress.cellsSearched} />
+          <Stat
+            label={progress.targetsFailed > 0 ? "Areas tried" : "Areas searched"}
+            value={progress.cellsSearched}
+          />
           <Stat label="Exhausted" value={progress.cellsExhausted} />
           <Stat label="Still had more" value={progress.cellsCapped} />
         </dl>
