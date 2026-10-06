@@ -324,6 +324,13 @@ Route::middleware(['auth:sanctum', 'set-current-org', 'subscription-active', 'fe
         Route::get('/leads/{lead}/email-templates', [EmailTemplateController::class, 'index'])
             ->middleware('permission:crm.follow-ups.view')
             ->can('view', 'lead');
+        // The composer's per-lead preview of a designed template: the HTML this lead would receive if it were
+        // sent unchanged now, through the send path's own rendering sequence. Gated exactly like the feed
+        // above; read-only, and throttled like the Settings previews.
+        Route::get('/leads/{lead}/email-templates/{emailTemplate}/preview', [EmailTemplateController::class, 'preview'])
+            ->whereNumber('emailTemplate')
+            ->middleware(['permission:crm.follow-ups.view', 'throttle:60,1'])
+            ->can('view', 'lead');
         Route::post('/leads', [LeadController::class, 'store'])->can('create', Lead::class);
 
         // Qualification bridge: accept a discovered prospect (Nearby Clients) into the CRM sales pipeline.

@@ -7,6 +7,7 @@ import { EmailComposer } from "@/modules/crm/features/follow-ups/components/emai
 import { EmptyPanel } from "@/modules/crm/features/follow-ups/components/empty-panel";
 import { DraftsList } from "@/modules/crm/features/follow-ups/components/drafts-list";
 import { SchedulerPanel } from "@/modules/crm/features/follow-ups/components/scheduler-panel";
+import { EmailDesignPreviewDialog } from "@/modules/crm/features/follow-ups/components/email-design-preview-dialog";
 import { OutreachTabs, type OutreachTab } from "@/modules/crm/features/follow-ups/components/outreach-tabs";
 import { ConfirmDialog } from "@/modules/crm/components/shared/confirm-dialog/confirm-dialog";
 import { notify as toast } from "@/core/lib/notify";
@@ -68,6 +69,7 @@ export function FollowUpsWorkspace({ leadId }: FollowUpsWorkspaceProps) {
   const [schedulerOpen, setSchedulerOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<OutreachTab>("followups");
   const [regenerateOpen, setRegenerateOpen] = useState(false);
+  const [designPreviewOpen, setDesignPreviewOpen] = useState(false);
 
   // Send: an already-saved draft transitions in place (same row); otherwise a fresh send.
   // The inbox row is a PlannerEvent, so the email targets its linked lead (`leadId`), not the
@@ -254,6 +256,11 @@ export function FollowUpsWorkspace({ leadId }: FollowUpsWorkspaceProps) {
               onSelectTone={selectTone}
               templateFormat={templateFormat}
               designNotice={designNotice}
+              onPreviewDesign={
+                selectedItem.leadId && sendableTemplateId !== null && templateFormat?.isDesigned
+                  ? () => setDesignPreviewOpen(true)
+                  : undefined
+              }
               onRegenerate={canRegenerate ? handleRegenerate : undefined}
               onToggleSchedule={handleToggleSchedule}
               // Withheld when the item has no lead: the draft endpoint is POST
@@ -303,6 +310,19 @@ export function FollowUpsWorkspace({ leadId }: FollowUpsWorkspaceProps) {
         onDatetimeChange={setScheduleDatetime}
         onClose={() => setSchedulerOpen(false)}
       />
+
+      {/* Mounted only while the composer offers a preview: an unedited designed template on a lead. */}
+      {selectedItem?.leadId && sendableTemplateId !== null && templateFormat?.isDesigned ? (
+        <EmailDesignPreviewDialog
+          open={designPreviewOpen}
+          onOpenChange={setDesignPreviewOpen}
+          leadId={selectedItem.leadId}
+          templateId={sendableTemplateId}
+          designName={templateFormat.designName}
+          recipientName={selectedItem.name}
+          subject={draft.subject}
+        />
+      ) : null}
     </div>
   );
 }

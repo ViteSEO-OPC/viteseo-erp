@@ -1,12 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronDown, Info, Zap } from "lucide-react";
+import { ChevronDown, Eye, Info, Zap } from "lucide-react";
 import { cn } from "@/modules/crm/lib/utils";
 import { FormField } from "@/modules/crm/components/forms/form-field/form-field";
 import { Input } from "@/modules/crm/components/ui/input";
 import { Textarea } from "@/modules/crm/components/ui/textarea";
 import { Badge } from "@/modules/crm/components/ui/badge";
+import { Button } from "@/modules/crm/components/ui/button";
 import {
   Select,
   SelectTrigger,
@@ -35,6 +36,11 @@ type EmailComposerProps = {
   templateFormat?: { isDesigned: boolean; designName: string | null } | null;
   /** Why a designed template will go out as plain text this time, or null. */
   designNotice?: string | null;
+  /**
+   * Open the per-lead preview of the HTML this email will be sent as. Provided only while a designed
+   * template's text is unedited — once edited it sends as plain text, so there is no design to preview.
+   */
+  onPreviewDesign?: () => void;
   /** Re-render Subject + Body from the current Purpose + Tone. Omitted when no template matches. */
   onRegenerate?: () => void;
   onToggleSchedule: () => void;
@@ -59,6 +65,7 @@ export function EmailComposer({
   onSelectTone,
   templateFormat,
   designNotice,
+  onPreviewDesign,
   onRegenerate,
   onToggleSchedule,
   onSaveDraft,
@@ -186,6 +193,12 @@ export function EmailComposer({
                   ? `Designed · ${templateFormat.designName ?? "Email design"}`
                   : "Plain text"}
               </Badge>
+              {onPreviewDesign ? (
+                <Button type="button" variant="outline" size="xs" onClick={onPreviewDesign}>
+                  <Eye aria-hidden />
+                  Preview
+                </Button>
+              ) : null}
             </div>
             {designNotice ? (
               <p role="status" className="flex items-start gap-1.5 text-xs text-foreground">

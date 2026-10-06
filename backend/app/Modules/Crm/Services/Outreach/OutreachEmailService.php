@@ -11,8 +11,6 @@ use App\Modules\Crm\Services\Mail\Contracts\EmailProvider;
 use App\Modules\Crm\Services\Mail\EmailDocument;
 use App\Modules\Crm\Services\Mail\EmailMessage;
 use App\Modules\Crm\Services\Mail\SentEmail;
-use App\Modules\Crm\Support\EmailDesign\EmailDesignRenderer;
-use App\Modules\Crm\Support\EmailDesign\EmailDesignValidator;
 use App\Support\Mail\Module;
 use App\Support\Mail\ModuleSender;
 use App\Support\Mail\ModuleSenderResolver;
@@ -33,13 +31,12 @@ class OutreachEmailService
     public function __construct(
         private readonly EmailProvider $provider,
         private readonly ModuleSenderResolver $senders,
-        // The designed-send collaborators. All four are the SAME objects the Settings preview uses —
-        // one renderer, one validator, one token map, one branding source — which is what makes
-        // "what an admin previewed is what a recipient receives" a property of the code rather than
-        // a hope about two implementations staying in step.
+        // The designed-send collaborators. The renderer, validator and branding sit behind
+        // EmailTemplateDesignService::designedHtml(), the SAME sequence the composer's per-lead preview
+        // calls, and the token map is the one the composer is handed — which is what makes "what the
+        // sender previewed is what the recipient receives" a property of the code rather than a hope
+        // about two implementations staying in step.
         private readonly EmailTemplateDesignService $designs,
-        private readonly EmailDesignRenderer $designRenderer,
-        private readonly EmailDesignValidator $designValidator,
         private readonly TemplateRenderer $templates,
     ) {}
 
@@ -283,35 +280,25 @@ class OutreachEmailService
             return null;
         }
 
-        // The documents have been at rest in the database since they were accepted, so they are
-        // re-validated rather than trusted — the same reasoning the body_doc path applies above.
-        $layout = $template->design->layout;
-        $content = $template->content;
+        // Validation, rendering and the Gmail guard are the shared sequence the composer's per-lead
+        // preview also calls (EmailTemplateDesignService::designedHtml), so what that preview shows is the
+        // HTML this line hands the provider. Each refusal is logged here exactly as it always was.
+        $rendered = $this->designs->designedHtml($template, $lead, $sender);
 
-        if ($this->designValidator->layoutProblem($layout) !== null || $this->designValidator->contentProblem($content) !== null) {
-            Log::warning('outreach.designed_html.skipped', ['email_id' => $email->id, 'reason' => 'document_invalid']);
-
-            return null;
-        }
-
-        $html = $this->designRenderer->toHtml($layout, $content, $this->designs->sendContext($lead, $sender));
-
-        // THE GMAIL GUARD, RE-RUN WITH THIS LEAD'S REAL VALUES. Settings measures the same email with
-        // sample values, and a real business name is often longer. Gmail clips over ~102 KB and hides
-        // the rest behind "[Message clipped]", so an email that would be truncated is sent as plain
-        // text instead: a complete message a person can read beats a designed one they cannot.
-        if (strlen($html) > EmailTemplateDesignService::MAX_HTML_BYTES) {
-            Log::warning('outreach.designed_html.skipped', [
-                'email_id' => $email->id,
-                'reason' => 'html_too_large',
-                'bytes' => strlen($html),
-                'max' => EmailTemplateDesignService::MAX_HTML_BYTES,
-            ]);
+        if ($rendered['html'] === null) {
+            Log::warning('outreach.designed_html.skipped', $rendered['reason'] === 'html_too_large'
+                ? [
+                    'email_id' => $email->id,
+                    'reason' => 'html_too_large',
+                    'bytes' => $rendered['bytes'],
+                    'max' => EmailTemplateDesignService::MAX_HTML_BYTES,
+                ]
+                : ['email_id' => $email->id, 'reason' => $rendered['reason']]);
 
             return null;
         }
 
-        return $html;
+        return $rendered['html'];
     }
 
     /**
