@@ -21,13 +21,17 @@
  * E  REMOTE CONTENT DETECTION — which emails offer "Show images".
  * F  LINK SCHEMES — the href allow-list used inside the frame, including obfuscated `javascript:`.
  * G  STATIC — no dangerouslySetInnerHTML in the renderer or the thread; the frame is sandboxed without
- *    scripts, forms, top navigation or modals.
+ *    scripts, forms, top navigation or modals; only CRM-sent (outbound) messages get a trusted source.
+ * H  TRUSTED IMAGE SOURCE — the CRM's own email-asset path is the ONLY thing a sent design's frame
+ *    trusts: an exact path prefix, never a host or scheme, and nothing that could break out of the
+ *    policy attribute or add a directive.
  */
 import { readFileSync, readdirSync } from "node:fs";
 import {
   EMAIL_FRAME_SANDBOX,
   QUOTES_COLLAPSED_CLASS,
   buildEmailSrcDoc,
+  emailAssetImageSource,
   emailFrameCsp,
   hasRemoteContent,
   isSafeEmailHref,
@@ -184,10 +188,16 @@ const reassembles = (text: string) => linkifyText(text).map((t) => t.text).join(
     ['<img src="cid:logo@viteseo">', false],
     ["<p>Hello, no images.</p>", false],
   ];
-  gate(
-    "E  remote content detection",
-    cases.map(([html, expected]) => [`${html} → ${!expected}`, hasRemoteContent(html) === expected]),
-  );
+  const own = "https://api.viteseo.ph/api/v1/crm/email-assets/";
+  const logo = `<img src="${own}0b6c9a3e-1111-4c4c-9d9d-123456789abc.png" width="160">`;
+  gate("E  remote content detection", [
+    ...cases.map(([html, expected]): [string, boolean] => [`${html} → ${!expected}`, hasRemoteContent(html) === expected]),
+    ["own logo without trust → offers Show images", hasRemoteContent(logo) === true],
+    ["own logo with trust → nothing held back", hasRemoteContent(logo, [own]) === false],
+    ["own logo + a tracker → still offers Show images", hasRemoteContent(logo + '<img src="https://t.example/p.gif">', [own]) === true],
+    ["another path on the same host is not trusted", hasRemoteContent('<img src="https://api.viteseo.ph/api/v1/crm/leads/1.png">', [own]) === true],
+    ["an invalid trusted source trusts nothing", hasRemoteContent(logo, ["https:"]) === true],
+  ]);
 }
 
 // ── F  link schemes ─────────────────────────────────────────────────────────────────────────
@@ -234,6 +244,49 @@ const reassembles = (text: string) => linkifyText(text).map((t) => t.text).join(
     ["sandbox has no allow-forms", !tokens.includes("allow-forms")],
     ["sandbox has no top navigation", !tokens.some((t) => t.startsWith("allow-top-navigation"))],
     ["sandbox has no allow-modals", !tokens.includes("allow-modals")],
+    ["thread trusts its own assets for outbound messages only", thread.includes("trustedImageSources={inbound ? undefined : ownAssetSources()}")],
+  ]);
+}
+
+// ── H  trusted image source ─────────────────────────────────────────────────────────────────────
+{
+  const own = emailAssetImageSource("https://api.viteseo.ph/api/v1/crm");
+  const ownSlash = emailAssetImageSource("https://api.viteseo.ph/api/v1/crm/");
+  const local = emailAssetImageSource("http://192.168.68.73:8001/api/v1/crm");
+  const imgSrc = (csp: string) => csp.split("; ").find((d) => d.startsWith("img-src ")) ?? "";
+  const trustedBlocked = emailFrameCsp(false, own === null ? [] : [own]);
+  const trustedShown = emailFrameCsp(true, own === null ? [] : [own]);
+  const hostile = [
+    "https:",
+    "*",
+    "https://api.viteseo.ph",
+    "https://api.viteseo.ph/",
+    "https://api.viteseo.ph/x/; script-src *",
+    "https://api.viteseo.ph/x/ https:",
+    'https://api.viteseo.ph/x/"><script>alert(1)</script>',
+    "https://api.viteseo.ph/x/?a=1",
+    "https://user:pw@api.viteseo.ph/x/",
+    "javascript:alert(1)//x/",
+    "data:image/png/",
+    "https://api.viteseo.ph/x",
+  ];
+  const doc = buildEmailSrcDoc("<p>x</p>", { showRemoteImages: false, trustedImageSources: own === null ? [] : [own] });
+
+  gate("H  trusted image source", [
+    ["own asset path from the CRM base", own === "https://api.viteseo.ph/api/v1/crm/email-assets/"],
+    ["trailing slash on the base is the same path", ownSlash === own],
+    ["local http base keeps its own scheme and port", local === "http://192.168.68.73:8001/api/v1/crm/email-assets/"],
+    ["unusable base → null", emailAssetImageSource("") === null && emailAssetImageSource("not a url") === null],
+    ["non-http base → null", emailAssetImageSource("javascript:alert(1)") === null],
+    ["blocked + trusted: img-src is data: and the path only", imgSrc(trustedBlocked) === `img-src data: ${own}`],
+    ["shown + trusted: https, data and the path", imgSrc(trustedShown) === `img-src https: data: ${own}`],
+    ["no trust → policy unchanged", emailFrameCsp(false, []) === emailFrameCsp(false) && emailFrameCsp(true, []) === emailFrameCsp(true)],
+    ["trusted policy still grants no script", !/script-src/.test(trustedBlocked + trustedShown)],
+    ["trusted document carries the trusted policy", doc.includes(`content="${trustedBlocked}"`)],
+    ...hostile.map((source): [string, boolean] => [
+      `hostile source dropped: ${JSON.stringify(source)}`,
+      emailFrameCsp(false, [source]) === emailFrameCsp(false),
+    ]),
   ]);
 }
 

@@ -10,8 +10,10 @@ type Props = {
   body: string;
   /** A formatted reply sent from the CRM: the Tiptap document, rendered read-only. */
   bodyDoc: JSONContent | null;
-  /** A received email's HTML part, already sanitised by the server. */
+  /** The HTML part: a received email's, or the snapshot of what the CRM itself sent. */
   bodyHtml: string | null;
+  /** Image path sources the frame may load without "Show images" (CRM-sent messages only). */
+  trustedImageSources?: readonly string[];
   className?: string;
 };
 
@@ -19,13 +21,16 @@ type Props = {
  * One email's body, in the richest form available:
  *
  *   bodyDoc   → NoteBody, exactly as the thread has rendered formatted replies since they shipped
- *   bodyHtml  → EmailHtmlFrame (sandboxed, scripts off, remote images blocked until asked)
+ *   bodyHtml  → EmailHtmlFrame (sandboxed, scripts off, remote images blocked until asked) — a received
+ *               email's HTML, or the exact HTML a designed email was sent with
  *   otherwise → EmailPlainText
  *
  * Presentation only: which fields exist is the server's decision, and nothing here sends or stores.
  */
-export function EmailBody({ body, bodyDoc, bodyHtml, className }: Props) {
+export function EmailBody({ body, bodyDoc, bodyHtml, trustedImageSources, className }: Props) {
   if (bodyDoc) return <NoteBody text={body} doc={bodyDoc} className={className} />;
-  if (bodyHtml) return <EmailHtmlFrame html={bodyHtml} className={className} />;
+  if (bodyHtml) {
+    return <EmailHtmlFrame html={bodyHtml} trustedImageSources={trustedImageSources} className={className} />;
+  }
   return <EmailPlainText text={body} className={className} />;
 }
