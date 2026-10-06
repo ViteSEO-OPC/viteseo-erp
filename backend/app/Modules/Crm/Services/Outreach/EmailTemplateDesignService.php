@@ -3,6 +3,7 @@
 namespace App\Modules\Crm\Services\Outreach;
 
 use App\Models\User;
+use App\Modules\Crm\Models\EmailTemplate;
 use App\Modules\Crm\Models\Lead;
 use App\Modules\Crm\Support\EmailDesign\EmailDesignContext;
 use App\Modules\Crm\Support\EmailDesign\EmailDesignRenderer;
@@ -229,6 +230,59 @@ class EmailTemplateDesignService
             logoAlt: $logo['alt'] ?? '',
             previewImages: [],
         );
+    }
+
+    /**
+     * The HTML part a designed template sends to this lead from this sender — or null, and why not.
+     *
+     * THE ONE RENDERING SEQUENCE for a real recipient, shared by the send path
+     * (OutreachEmailService::designedHtmlFor) and the composer's per-lead preview, so the preview is the
+     * sent HTML, not a second rendering that resembles it: the same documents, re-validated rather than
+     * trusted, rendered by the same renderer in the same {@see sendContext()}, and held to the same Gmail
+     * guard re-run with this lead's real values.
+     *
+     * Deliberately NOT here: the edit check. Whether a message's text is still the template's own is a
+     * question about one email row, so the send path keeps deciding it before it calls this. A preview is
+     * only offered while the composer's text is unedited, which is the same condition.
+     *
+     * Reasons, as the send path logs them: `template_not_designed`, `design_missing`, `document_invalid`,
+     * `html_too_large` (which also reports the size it measured).
+     *
+     * @return array{html: string|null, reason: string|null, bytes: int|null}
+     */
+    public function designedHtml(EmailTemplate $template, Lead $lead, ?User $sender): array
+    {
+        $refused = static fn (string $reason, ?int $bytes = null): array => ['html' => null, 'reason' => $reason, 'bytes' => $bytes];
+
+        if (! $template->isDesigned()) {
+            return $refused('template_not_designed');
+        }
+
+        $design = $template->design;
+        if ($design === null) {
+            return $refused('design_missing');
+        }
+
+        // The documents have been at rest in the database since they were accepted, so they are
+        // re-validated rather than trusted.
+        $layout = $design->layout;
+        $content = $template->content;
+
+        if ($this->validator->layoutProblem($layout) !== null || $this->validator->contentProblem($content) !== null) {
+            return $refused('document_invalid');
+        }
+
+        $html = $this->renderer->toHtml($layout, $content, $this->sendContext($lead, $sender));
+
+        // THE GMAIL GUARD, RE-RUN WITH THIS LEAD'S REAL VALUES. Settings measures the same email with
+        // sample values, and a real business name is often longer. Gmail clips over ~102 KB and hides
+        // the rest behind "[Message clipped]", so an email that would be truncated is sent as plain
+        // text instead: a complete message a person can read beats a designed one they cannot.
+        if (strlen($html) > self::MAX_HTML_BYTES) {
+            return $refused('html_too_large', strlen($html));
+        }
+
+        return ['html' => $html, 'reason' => null, 'bytes' => strlen($html)];
     }
 
     /**

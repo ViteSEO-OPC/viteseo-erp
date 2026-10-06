@@ -1407,4 +1407,129 @@ class EmailDesignedSendTest extends TestCase
         $this->assertNotNull($this->lastSent()->getHtmlBody(), 'A valid same-organization template still renders its design.');
         $this->assertSame($template->id, Email::query()->latest('id')->firstOrFail()->email_template_id);
     }
+
+    // ── 15. THE COMPOSER'S PER-LEAD PREVIEW ──────────────────────────────────────────────────
+    //
+    // "This is the HTML this lead will receive if I send this unchanged right now." Not a resemblance: the
+    // preview calls the send path's own rendering sequence (EmailTemplateDesignService::designedHtml) with
+    // the real lead and the signed-in sender, so its HTML and the provider's are the same string.
+
+    private function previewFor(Lead $lead, EmailTemplate $template)
+    {
+        return $this->getJson("/api/v1/crm/leads/{$lead->id}/email-templates/{$template->id}/preview");
+    }
+
+    public function test_the_preview_is_byte_for_byte_the_html_that_is_sent(): void
+    {
+        $logo = 'https://crm.viteseo.test/api/v1/crm/email-assets/0b3d6c1e-7a2f-4c55-9e1d-2f6a8b7c9d01.png';
+        $this->brandLogo($logo);
+        $sender = $this->admin();
+        Sanctum::actingAs($sender);
+        $lead = $this->lead();
+        $template = $this->designedTemplate();
+
+        $preview = $this->previewFor($lead, $template)->assertOk()->json('data');
+
+        $this->assertSame(0, Email::withoutGlobalScopes()->count(), 'A preview writes nothing.');
+        $this->assertNull($preview['reason']);
+        $this->assertIsString($preview['html']);
+
+        $this->sendDesigned($lead, $sender, $template);
+        $sent = (string) $this->lastSent()->getHtmlBody();
+
+        $this->assertSame($sent, $preview['html'], 'The preview must be exactly the HTML the provider was handed.');
+        $this->assertSame($sent, Email::query()->latest('id')->firstOrFail()->body_html);
+        $this->assertSame(strlen($sent), $preview['htmlBytes']);
+        $this->assertSame(EmailTemplateDesignService::MAX_HTML_BYTES, $preview['maxHtmlBytes']);
+
+        // The real lead and the public logo URL — never the Settings samples or inline preview bytes.
+        $this->assertStringContainsString('Hello Maria', $preview['html']);
+        $this->assertStringContainsString('Acme Bakery', $preview['html']);
+        $this->assertStringContainsString($logo, $preview['html']);
+        $this->assertStringNotContainsString('data:image', $preview['html']);
+    }
+
+    public function test_the_preview_reports_why_an_invalid_or_plain_template_sends_plain_text(): void
+    {
+        Sanctum::actingAs($this->admin());
+        $lead = $this->lead();
+
+        $broken = $this->designedTemplate();
+        $broken->design->forceFill(['layout' => ['version' => 1, 'header' => 'not-a-list']])->save();
+        $this->previewFor($lead, $broken)->assertOk()
+            ->assertJsonPath('data.html', null)
+            ->assertJsonPath('data.reason', 'document_invalid');
+
+        $this->previewFor($lead, $this->plainTemplate())->assertOk()
+            ->assertJsonPath('data.html', null)
+            ->assertJsonPath('data.reason', 'template_not_designed');
+    }
+
+    public function test_the_preview_reports_an_email_over_the_size_guard_as_plain_text(): void
+    {
+        Sanctum::actingAs($this->admin());
+        $lead = $this->lead();
+        // The same expanding content as the send-path guard test: small stored, ~122 KB rendered.
+        $expanding = str_repeat('&', 4900);
+        $template = $this->designedTemplate($this->content(array_map(
+            fn (int $i): array => $this->textBlock(['id' => "bulk-{$i}", 'content' => $this->doc($this->para($this->text($expanding)))]),
+            range(1, 5),
+        )));
+
+        $preview = $this->previewFor($lead, $template)->assertOk()->json('data');
+
+        $this->assertNull($preview['html']);
+        $this->assertSame('html_too_large', $preview['reason']);
+        $this->assertGreaterThan(EmailTemplateDesignService::MAX_HTML_BYTES, $preview['htmlBytes']);
+    }
+
+    public function test_the_preview_never_renders_another_organizations_template(): void
+    {
+        $theirs = $this->theirTemplate();
+
+        Sanctum::actingAs($this->admin());
+
+        $this->previewFor($this->lead(), $theirs)->assertNotFound();
+    }
+
+    public function test_the_preview_only_renders_a_live_template_the_composer_offers(): void
+    {
+        Sanctum::actingAs($this->admin());
+        $lead = $this->lead();
+
+        $deleted = $this->designedTemplate();
+        $deleted->delete();
+        $this->previewFor($lead, $deleted)->assertNotFound();
+
+        $inactive = $this->designedTemplate();
+        $inactive->forceFill(['is_active' => false])->save();
+        $this->previewFor($lead, $inactive)->assertNotFound();
+
+        $automation = $this->designedTemplate();
+        $automation->forceFill(['purpose' => 'introduction'])->save();
+        $this->previewFor($lead, $automation)->assertNotFound();
+    }
+
+    public function test_the_preview_keeps_the_composer_feeds_rbac(): void
+    {
+        $bd = User::factory()->create(['status' => 'active']);
+        $bd->assignRole('crm_bd');
+        $own = $this->lead(['assigned_to' => $bd->id]);
+        $other = $this->lead(['assigned_to' => $this->admin()->id, 'email' => 'other@acme.test']);
+        $template = $this->designedTemplate();
+
+        // The BD sees exactly what the feed lets them see: their own lead, not someone else's.
+        Sanctum::actingAs($bd);
+        $this->previewFor($own, $template)->assertOk()->assertJsonPath('data.reason', null);
+        $this->getJson("/api/v1/crm/leads/{$other->id}/email-templates")->assertForbidden();
+        $this->previewFor($other, $template)->assertForbidden();
+
+        // Without the composer's permission, neither the feed nor the preview answers.
+        $outsider = User::factory()->create(['status' => 'active']);
+        Sanctum::actingAs($outsider);
+        $this->getJson("/api/v1/crm/leads/{$own->id}/email-templates")->assertForbidden();
+        $this->previewFor($own, $template)->assertForbidden();
+
+        $this->assertSame(0, Email::withoutGlobalScopes()->count(), 'No preview wrote anything.');
+    }
 }

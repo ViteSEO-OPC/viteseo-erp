@@ -15,6 +15,38 @@ const DEVICE_OPTIONS = [
   { value: "mobile", label: "Mobile", icon: Smartphone },
 ] as const;
 
+/** The frame's width per device: a 600px email with its margin, or a phone. */
+export const PREVIEW_DEVICE_WIDTH: Record<PreviewDevice, string> = { desktop: "max-w-[640px]", mobile: "max-w-[375px]" };
+
+/** Desktop / Mobile — the preview width switch, shared by the Settings designers and the Outreach composer. */
+export function PreviewDeviceToggle({
+  device,
+  onDeviceChange,
+}: {
+  device: PreviewDevice;
+  onDeviceChange: (device: PreviewDevice) => void;
+}) {
+  return (
+    <div role="group" aria-label="Preview width" className="inline-flex items-center gap-1 rounded-lg border border-border bg-card p-1">
+      {DEVICE_OPTIONS.map(({ value, label, icon: Icon }) => (
+        <button
+          key={value}
+          type="button"
+          aria-pressed={device === value}
+          onClick={() => onDeviceChange(value)}
+          className={cn(
+            "inline-flex items-center gap-1.5 rounded-md px-3 py-1 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            device === value ? "bg-muted text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+          )}
+        >
+          <Icon className="size-4" aria-hidden />
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 type Props = {
   preview: EmailDesignPreview | null;
   isUpdating: boolean;
@@ -65,23 +97,7 @@ export function DesignPreviewPanel({
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div role="group" aria-label="Preview width" className="inline-flex items-center gap-1 rounded-lg border border-border bg-card p-1">
-          {DEVICE_OPTIONS.map(({ value, label, icon: Icon }) => (
-            <button
-              key={value}
-              type="button"
-              aria-pressed={device === value}
-              onClick={() => onDeviceChange(value)}
-              className={cn(
-                "inline-flex items-center gap-1.5 rounded-md px-3 py-1 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                device === value ? "bg-muted text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              <Icon className="size-4" aria-hidden />
-              {label}
-            </button>
-          ))}
-        </div>
+        <PreviewDeviceToggle device={device} onDeviceChange={onDeviceChange} />
         <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground" aria-live="polite">
           {isUpdating ? (
             <>
@@ -127,7 +143,7 @@ export function DesignPreviewPanel({
             <p className="mt-0.5 break-words text-sm font-semibold text-foreground">{preview.subject.trim() || "(no subject)"}</p>
           </div>
 
-          <div className={cn("mx-auto w-full transition-opacity", device === "mobile" ? "max-w-[375px]" : "max-w-[640px]", stale && "opacity-60")}>
+          <div className={cn("mx-auto w-full transition-opacity", PREVIEW_DEVICE_WIDTH[device], stale && "opacity-60")}>
             <EmailHtmlFrame html={preview.html} />
           </div>
 

@@ -7,6 +7,7 @@ use App\Http\Controllers\Controller;
 use App\Modules\Crm\Models\EmailTemplate;
 use App\Modules\Crm\Models\Lead;
 use App\Models\User;
+use App\Modules\Crm\Services\Outreach\EmailTemplateDesignService;
 use App\Modules\Crm\Services\Outreach\EmailTemplateOptionService;
 use App\Modules\Crm\Services\Outreach\TemplateRenderer;
 use Illuminate\Http\JsonResponse;
@@ -39,7 +40,7 @@ class EmailTemplateController extends Controller
         // The composer also offers this organization's own custom purposes (Settings → Email Templates). A custom
         // purpose can never equal an automation key, however spelled — EmailTemplateOptionService refuses it — so
         // this exact, case-sensitive allowlist still keeps every automation template out of the dropdown.
-        $purposes = [...self::COMPOSER_PURPOSES, ...$options->customValues(EmailTemplateOptionService::TYPE_PURPOSE)];
+        $purposes = $this->composerPurposes($options);
 
         $data = EmailTemplate::query()
             ->active()
@@ -76,5 +77,53 @@ class EmailTemplateController extends Controller
             });
 
         return response()->json(['data' => $data]);
+    }
+
+    /**
+     * The HTML this lead would receive if the BD sent this designed template unchanged, right now — the
+     * composer's per-lead preview. Read-only: it renders and writes nothing.
+     *
+     * Not a second renderer: it calls EmailTemplateDesignService::designedHtml(), the sequence the send
+     * path calls for the same template, lead and sender (the signed-in user, who is who would send it), so
+     * the HTML returned is the HTML the provider would be handed. When the send would fall back to plain
+     * text, `html` is null and `reason` says why, so the composer can say so instead of showing a design
+     * that would not be sent.
+     *
+     * Only what the composer offers: the same route gates as the feed, and an active template with a
+     * composer purpose. Another organization's template, or a deleted one, never binds (BelongsToOrg,
+     * SoftDeletes) — a 404, the same as an inactive or automation template.
+     */
+    public function preview(
+        Lead $lead,
+        EmailTemplate $emailTemplate,
+        Request $request,
+        EmailTemplateOptionService $options,
+        EmailTemplateDesignService $designs,
+    ): JsonResponse {
+        abort_unless(
+            $emailTemplate->is_active && in_array($emailTemplate->purpose, $this->composerPurposes($options), true),
+            404,
+        );
+
+        /** @var User|null $sender */
+        $sender = $request->user();
+        $rendered = $designs->designedHtml($emailTemplate, $lead, $sender);
+
+        return response()->json(['data' => [
+            'html' => $rendered['html'],
+            'reason' => $rendered['reason'],
+            'htmlBytes' => $rendered['bytes'],
+            'maxHtmlBytes' => EmailTemplateDesignService::MAX_HTML_BYTES,
+        ]]);
+    }
+
+    /**
+     * The purposes the composer offers — see index() for why this allowlist keeps automation templates out.
+     *
+     * @return list<string>
+     */
+    private function composerPurposes(EmailTemplateOptionService $options): array
+    {
+        return [...self::COMPOSER_PURPOSES, ...$options->customValues(EmailTemplateOptionService::TYPE_PURPOSE)];
     }
 }

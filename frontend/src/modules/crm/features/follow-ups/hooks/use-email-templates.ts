@@ -38,3 +38,31 @@ export function useEmailTemplates(leadId: string | null) {
 
   return { templates: query.data?.data ?? [], isLoading: query.isLoading };
 }
+
+/**
+ * The composer's per-lead preview of a designed template (GET /leads/{lead}/email-templates/{id}/preview):
+ * the HTML this lead would receive if the signed-in BD sent the template unchanged now. `html` is the exact
+ * string the send path would hand the provider; when that send would fall back to plain text it is null
+ * and `reason` says why.
+ */
+export type EmailTemplatePreview = {
+  html: string | null;
+  reason: "template_not_designed" | "design_missing" | "document_invalid" | "html_too_large" | null;
+  htmlBytes: number | null;
+  maxHtmlBytes: number;
+};
+
+/**
+ * Fetched only while the preview is open, and fresh each time it opens: the template, its design and the
+ * branding logo can all change between two looks, and the preview promises "if I send this now".
+ */
+export function useEmailTemplatePreview(leadId: string | null, templateId: string | null, enabled: boolean) {
+  return useQuery<EmailTemplatePreview>({
+    queryKey: [...queryKeys.leads.emailTemplates(leadId ?? "none"), templateId ?? "none", "preview"],
+    queryFn: () =>
+      apiClient.get(`/leads/${leadId}/email-templates/${templateId}/preview`).then((r) => r.data.data as EmailTemplatePreview),
+    enabled: enabled && !!leadId && !!templateId,
+    staleTime: 0,
+    gcTime: 0,
+  });
+}
