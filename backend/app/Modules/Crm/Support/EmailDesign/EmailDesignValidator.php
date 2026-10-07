@@ -66,6 +66,12 @@ final class EmailDesignValidator
 
     public const TOO_MANY_ROWS = 'A rows block can hold at most %d rows.';
 
+    public const NO_ACTIONS = 'Add at least one button or link.';
+
+    public const TOO_MANY_ACTIONS = 'An actions block can hold at most %d buttons and links.';
+
+    public const INVALID_ACTION_KIND = 'Choose a button or a link.';
+
     public const INVALID_ALIGNMENT = 'Alignment must be left, center or right.';
 
     public const OUT_OF_RANGE = 'Use a whole number from %d to %d.';
@@ -289,6 +295,7 @@ final class EmailDesignValidator
 
             $problem = match (true) {
                 $key === 'font' => $this->fontProblem($value, $path.'.font'),
+                array_key_exists($key, EmailDesignSchema::BOOLEAN_STYLES) => is_bool($value) ? null : $this->fail($path.'.'.$key, self::INVALID_SWITCH),
                 array_key_exists($key, EmailDesignSchema::NUMERIC_STYLES) => $this->rangeProblem($value, EmailDesignSchema::NUMERIC_STYLES[$key][1], $path.'.'.$key),
                 default => $this->colorProblem($value, $path.'.'.$key),
             };
@@ -483,6 +490,10 @@ final class EmailDesignValidator
                     ?? $this->optionalColorProblem($block, 'title_color', $path)
                     ?? $this->optionalColorProblem($block, 'description_color', $path)
                     ?? $this->optionalColorProblem($block, 'divider_color', $path),
+                'actions' => $this->listProblem($block['items'], $path.'.items', EmailDesignSchema::MAX_ACTION_ITEMS, self::NO_ACTIONS, self::TOO_MANY_ACTIONS)
+                    ?? $this->actionItemsProblem($block['items'], $path.'.items')
+                    ?? $this->alignmentProblem($block['align'], $path.'.align')
+                    ?? $this->rangeProblem($block['radius'], EmailDesignSchema::BUTTON_RADIUS, $path.'.radius'),
                 default => $this->fail($path.'.type', self::UNKNOWN_BLOCK),
             };
     }
@@ -521,6 +532,37 @@ final class EmailDesignValidator
             $problem = $this->fieldsProblem($item, EmailDesignSchema::ROWS_ITEM_FIELDS['required'], EmailDesignSchema::ROWS_ITEM_FIELDS['optional'], $itemPath)
                 ?? $this->lineProblem($item['title'], $itemPath.'.title', EmailDesignSchema::MAX_ROW_TITLE, required: true, placeholders: true)
                 ?? $this->optionalProblem($item, 'description', fn (mixed $text): ?array => $this->lineProblem($text, $itemPath.'.description', EmailDesignSchema::MAX_ROW_DESCRIPTION, required: false, placeholders: true));
+            if ($problem !== null) {
+                return $problem;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Each action item: a `kind` of button or link, a label (text with placeholders, like a button's) and a link
+     * (the same https / mailto / tel rule as every link). Only a button may carry a `variant`.
+     *
+     * @param  list<mixed>  $items
+     * @return array{path: string, message: string}|null
+     */
+    private function actionItemsProblem(array $items, string $path): ?array
+    {
+        foreach ($items as $i => $item) {
+            $itemPath = $path.'.'.$i;
+            if (! $this->isObject($item)) {
+                return $this->fail($itemPath, self::MALFORMED);
+            }
+            if (! in_array($item['kind'] ?? null, EmailDesignSchema::ACTION_KINDS, true)) {
+                return $this->fail($itemPath.'.kind', array_key_exists('kind', $item) ? self::INVALID_ACTION_KIND : self::MISSING_FIELD);
+            }
+
+            $optional = $item['kind'] === 'button' ? EmailDesignSchema::ACTION_BUTTON_OPTIONAL : [];
+            $problem = $this->fieldsProblem($item, EmailDesignSchema::ACTION_ITEM_REQUIRED, $optional, $itemPath)
+                ?? $this->lineProblem($item['label'], $itemPath.'.label', EmailDesignSchema::MAX_BUTTON_LABEL, required: true, placeholders: true)
+                ?? $this->urlProblem($item['url'], $itemPath.'.url')
+                ?? $this->optionalProblem($item, 'variant', fn (mixed $variant): ?array => in_array($variant, EmailDesignSchema::BUTTON_VARIANTS, true) ? null : $this->fail($itemPath.'.variant', self::INVALID_VARIANT));
             if ($problem !== null) {
                 return $problem;
             }

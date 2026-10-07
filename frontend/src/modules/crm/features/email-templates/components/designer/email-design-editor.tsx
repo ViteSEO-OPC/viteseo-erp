@@ -29,6 +29,7 @@ import {
   ADDABLE_BLOCKS,
   ADDITIONAL_STYLE_LABELS,
   BLOCK_LABELS,
+  BOOLEAN_STYLE_LABELS,
   COLOR_STYLE_FIELDS,
   FONT_OPTIONS,
   MAX_REGION_BLOCKS,
@@ -42,10 +43,12 @@ import {
   documentProblems,
   documentRegions,
   effectiveAdditionalColor,
+  effectiveBooleanStyle,
   effectiveNumericStyle,
   effectiveStyle,
   mergeProblems,
   serializeDocument,
+  withBooleanStyle,
   withNumericStyle,
   withStyle,
 } from "@/modules/crm/features/email-templates/lib/email-design";
@@ -226,6 +229,7 @@ export function EmailDesignEditor({ design, tokens, onClose }: Props) {
     if (root === "styles") {
       if (key in STYLE_LABELS) return `Page style · ${STYLE_LABELS[key as DesignStyleKey]}`;
       if (key in ADDITIONAL_STYLE_LABELS) return `Page style · ${ADDITIONAL_STYLE_LABELS[key as keyof typeof ADDITIONAL_STYLE_LABELS]}`;
+      if (key in BOOLEAN_STYLE_LABELS) return `Page style · ${BOOLEAN_STYLE_LABELS[key as keyof typeof BOOLEAN_STYLE_LABELS]}`;
       return "Page style";
     }
     if (root === "signature") return SIGNATURE_LABELS[key] ? `Signature · ${SIGNATURE_LABELS[key]}` : "Signature";
@@ -350,6 +354,15 @@ export function EmailDesignEditor({ design, tokens, onClose }: Props) {
                     />
                   ))}
                 </div>
+                <SwitchControl
+                  label={BOOLEAN_STYLE_LABELS.link_underline}
+                  description="Links in text, footers and action rows. Buttons are never underlined."
+                  checked={effectiveBooleanStyle([layout.styles], "link_underline")}
+                  // On is the default, stored as nothing — the way every older design has it; off is stored.
+                  onChange={(on) => changeLayout((current) => ({ ...current, styles: withBooleanStyle(current.styles, "link_underline", on ? undefined : false) }))}
+                  disabled={pending}
+                  error={problems.fields["styles.link_underline"]}
+                />
                 <div className="flex flex-col gap-1">
                   <h4 className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">Layout</h4>
                   <p className="text-xs text-muted-foreground">

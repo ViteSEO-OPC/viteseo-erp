@@ -48,6 +48,7 @@ import {
   ADDITIONAL_COLOR_FIELDS,
   ADDITIONAL_STYLE_LABELS,
   BLOCK_LABELS,
+  BOOLEAN_STYLE_LABELS,
   COLOR_STYLE_FIELDS,
   FONT_OPTIONS,
   MAX_CONTENT_BLOCKS,
@@ -58,10 +59,12 @@ import {
   documentProblems,
   documentRegions,
   effectiveAdditionalColor,
+  effectiveBooleanStyle,
   effectiveNumericStyle,
   effectiveStyle,
   mergeProblems,
   serializeDocument,
+  withBooleanOverride,
   withNumericOverride,
   withPreheader,
   withSignOff,
@@ -104,6 +107,9 @@ const KIND_GROUP_LABELS: Record<TemplateKind, string> = {
 
 /** The Font select's value for "use the design's font". Never sent: an unset override is simply absent. */
 const DESIGN_FONT = "design";
+
+/** The link-underline select's value for "use the design's setting". Never sent. */
+const DESIGN_UNDERLINE = "design";
 
 const NO_STYLES: DesignStyles = {};
 
@@ -241,6 +247,7 @@ export function EmailTemplateContentEditor({ template, seed, catalog, onClose }:
     if (root === "style_overrides") {
       if (key in STYLE_LABELS) return `Template style · ${STYLE_LABELS[key as DesignStyleKey]}`;
       if (key in ADDITIONAL_STYLE_LABELS) return `Template style · ${ADDITIONAL_STYLE_LABELS[key as keyof typeof ADDITIONAL_STYLE_LABELS]}`;
+      if (key in BOOLEAN_STYLE_LABELS) return `Template style · ${BOOLEAN_STYLE_LABELS[key as keyof typeof BOOLEAN_STYLE_LABELS]}`;
       return "Template style";
     }
     return field;
@@ -608,6 +615,33 @@ export function EmailTemplateContentEditor({ template, seed, catalog, onClose }:
                           />
                         ))}
                       </div>
+                      <FormField label={BOOLEAN_STYLE_LABELS.link_underline} error={problems.fields["style_overrides.link_underline"]}>
+                        <Select
+                          value={overrides.link_underline === undefined ? DESIGN_UNDERLINE : overrides.link_underline ? "on" : "off"}
+                          onValueChange={(value) =>
+                            typeof value === "string" &&
+                            changeContent((current) => withBooleanOverride(current, "link_underline", value === DESIGN_UNDERLINE ? undefined : value === "on"))
+                          }
+                          disabled={pending}
+                        >
+                          <SelectTrigger className="w-full sm:w-64" aria-label="Template link underline">
+                            <SelectValue>
+                              {overrides.link_underline === undefined
+                                ? `Default (${effectiveBooleanStyle(designChain, "link_underline") ? "underlined" : "not underlined"})`
+                                : overrides.link_underline
+                                  ? "Underlined"
+                                  : "Not underlined"}
+                            </SelectValue>
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value={DESIGN_UNDERLINE}>
+                              Default ({effectiveBooleanStyle(designChain, "link_underline") ? "underlined" : "not underlined"})
+                            </SelectItem>
+                            <SelectItem value="on">Underlined</SelectItem>
+                            <SelectItem value="off">Not underlined</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </FormField>
                       <div className="grid gap-4 sm:grid-cols-2">
                         {NUMERIC_STYLE_FIELDS.map((key) => (
                           <OptionalRangeControl

@@ -22,6 +22,7 @@ import {
   BLOCK_CONTROL_FIELDS,
   BLOCK_LABELS,
   HEADING_SIZES,
+  MAX_ACTION_ITEMS,
   MAX_CARD_BLOCKS,
   MAX_ROWS_ITEMS,
   RANGES,
@@ -35,6 +36,8 @@ import {
   withRowDescription,
 } from "@/modules/crm/features/email-templates/lib/email-design";
 import type {
+  ActionItem,
+  ActionsBlock,
   ButtonBlock,
   ButtonVariant,
   CardBlock,
@@ -56,6 +59,16 @@ const BUTTON_VARIANT_OPTIONS = [
   { value: "primary", label: "Primary", title: "The design's button colors" },
   { value: "secondary", label: "Secondary", title: "The design's secondary button colors" },
 ] as const satisfies readonly { value: ButtonVariant; label: string; title: string }[];
+
+const ACTION_KIND_OPTIONS = [
+  { value: "button", label: "Button", title: "A button" },
+  { value: "link", label: "Link", title: "A text link" },
+] as const satisfies readonly { value: ActionItem["kind"]; label: string; title: string }[];
+
+/** An item switched to `kind`: its label and link stay, and any button style is dropped (a link has none). */
+function withActionKind(item: ActionItem, kind: ActionItem["kind"]): ActionItem {
+  return { kind, label: item.label, url: item.url };
+}
 
 /** Whether a problem's field is one this block's panel shows: the field itself, or a part of it (`items.2.title`). */
 function isPlaced(type: DesignBlock["type"], field: string): boolean {
@@ -486,7 +499,137 @@ function BlockSettings({
 
     case "rows":
       return <RowsSettings block={block} onChange={onChange} tokens={tokens} styleChain={styleChain} disabled={disabled} error={error} />;
+
+    case "actions":
+      return <ActionsSettings block={block} onChange={onChange} tokens={tokens} disabled={disabled} error={error} />;
   }
+}
+
+/**
+ * An actions row: up to three buttons and links side by side. What each says and where it goes is the template's;
+ * button colors are the design's (accent, or secondary), and links follow its link color and underline setting.
+ */
+function ActionsSettings({
+  block,
+  onChange,
+  tokens,
+  disabled,
+  error,
+}: {
+  block: ActionsBlock;
+  onChange: (block: DesignBlock) => void;
+  tokens: readonly TemplateToken[];
+  disabled: boolean;
+  error: (field: string) => string | undefined;
+}) {
+  const items = block.items;
+  const full = items.length >= MAX_ACTION_ITEMS;
+  const setItems = (next: ActionItem[]) => onChange({ ...block, items: next });
+  const setItem = (index: number, item: ActionItem) => setItems(items.map((current, i) => (i === index ? item : current)));
+
+  function move(index: number, direction: -1 | 1) {
+    const to = index + direction;
+    if (to < 0 || to >= items.length) return;
+    const next = [...items];
+    [next[index], next[to]] = [next[to], next[index]];
+    setItems(next);
+  }
+
+  return (
+    <>
+      <div className="flex flex-col gap-2">
+        <div className="flex items-baseline justify-between">
+          <span className="text-sm font-medium text-foreground">Buttons and links</span>
+          <span className="text-xs text-muted-foreground">
+            {items.length} of {MAX_ACTION_ITEMS}
+          </span>
+        </div>
+        <p className="text-xs text-muted-foreground">Shown side by side, and one under another on a narrow screen.</p>
+        {items.map((item, index) => (
+          <div key={index} className="flex flex-col gap-2 rounded-lg border border-border p-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-muted-foreground">
+                {item.kind === "button" ? "Button" : "Link"} {index + 1}
+              </span>
+              <div className="flex items-center">
+                <button type="button" className={ICON_BUTTON} onClick={() => move(index, -1)} disabled={disabled || index === 0} aria-label={`Move item ${index + 1} left`}>
+                  <ChevronUp className="size-4" aria-hidden />
+                </button>
+                <button type="button" className={ICON_BUTTON} onClick={() => move(index, 1)} disabled={disabled || index === items.length - 1} aria-label={`Move item ${index + 1} right`}>
+                  <ChevronDown className="size-4" aria-hidden />
+                </button>
+                <button
+                  type="button"
+                  className={cn(ICON_BUTTON, "hover:text-destructive")}
+                  onClick={() => setItems(items.filter((_, i) => i !== index))}
+                  disabled={disabled || items.length === 1}
+                  aria-label={`Remove item ${index + 1}`}
+                  title={items.length === 1 ? "An actions row needs at least one button or link" : undefined}
+                >
+                  <Trash2 className="size-4" aria-hidden />
+                </button>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-4">
+              <SegmentedChoice
+                label="Kind"
+                value={item.kind}
+                options={ACTION_KIND_OPTIONS}
+                onChange={(kind) => setItem(index, withActionKind(item, kind))}
+                disabled={disabled}
+                error={error(`items.${index}.kind`)}
+              />
+              {item.kind === "button" ? (
+                <SegmentedChoice
+                  label="Style"
+                  value={item.variant ?? "primary"}
+                  options={BUTTON_VARIANT_OPTIONS}
+                  onChange={(variant) => {
+                    // Primary is the default and is stored as no variant at all.
+                    const next: ActionItem = { ...item, variant };
+                    if (variant === "primary") delete next.variant;
+                    setItem(index, next);
+                  }}
+                  disabled={disabled}
+                  error={error(`items.${index}.variant`)}
+                />
+              ) : null}
+            </div>
+            <TextLineControl
+              label="Label"
+              required
+              value={item.label}
+              onChange={(label) => setItem(index, { ...item, label })}
+              tokens={tokens}
+              tokensOnFocus
+              maxLength={TEXT_LIMITS.buttonLabel}
+              placeholder={item.kind === "button" ? "e.g. Contact us" : "e.g. See our portfolio ›"}
+              disabled={disabled}
+              error={error(`items.${index}.label`) ?? error(`items.${index}`)}
+            />
+            <LinkControl label="Link" value={item.url} onChange={(url) => setItem(index, { ...item, url })} disabled={disabled} error={error(`items.${index}.url`)} />
+          </div>
+        ))}
+        {error("items") ? (
+          <p role="alert" className="text-xs text-red-500">
+            {error("items")}
+          </p>
+        ) : null}
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" variant="outline" size="sm" onClick={() => setItems([...items, { kind: "button", label: "Contact us", url: "" }])} disabled={disabled || full}>
+            <Plus aria-hidden />
+            Add button
+          </Button>
+          <Button type="button" variant="outline" size="sm" onClick={() => setItems([...items, { kind: "link", label: "Learn more ›", url: "" }])} disabled={disabled || full}>
+            <Plus aria-hidden />
+            Add link
+          </Button>
+        </div>
+      </div>
+      <AlignmentControl value={block.align} onChange={(align) => onChange({ ...block, align })} disabled={disabled} error={error("align")} />
+      <RangeControl label="Button corner radius" value={block.radius} range={RANGES.buttonRadius} onChange={(radius) => onChange({ ...block, radius })} disabled={disabled} error={error("radius")} />
+    </>
+  );
 }
 
 /**

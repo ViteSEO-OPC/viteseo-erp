@@ -56,7 +56,7 @@ final class EmailDesignCardRowsTest extends TestCase
     {
         $this->assertNull($this->problem([$this->card()]));
         $this->assertNull($this->problem([$this->rows()]));
-        $this->assertSame(['heading', 'text', 'rows', 'divider', 'button', 'spacer'], EmailDesignSchema::CARD_BLOCKS);
+        $this->assertSame(['heading', 'text', 'rows', 'divider', 'button', 'spacer', 'actions'], EmailDesignSchema::CARD_BLOCKS);
 
         $everything = $this->card(['blocks' => [
             $this->heading(['id' => 'i-h']), $this->textBlock(['id' => 'i-t']), $this->rows(['id' => 'i-r']),

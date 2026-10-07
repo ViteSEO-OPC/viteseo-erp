@@ -66,8 +66,14 @@ export type NumericStyles = {
   card_border_width?: number;
 };
 
+/** Optional on/off styles (EmailDesignSchema::BOOLEAN_STYLES). Unset, each takes its default. */
+export type BooleanStyles = {
+  /** Links in text, footers and actions are underlined. Unset: true, as they always were. */
+  link_underline?: boolean;
+};
+
 /** A design's styles, or a template's style overrides. Every one optional. */
-export type DesignStyles = SystemStyles & AdditionalColorStyles & NumericStyles;
+export type DesignStyles = SystemStyles & AdditionalColorStyles & NumericStyles & BooleanStyles;
 
 /** The system styles: the font and the nine colors every design has always had. */
 export type DesignStyleKey = keyof SystemStyles;
@@ -75,6 +81,8 @@ export type DesignStyleKey = keyof SystemStyles;
 export type AdditionalColorStyleKey = keyof AdditionalColorStyles;
 
 export type NumericStyleKey = keyof NumericStyles;
+
+export type BooleanStyleKey = keyof BooleanStyles;
 
 export type DesignStyleValues = Required<SystemStyles>;
 
@@ -165,6 +173,21 @@ export type RowsBlock = {
   divider_color?: string;
 };
 
+/** One call to action in an actions row: a button (primary or secondary) or a link. */
+export type ActionItem =
+  | { kind: "button"; label: string; url: string; variant?: ButtonVariant }
+  | { kind: "link"; label: string; url: string };
+
+/** Calls to action side by side — a button beside a "See more ›" link, two buttons — wrapping on a narrow screen. */
+export type ActionsBlock = {
+  type: "actions";
+  id: string;
+  items: ActionItem[];
+  align: DesignAlignment;
+  /** The corner radius of every button in the row. */
+  radius: number;
+};
+
 /**
  * A framed panel holding its own blocks (CARD_BLOCKS: never a card, never an image). Its frame — background,
  * border, corners, padding — is the design's; a card may set its own two colors.
@@ -190,7 +213,8 @@ export type DesignBlock =
   | SpacerBlock
   | FooterBlock
   | CardBlock
-  | RowsBlock;
+  | RowsBlock
+  | ActionsBlock;
 
 export type DesignBlockType = DesignBlock["type"];
 

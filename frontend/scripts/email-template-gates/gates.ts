@@ -46,7 +46,7 @@
  * P  CUSTOM PURPOSES AND TONES — the add rules equal EmailTemplateOptionService (PHP): limits, messages, cleaning,
  *    normalization, invalid characters, duplicates however spelled; the composer keeps its fixed purposes and adds
  *    custom ones through the same exact filter; both template editors offer "+ Add custom purpose/tone".
- * Q  CARDS, ROWS AND ADDITIONAL STYLES — the additional colors and sizes, signature switches, button variants, card
+ * Q  CARDS, ROWS, ACTIONS AND ADDITIONAL STYLES — the action kinds, item fields and limit, the link underline style, the additional colors and sizes, signature switches, button variants, card
  *    blocks, rows items and their limits equal EmailDesignSchema (PHP); ids are unique across a card's blocks too,
  *    and duplicating a card gives its blocks fresh ids; the content count includes a card's blocks; the server's
  *    problems for a card's block land on that block and a row's on that row; the additional colors fall back to
@@ -61,14 +61,19 @@ import {
   unknownPlaceholders,
 } from "@/modules/crm/features/email-templates/lib/email-template-text";
 import {
+  ACTION_BUTTON_OPTIONAL,
+  ACTION_ITEM_REQUIRED,
+  ACTION_KINDS,
   ADDABLE_BLOCKS,
   ADDABLE_CARD_BLOCKS,
   ADDITIONAL_COLOR_STYLES,
   ALIGNMENTS,
   BLOCK_COLOR_FALLBACKS,
+  BOOLEAN_STYLES,
   BUTTON_VARIANTS,
   CARD_BLOCKS,
   HEADING_SIZES,
+  MAX_ACTION_ITEMS,
   MAX_CARD_BLOCKS,
   MAX_ROWS_ITEMS,
   NUMERIC_STYLES,
@@ -98,6 +103,7 @@ import {
   documentRegions,
   duplicateBlock,
   effectiveAdditionalColor,
+  effectiveBooleanStyle,
   effectiveNumericStyle,
   effectiveStyle,
   inheritedBlockColor,
@@ -115,6 +121,8 @@ import {
   trailingSignOff,
   withPreheader,
   withSignOff,
+  withBooleanOverride,
+  withBooleanStyle,
   withCardText,
   withNumericOverride,
   withNumericStyle,
@@ -155,6 +163,7 @@ import {
   optionValueProblem,
 } from "@/modules/crm/features/email-templates/lib/template-options";
 import type {
+  ActionsBlock,
   ButtonBlock,
   CardBlock,
   DesignBlock,
@@ -373,7 +382,7 @@ gate("E  caret insertion", [
   const start = defaultLayout();
 
   gate("G  schema parity", [
-    ["the PHP schema was read", Object.keys(phpBlocks).length === 10],
+    ["the PHP schema was read", Object.keys(phpBlocks).length === 11],
     ["block types and fields match BLOCK_FIELDS", same(phpBlocks, BLOCK_FIELDS)],
     ["regions and the blocks they hold match REGION_BLOCKS", same(phpRegions, REGION_BLOCKS)],
     ["layout fields match", same(listConst("LAYOUT_FIELDS"), LAYOUT_FIELDS)],
@@ -461,6 +470,8 @@ gate("E  caret insertion", [
         return within(block.radius, RANGES.buttonRadius);
       case "rows":
         return block.items.length >= 1 && block.items.length <= MAX_ROWS_ITEMS;
+      case "actions":
+        return block.items.length >= 1 && block.items.length <= MAX_ACTION_ITEMS && within(block.radius, RANGES.buttonRadius);
       case "card":
         return block.blocks.length >= 1 && block.blocks.length <= MAX_CARD_BLOCKS && block.blocks.every((inner) => CARD_BLOCKS.includes(inner.type) && inRange(inner));
     }
@@ -977,7 +988,18 @@ gate("E  caret insertion", [
   const chain: DesignStyles[] = [{}, { background_color: "#eeeeee", text_color: "#111111", muted_text_color: "#777777" }];
   const secondary = { ...(createBlock("button", "b") as ButtonBlock), variant: "secondary" as const };
 
-  gate("Q  cards, rows and additional styles", [
+  const phpBooleans = Object.fromEntries([...(php.match(/public const BOOLEAN_STYLES = \[([\s\S]*?)\];/)?.[1] ?? "").matchAll(/'(\w+)' => (true|false)/g)].map((m) => [m[1], m[2] === "true"]));
+  const actions = createBlock("actions", "a-1") as ActionsBlock;
+
+  gate("Q  cards, rows, actions and additional styles", [
+    ["action kinds match", same(listConst("ACTION_KINDS"), ACTION_KINDS)],
+    ["action item fields match", same(listConst("ACTION_ITEM_REQUIRED"), ACTION_ITEM_REQUIRED) && same(listConst("ACTION_BUTTON_OPTIONAL"), ACTION_BUTTON_OPTIONAL)],
+    ["action item limit matches", constant("MAX_ACTION_ITEMS") === MAX_ACTION_ITEMS],
+    ["on/off styles and defaults match", Object.keys(phpBooleans).length === 1 && same(phpBooleans, BOOLEAN_STYLES)],
+    ["a new actions row is a button and a link, generic and unlinked until filled in", same(actions.items.map((i) => i.kind), ["button", "link"]) && actions.items.every((i) => i.url === "")],
+    ["actions may go in content, a card and the footer, never the header", REGION_BLOCKS.blocks.includes("actions") && CARD_BLOCKS.includes("actions") && REGION_BLOCKS.footer.includes("actions") && !REGION_BLOCKS.header.includes("actions")],
+    ["links are underlined unless turned off, nearest first", effectiveBooleanStyle([], "link_underline") === true && effectiveBooleanStyle([{}, { link_underline: false }], "link_underline") === false && effectiveBooleanStyle([{ link_underline: true }, { link_underline: false }], "link_underline") === true],
+    ["turning the underline back on removes the key", same(withBooleanStyle({ link_underline: false }, "link_underline", undefined), {}) && !("style_overrides" in withBooleanOverride({ version: 1, blocks: [], style_overrides: { link_underline: false } }, "link_underline", undefined))],
     ["additional colors match the PHP, in order", same(pairs("ADDITIONAL_COLOR_STYLES"), ADDITIONAL_COLOR_STYLES) && same(Object.keys(pairs("ADDITIONAL_COLOR_STYLES")), Object.keys(ADDITIONAL_COLOR_STYLES))],
     ["numeric styles, defaults and ranges match the PHP", Object.keys(phpNumeric).length === 5 && same(phpNumeric, NUMERIC_STYLES)],
     ["signature switches match", same(listConst("SIGNATURE_OPTIONS"), SIGNATURE_OPTIONS)],

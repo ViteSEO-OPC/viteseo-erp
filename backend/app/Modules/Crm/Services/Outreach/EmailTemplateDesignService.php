@@ -440,6 +440,7 @@ class EmailTemplateDesignService
             'button' => $this->isVisible($block['label']),
             'text' => $this->documentHasVisibleText($block['content']),
             'rows' => array_any($block['items'], fn (array $item): bool => $this->isVisible($item['title']) || $this->isVisible((string) ($item['description'] ?? ''))),
+            'actions' => array_any($block['items'], fn (array $item): bool => $this->isVisible($item['label'])),
             'card' => $this->isVisible((string) ($block['eyebrow'] ?? '')) || $this->isVisible((string) ($block['title'] ?? ''))
                 || array_any($block['blocks'], fn (array $inner): bool => $this->isReadable($inner)),
             // divider · spacer · image
