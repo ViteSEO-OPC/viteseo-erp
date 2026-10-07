@@ -62,6 +62,10 @@ final class EmailDesignValidator
 
     public const INVALID_VARIANT = 'Choose a primary or secondary button.';
 
+    public const NO_ROWS = 'Add at least one row.';
+
+    public const TOO_MANY_ROWS = 'A rows block can hold at most %d rows.';
+
     public const INVALID_ALIGNMENT = 'Alignment must be left, center or right.';
 
     public const OUT_OF_RANGE = 'Use a whole number from %d to %d.';
@@ -360,18 +364,51 @@ final class EmailDesignValidator
             return $this->fail($region, sprintf(self::TOO_MANY_BLOCKS, $max));
         }
 
+        // Blocks inside cards count toward the same limit as the blocks around them.
+        $total = count($blocks);
+
         foreach ($blocks as $i => $block) {
             $path = $region.'.'.$i;
 
-            $problem = $this->blockProblem($block, $path, EmailDesignSchema::REGION_BLOCKS[$region]);
+            $problem = $this->blockProblem($block, $path, EmailDesignSchema::REGION_BLOCKS[$region])
+                ?? $this->idProblem($block['id'], $path, $ids);
             if ($problem !== null) {
                 return $problem;
             }
-            if (isset($ids[$block['id']])) {
-                return $this->fail($path.'.id', self::DUPLICATE_ID);
+
+            if ($block['type'] === 'card') {
+                $total += count($block['blocks']);
+                if ($total > $max) {
+                    return $this->fail($region, sprintf(self::TOO_MANY_BLOCKS, $max));
+                }
+
+                // One level only: CARD_BLOCKS holds no card, so these blocks can hold no blocks.
+                foreach ($block['blocks'] as $j => $inner) {
+                    $innerPath = $path.'.blocks.'.$j;
+                    $problem = $this->blockProblem($inner, $innerPath, EmailDesignSchema::CARD_BLOCKS)
+                        ?? $this->idProblem($inner['id'], $innerPath, $ids);
+                    if ($problem !== null) {
+                        return $problem;
+                    }
+                }
             }
-            $ids[$block['id']] = true;
         }
+
+        return null;
+    }
+
+    /**
+     * A validated block's id, which must not repeat anywhere in the document — cards' blocks included.
+     *
+     * @param  array<string, true>  $ids
+     * @return array{path: string, message: string}|null
+     */
+    private function idProblem(string $id, string $path, array &$ids): ?array
+    {
+        if (isset($ids[$id])) {
+            return $this->fail($path.'.id', self::DUPLICATE_ID);
+        }
+        $ids[$id] = true;
 
         return null;
     }
@@ -433,8 +470,63 @@ final class EmailDesignValidator
                     ?? $this->alignmentProblem($block['align'], $path.'.align')
                     ?? $this->rangeProblem($block['font_size'], EmailDesignSchema::FOOTER_FONT_SIZE, $path.'.font_size')
                     ?? $this->optionalColorProblem($block, 'color', $path),
+                'card' => $this->listProblem($block['blocks'], $path.'.blocks', EmailDesignSchema::MAX_CARD_BLOCKS, self::NO_BLOCKS, self::TOO_MANY_BLOCKS)
+                    ?? $this->alignmentProblem($block['align'], $path.'.align')
+                    ?? $this->optionalProblem($block, 'eyebrow', fn (mixed $text): ?array => $this->lineProblem($text, $path.'.eyebrow', EmailDesignSchema::MAX_CARD_EYEBROW, required: false, placeholders: true))
+                    ?? $this->optionalProblem($block, 'title', fn (mixed $text): ?array => $this->lineProblem($text, $path.'.title', EmailDesignSchema::MAX_CARD_TITLE, required: false, placeholders: true))
+                    ?? $this->optionalColorProblem($block, 'background_color', $path)
+                    ?? $this->optionalColorProblem($block, 'border_color', $path),
+                'rows' => $this->listProblem($block['items'], $path.'.items', EmailDesignSchema::MAX_ROWS_ITEMS, self::NO_ROWS, self::TOO_MANY_ROWS)
+                    ?? $this->rowsItemsProblem($block['items'], $path.'.items')
+                    ?? $this->alignmentProblem($block['align'], $path.'.align')
+                    ?? (is_bool($block['dividers']) ? null : $this->fail($path.'.dividers', self::INVALID_SWITCH))
+                    ?? $this->optionalColorProblem($block, 'title_color', $path)
+                    ?? $this->optionalColorProblem($block, 'description_color', $path)
+                    ?? $this->optionalColorProblem($block, 'divider_color', $path),
                 default => $this->fail($path.'.type', self::UNKNOWN_BLOCK),
             };
+    }
+
+    /**
+     * A JSON array of 1 to `$max` entries. Its entries are checked by the caller.
+     *
+     * @return array{path: string, message: string}|null
+     */
+    private function listProblem(mixed $list, string $path, int $max, string $empty, string $tooMany): ?array
+    {
+        if (! is_array($list) || ! array_is_list($list)) {
+            return $this->fail($path, self::MALFORMED);
+        }
+        if ($list === []) {
+            return $this->fail($path, $empty);
+        }
+
+        return count($list) > $max ? $this->fail($path, sprintf($tooMany, $max)) : null;
+    }
+
+    /**
+     * Each rows item: a required title and an optional description, plain text with placeholders.
+     *
+     * @param  list<mixed>  $items
+     * @return array{path: string, message: string}|null
+     */
+    private function rowsItemsProblem(array $items, string $path): ?array
+    {
+        foreach ($items as $i => $item) {
+            $itemPath = $path.'.'.$i;
+            if (! $this->isObject($item)) {
+                return $this->fail($itemPath, self::MALFORMED);
+            }
+
+            $problem = $this->fieldsProblem($item, EmailDesignSchema::ROWS_ITEM_FIELDS['required'], EmailDesignSchema::ROWS_ITEM_FIELDS['optional'], $itemPath)
+                ?? $this->lineProblem($item['title'], $itemPath.'.title', EmailDesignSchema::MAX_ROW_TITLE, required: true, placeholders: true)
+                ?? $this->optionalProblem($item, 'description', fn (mixed $text): ?array => $this->lineProblem($text, $itemPath.'.description', EmailDesignSchema::MAX_ROW_DESCRIPTION, required: false, placeholders: true));
+            if ($problem !== null) {
+                return $problem;
+            }
+        }
+
+        return null;
     }
 
     // ── Rich text ────────────────────────────────────────────────────────────────────────────

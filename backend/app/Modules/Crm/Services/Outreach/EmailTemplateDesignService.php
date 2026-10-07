@@ -419,20 +419,32 @@ class EmailTemplateDesignService
     private function hasReadableContent(array $content): bool
     {
         foreach ($content['blocks'] as $block) {
-            $readable = match ($block['type']) {
-                'heading' => $this->isVisible($block['text']),
-                'button' => $this->isVisible($block['label']),
-                'text' => $this->documentHasVisibleText($block['content']),
-                // divider · spacer · image
-                default => false,
-            };
-
-            if ($readable) {
+            if ($this->isReadable($block)) {
                 return true;
             }
         }
 
         return false;
+    }
+
+    /**
+     * Whether a validated block carries visible text. A card counts through its eyebrow, title or any of its
+     * blocks — one level, since a card never holds a card.
+     *
+     * @param  array<string, mixed>  $block
+     */
+    private function isReadable(array $block): bool
+    {
+        return match ($block['type']) {
+            'heading' => $this->isVisible($block['text']),
+            'button' => $this->isVisible($block['label']),
+            'text' => $this->documentHasVisibleText($block['content']),
+            'rows' => array_any($block['items'], fn (array $item): bool => $this->isVisible($item['title']) || $this->isVisible((string) ($item['description'] ?? ''))),
+            'card' => $this->isVisible((string) ($block['eyebrow'] ?? '')) || $this->isVisible((string) ($block['title'] ?? ''))
+                || array_any($block['blocks'], fn (array $inner): bool => $this->isReadable($inner)),
+            // divider · spacer · image
+            default => false,
+        };
     }
 
     /** @param  array<string, mixed>  $node  a validated rich-text node, so its depth is already bounded */

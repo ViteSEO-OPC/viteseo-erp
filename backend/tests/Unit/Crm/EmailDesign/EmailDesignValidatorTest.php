@@ -62,7 +62,9 @@ class EmailDesignValidatorTest extends TestCase
 
     public function test_the_fixture_covers_every_block_content_may_hold(): void
     {
-        $this->assertSame(EmailDesignSchema::REGION_BLOCKS[EmailDesignSchema::CONTENT], array_column($this->contentBlocks(), 'type'));
+        // The default content fixture holds every single block; the card and rows blocks are covered by their own
+        // fixtures in EmailDesignCardRowsTest, so the many tests that render this one keep their exact output.
+        $this->assertSame(EmailDesignSchema::REGION_BLOCKS[EmailDesignSchema::CONTENT], [...array_column($this->contentBlocks(), 'type'), 'card', 'rows']);
     }
 
     /** @return array<string, array{string, string}> */

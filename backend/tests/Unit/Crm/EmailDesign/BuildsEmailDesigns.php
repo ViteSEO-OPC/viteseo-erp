@@ -87,6 +87,8 @@ trait BuildsEmailDesigns
             'divider' => $this->divider($overrides),
             'spacer' => $this->spacer($overrides),
             'footer' => $this->footer($overrides),
+            'card' => $this->card($overrides),
+            'rows' => $this->rows($overrides),
             default => throw new LogicException("There is no {$type} block."),
         };
     }
@@ -167,6 +169,39 @@ trait BuildsEmailDesigns
             'align' => 'center',
             'font_size' => 12,
             'color' => '#71717A',
+        ], ...$overrides];
+    }
+
+    /** @param  array<string, mixed>  $overrides */
+    protected function card(array $overrides = []): array
+    {
+        return [...[
+            'type' => 'card',
+            'id' => 'card',
+            'blocks' => [$this->rows(['id' => 'card-rows'])],
+            'align' => 'center',
+            'eyebrow' => 'Quotation summary',
+            'title' => 'Basic website. ₱35,000, one-time.',
+            'background_color' => '#F4F4F5',
+            'border_color' => '#E4E4E7',
+        ], ...$overrides];
+    }
+
+    /** @param  array<string, mixed>  $overrides */
+    protected function rows(array $overrides = []): array
+    {
+        return [...[
+            'type' => 'rows',
+            'id' => 'rows',
+            'items' => [
+                ['title' => 'Website', 'description' => '5 pages for {{business_name}}, with a contact form.'],
+                ['title' => 'Payment'],
+            ],
+            'align' => 'center',
+            'dividers' => true,
+            'title_color' => '#18181B',
+            'description_color' => '#71717A',
+            'divider_color' => '#E4E4E7',
         ], ...$overrides];
     }
 
