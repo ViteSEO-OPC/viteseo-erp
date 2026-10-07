@@ -29,8 +29,8 @@ export type RichTextNode = {
 
 export type RichTextDoc = { type: "doc"; content: RichTextNode[] };
 
-/** A design's styles, or a template's style overrides. Every one optional. */
-export type DesignStyles = {
+/** The inheritable system styles (EmailDesignSchema::SYSTEM_DEFAULTS). Every one optional. */
+export type SystemStyles = {
   font?: DesignFont;
   background_color?: string;
   content_background_color?: string;
@@ -45,9 +45,38 @@ export type DesignStyles = {
   divider_color?: string;
 };
 
-export type DesignStyleKey = keyof DesignStyles;
+/**
+ * Optional colors beside the system styles (EmailDesignSchema::ADDITIONAL_COLOR_STYLES). Unset, each takes the
+ * resolved system style it names — a card's background is the page background, and so on.
+ */
+export type AdditionalColorStyles = {
+  card_background_color?: string;
+  card_border_color?: string;
+  eyebrow_color?: string;
+  secondary_color?: string;
+  secondary_text_color?: string;
+};
 
-export type DesignStyleValues = Required<DesignStyles>;
+/** Optional sizes in px (EmailDesignSchema::NUMERIC_STYLES). Unset, each takes its default. */
+export type NumericStyles = {
+  container_radius?: number;
+  content_padding?: number;
+  card_radius?: number;
+  card_padding?: number;
+  card_border_width?: number;
+};
+
+/** A design's styles, or a template's style overrides. Every one optional. */
+export type DesignStyles = SystemStyles & AdditionalColorStyles & NumericStyles;
+
+/** The system styles: the font and the nine colors every design has always had. */
+export type DesignStyleKey = keyof SystemStyles;
+
+export type AdditionalColorStyleKey = keyof AdditionalColorStyles;
+
+export type NumericStyleKey = keyof NumericStyles;
+
+export type DesignStyleValues = Required<SystemStyles>;
 
 /** Where a logo links: the organization website (the default), a custom address, or nowhere. */
 export type LogoLinkTarget = "website" | "custom" | "none";
@@ -69,6 +98,8 @@ export type HeadingBlock = {
   text: string;
   align: DesignAlignment;
   color?: string;
+  /** A size of its own in px, instead of its level's. */
+  font_size?: number;
 };
 
 export type TextBlock = {
@@ -89,7 +120,11 @@ export type ButtonBlock = {
   background_color?: string;
   text_color?: string;
   radius: number;
+  /** A secondary button takes the design's secondary colors instead of its accent. */
+  variant?: ButtonVariant;
 };
+
+export type ButtonVariant = "primary" | "secondary";
 
 /** Image blocks reference a stored asset by id. Uploads arrive in a later slice; existing ones round-trip. */
 export type ImageBlock = {
@@ -115,6 +150,36 @@ export type FooterBlock = {
   color?: string;
 };
 
+/** One line of a rows block: a title, and a description under it. */
+export type RowsItem = { title: string; description?: string };
+
+/** Title and description lines — a quotation's items, a package's features — optionally ruled apart. */
+export type RowsBlock = {
+  type: "rows";
+  id: string;
+  items: RowsItem[];
+  align: DesignAlignment;
+  dividers: boolean;
+  title_color?: string;
+  description_color?: string;
+  divider_color?: string;
+};
+
+/**
+ * A framed panel holding its own blocks (CARD_BLOCKS: never a card, never an image). Its frame — background,
+ * border, corners, padding — is the design's; a card may set its own two colors.
+ */
+export type CardBlock = {
+  type: "card";
+  id: string;
+  blocks: DesignBlock[];
+  align: DesignAlignment;
+  eyebrow?: string | null;
+  title?: string | null;
+  background_color?: string;
+  border_color?: string;
+};
+
 export type DesignBlock =
   | LogoBlock
   | HeadingBlock
@@ -123,15 +188,29 @@ export type DesignBlock =
   | ImageBlock
   | DividerBlock
   | SpacerBlock
-  | FooterBlock;
+  | FooterBlock
+  | CardBlock
+  | RowsBlock;
 
 export type DesignBlockType = DesignBlock["type"];
 
 /** The parts of an email that hold blocks: a design's header and footer, and a template's content. */
 export type DesignRegion = "header" | "footer" | "blocks";
 
-/** A design's signature area. The sender's name, title and phone are filled in when the email is rendered. */
-export type SignatureArea = { enabled: boolean; sign_off: string; align: DesignAlignment };
+/**
+ * A design's signature area. The sender's name is filled in when the email is rendered; the optional switches add
+ * the organization's name, its CRM mailbox and the sending person's own phone number.
+ */
+export type SignatureArea = {
+  enabled: boolean;
+  sign_off: string;
+  align: DesignAlignment;
+  show_company?: boolean;
+  show_email?: boolean;
+  show_phone?: boolean;
+};
+
+export type SignatureOption = "show_company" | "show_email" | "show_phone";
 
 export type EmailDesignLayout = {
   version: 1;

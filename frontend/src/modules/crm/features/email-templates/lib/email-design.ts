@@ -12,6 +12,10 @@
  * re-validates every preview and save regardless.
  */
 import type {
+  AdditionalColorStyleKey,
+  ButtonBlock,
+  ButtonVariant,
+  CardBlock,
   DesignAlignment,
   DesignBlock,
   DesignBlockType,
@@ -24,9 +28,11 @@ import type {
   EmailDesignLayout,
   LogoBlock,
   LogoLinkTarget,
+  NumericStyleKey,
   RichTextDoc,
   RichTextNode,
   SignatureArea,
+  SignatureOption,
   TemplateContent,
 } from "@/modules/crm/features/email-templates/types/email-design-types";
 
@@ -37,6 +43,12 @@ export const MAX_CONTENT_BLOCKS = 50;
 
 /** Blocks a design's header, and separately its footer, may hold. */
 export const MAX_REGION_BLOCKS = 10;
+
+/** Blocks one card may hold. They count toward MAX_CONTENT_BLOCKS too. */
+export const MAX_CARD_BLOCKS = 20;
+
+/** Items one rows block may hold. */
+export const MAX_ROWS_ITEMS = 30;
 
 export const FONT_OPTIONS: readonly { value: DesignFont; label: string }[] = [
   { value: "arial", label: "Arial" },
@@ -60,7 +72,11 @@ export const RANGES = {
   spacerHeight: [4, 96],
   dividerThickness: [1, 4],
   buttonRadius: [0, 24],
+  headingFontSize: [14, 48],
 } as const satisfies Record<string, readonly [number, number]>;
+
+/** Heading level → its font size in px — EmailDesignSchema::HEADING_SIZES. */
+export const HEADING_SIZES = { 1: 28, 2: 22, 3: 18 } as const;
 
 /** Character limits — EmailDesignSchema's MAX_* text constants. */
 export const TEXT_LIMITS = {
@@ -72,6 +88,10 @@ export const TEXT_LIMITS = {
   blockText: 5000,
   url: 2000,
   designName: 100,
+  cardEyebrow: 100,
+  cardTitle: 200,
+  rowTitle: 200,
+  rowDescription: 1000,
 } as const;
 
 /**
@@ -107,6 +127,44 @@ export const STYLE_LABELS: Record<DesignStyleKey, string> = {
   divider_color: "Dividers",
 };
 
+/**
+ * EmailDesignSchema::ADDITIONAL_COLOR_STYLES — optional colors → the system style each takes when unset, in the
+ * PHP order.
+ */
+export const ADDITIONAL_COLOR_STYLES = {
+  card_background_color: "background_color",
+  card_border_color: "divider_color",
+  eyebrow_color: "muted_text_color",
+  secondary_color: "text_color",
+  secondary_text_color: "content_background_color",
+} as const satisfies Record<AdditionalColorStyleKey, DesignStyleKey>;
+
+export const ADDITIONAL_COLOR_FIELDS = Object.keys(ADDITIONAL_COLOR_STYLES) as AdditionalColorStyleKey[];
+
+/** EmailDesignSchema::NUMERIC_STYLES — optional sizes in px → [default, [min, max]], in the PHP order. */
+export const NUMERIC_STYLES = {
+  container_radius: [0, [0, 32]],
+  content_padding: [24, [8, 48]],
+  card_radius: [12, [0, 32]],
+  card_padding: [24, [8, 40]],
+  card_border_width: [0, [0, 4]],
+} as const satisfies Record<NumericStyleKey, readonly [number, readonly [number, number]]>;
+
+export const NUMERIC_STYLE_FIELDS = Object.keys(NUMERIC_STYLES) as NumericStyleKey[];
+
+export const ADDITIONAL_STYLE_LABELS: Record<AdditionalColorStyleKey | NumericStyleKey, string> = {
+  card_background_color: "Card background",
+  card_border_color: "Card border",
+  eyebrow_color: "Card label",
+  secondary_color: "Secondary buttons",
+  secondary_text_color: "Secondary button labels",
+  container_radius: "Email corner radius",
+  content_padding: "Side padding",
+  card_radius: "Card corner radius",
+  card_padding: "Card padding",
+  card_border_width: "Card border width",
+};
+
 /** EmailDesignSchema::BLOCK_COLOR_FALLBACKS — block type → color field → the style it inherits. */
 export const BLOCK_COLOR_FALLBACKS = {
   heading: { color: "text_color" },
@@ -114,7 +172,18 @@ export const BLOCK_COLOR_FALLBACKS = {
   footer: { color: "muted_text_color" },
   button: { background_color: "accent_color", text_color: "accent_text_color" },
   divider: { color: "divider_color" },
-} as const satisfies Record<string, Record<string, DesignStyleKey>>;
+  card: { background_color: "card_background_color", border_color: "card_border_color" },
+  rows: { title_color: "text_color", description_color: "muted_text_color", divider_color: "divider_color" },
+} as const satisfies Record<string, Record<string, DesignStyleKey | AdditionalColorStyleKey>>;
+
+/** A secondary button's colors — what `variant: "secondary"` takes instead of the accent ones. */
+export const SECONDARY_BUTTON_COLORS = {
+  background_color: "secondary_color",
+  text_color: "secondary_text_color",
+} as const satisfies Record<string, AdditionalColorStyleKey>;
+
+/** EmailDesignSchema::BUTTON_VARIANTS. */
+export const BUTTON_VARIANTS: readonly ButtonVariant[] = ["primary", "secondary"];
 
 export type ColoredBlockType = keyof typeof BLOCK_COLOR_FALLBACKS;
 
@@ -126,6 +195,9 @@ export const LAYOUT_FIELDS: readonly (keyof EmailDesignLayout)[] = ["version", "
 /** The signature area's fields — EmailDesignSchema::SIGNATURE_FIELDS. */
 export const SIGNATURE_FIELDS: readonly (keyof SignatureArea)[] = ["enabled", "sign_off", "align"];
 
+/** The signature area's optional switches, off when absent — EmailDesignSchema::SIGNATURE_OPTIONS. */
+export const SIGNATURE_OPTIONS: readonly SignatureOption[] = ["show_company", "show_email", "show_phone"];
+
 /** A template content's fields — EmailDesignSchema::CONTENT_FIELDS. */
 export const CONTENT_FIELDS: { required: readonly (keyof TemplateContent)[]; optional: readonly (keyof TemplateContent)[] } = {
   required: ["version", "blocks"],
@@ -136,21 +208,29 @@ export const CONTENT_FIELDS: { required: readonly (keyof TemplateContent)[]; opt
 export const REGION_BLOCKS: Record<DesignRegion, readonly DesignBlockType[]> = {
   header: ["logo", "heading", "text", "button", "image", "divider", "spacer"],
   footer: ["footer", "text", "logo", "button", "image", "divider", "spacer"],
-  blocks: ["heading", "text", "button", "image", "divider", "spacer"],
+  blocks: ["heading", "text", "button", "image", "divider", "spacer", "card", "rows"],
 };
+
+/** The blocks a card may hold — EmailDesignSchema::CARD_BLOCKS. Never a card, never an image. */
+export const CARD_BLOCKS: readonly DesignBlockType[] = ["heading", "text", "rows", "divider", "button", "spacer"];
+
+/** A rows item's fields — EmailDesignSchema::ROWS_ITEM_FIELDS. */
+export const ROWS_ITEM_FIELDS = { required: ["title"], optional: ["description"] } as const;
 
 export const REGION_LABELS: Record<DesignRegion, string> = { header: "Header", footer: "Footer", blocks: "Content" };
 
 /** Every field each block holds — EmailDesignSchema::BLOCK_FIELDS, in the same order. */
 export const BLOCK_FIELDS: Record<DesignBlockType, { required: readonly string[]; optional: readonly string[] }> = {
   logo: { required: ["type", "id", "width", "align"], optional: ["link_target", "link_url"] },
-  heading: { required: ["type", "id", "level", "text", "align"], optional: ["color"] },
+  heading: { required: ["type", "id", "level", "text", "align"], optional: ["color", "font_size"] },
   text: { required: ["type", "id", "content", "align", "font_size"], optional: ["color"] },
-  button: { required: ["type", "id", "label", "url", "align", "radius"], optional: ["background_color", "text_color"] },
+  button: { required: ["type", "id", "label", "url", "align", "radius"], optional: ["background_color", "text_color", "variant"] },
   image: { required: ["type", "id", "asset_id", "alt", "width", "align"], optional: ["link_url"] },
   divider: { required: ["type", "id", "thickness"], optional: ["color"] },
   spacer: { required: ["type", "id", "height"], optional: [] },
   footer: { required: ["type", "id", "content", "align", "font_size"], optional: ["color"] },
+  card: { required: ["type", "id", "blocks", "align"], optional: ["eyebrow", "title", "background_color", "border_color"] },
+  rows: { required: ["type", "id", "items", "align", "dividers"], optional: ["title_color", "description_color", "divider_color"] },
 };
 
 export const BLOCK_LABELS: Record<DesignBlockType, string> = {
@@ -162,6 +242,8 @@ export const BLOCK_LABELS: Record<DesignBlockType, string> = {
   divider: "Divider",
   spacer: "Spacer",
   footer: "Footer text",
+  card: "Card",
+  rows: "Rows",
 };
 
 /**
@@ -171,19 +253,24 @@ export const BLOCK_LABELS: Record<DesignBlockType, string> = {
 export const ADDABLE_BLOCKS: Record<DesignRegion, readonly DesignBlockType[]> = {
   header: ["logo", "heading", "text", "button", "divider", "spacer"],
   footer: ["footer", "text", "logo", "button", "divider", "spacer"],
-  blocks: ["heading", "text", "button", "divider", "spacer"],
+  blocks: ["heading", "text", "button", "divider", "spacer", "card", "rows"],
 };
+
+/** What "Add block" offers inside a card: everything a card may hold. */
+export const ADDABLE_CARD_BLOCKS: readonly DesignBlockType[] = CARD_BLOCKS;
 
 /** The fields each block's settings panel has a control for; any other problem shows at the top of it. */
 export const BLOCK_CONTROL_FIELDS: Record<DesignBlockType, readonly string[]> = {
   logo: ["width", "align", "link_target", "link_url"],
-  heading: ["text", "level", "align", "color"],
+  heading: ["text", "level", "align", "color", "font_size"],
   text: ["content", "align", "font_size", "color"],
-  button: ["label", "url", "align", "background_color", "text_color", "radius"],
+  button: ["label", "url", "align", "background_color", "text_color", "radius", "variant"],
   image: ["alt", "width", "align", "link_url"],
   divider: ["color", "thickness"],
   spacer: ["height"],
   footer: ["content", "align", "font_size", "color"],
+  card: ["eyebrow", "title", "align", "background_color", "border_color", "blocks"],
+  rows: ["items", "align", "dividers", "title_color", "description_color", "divider_color"],
 };
 
 // ── Style inheritance ─────────────────────────────────────────────────────────────────────────
@@ -202,14 +289,44 @@ export function effectiveStyle(chain: readonly DesignStyles[], key: DesignStyleK
   return STYLE_DEFAULTS[key];
 }
 
+/** An optional color's value: the first of `chain` that sets it, otherwise the system style it names. */
+export function effectiveAdditionalColor(chain: readonly DesignStyles[], key: AdditionalColorStyleKey): string {
+  for (const styles of chain) {
+    const value = styles[key];
+    if (value !== undefined) return value;
+  }
+  return effectiveStyle(chain, ADDITIONAL_COLOR_STYLES[key]);
+}
+
+/** An optional size's value in px: the first of `chain` that sets it, otherwise its default. */
+export function effectiveNumericStyle(chain: readonly DesignStyles[], key: NumericStyleKey): number {
+  for (const styles of chain) {
+    const value = styles[key];
+    if (value !== undefined) return value;
+  }
+  return NUMERIC_STYLES[key][0];
+}
+
+function isAdditionalColor(key: string): key is AdditionalColorStyleKey {
+  return key in ADDITIONAL_COLOR_STYLES;
+}
+
 /** What an unset block color inherits: the style BLOCK_COLOR_FALLBACKS names for it, through `chain`. */
 export function inheritedBlockColor(type: ColoredBlockType, field: string, chain: readonly DesignStyles[]): string {
-  const fallbacks: Record<string, DesignStyleKey> = BLOCK_COLOR_FALLBACKS[type];
-  return effectiveStyle(chain, fallbacks[field] ?? "text_color");
+  const fallbacks: Record<string, DesignStyleKey | AdditionalColorStyleKey> = BLOCK_COLOR_FALLBACKS[type];
+  const key = fallbacks[field] ?? "text_color";
+  return isAdditionalColor(key) ? effectiveAdditionalColor(chain, key) : effectiveStyle(chain, key);
+}
+
+/** What an unset button color inherits: the accent colors, or the secondary ones for a secondary button. */
+export function inheritedButtonColor(block: ButtonBlock, field: "background_color" | "text_color", chain: readonly DesignStyles[]): string {
+  return block.variant === "secondary"
+    ? effectiveAdditionalColor(chain, SECONDARY_BUTTON_COLORS[field])
+    : inheritedBlockColor("button", field, chain);
 }
 
 /** `styles` with `key` set, or removed — inherited again — when `value` is undefined or blank. */
-export function withStyle(styles: DesignStyles, key: DesignStyleKey, value: string | undefined): DesignStyles {
+export function withStyle(styles: DesignStyles, key: DesignStyleKey | AdditionalColorStyleKey, value: string | undefined): DesignStyles {
   const next: DesignStyles = { ...styles };
   if (value === undefined || value === "") {
     delete next[key];
@@ -219,8 +336,35 @@ export function withStyle(styles: DesignStyles, key: DesignStyleKey, value: stri
   return next;
 }
 
+/** `styles` with a size set, or removed — back to its default — when `value` is undefined. */
+export function withNumericStyle(styles: DesignStyles, key: NumericStyleKey, value: number | undefined): DesignStyles {
+  const next: DesignStyles = { ...styles };
+  if (value === undefined) {
+    delete next[key];
+  } else {
+    next[key] = value;
+  }
+  return next;
+}
+
+/** Template content with its style overrides replaced; none at all removes `style_overrides`. */
+function withOverrides(content: TemplateContent, overrides: DesignStyles): TemplateContent {
+  const next: TemplateContent = { ...content };
+  if (Object.keys(overrides).length === 0) {
+    delete next.style_overrides;
+  } else {
+    next.style_overrides = overrides;
+  }
+  return next;
+}
+
+/** Template content with one size override set or cleared. */
+export function withNumericOverride(content: TemplateContent, key: NumericStyleKey, value: number | undefined): TemplateContent {
+  return withOverrides(content, withNumericStyle(content.style_overrides ?? {}, key, value));
+}
+
 /** Template content with one style override set or cleared; no overrides at all removes `style_overrides`. */
-export function withStyleOverride(content: TemplateContent, key: DesignStyleKey, value: string | undefined): TemplateContent {
+export function withStyleOverride(content: TemplateContent, key: DesignStyleKey | AdditionalColorStyleKey, value: string | undefined): TemplateContent {
   const overrides = withStyle(content.style_overrides ?? {}, key, value);
   const next: TemplateContent = { ...content };
   if (Object.keys(overrides).length === 0) {
@@ -279,9 +423,14 @@ export function newBlockId(type: DesignBlockType, taken: ReadonlySet<string>, ra
   }
 }
 
-/** Every block id in the given lists. */
+/** Every block id in the given lists, a card's own blocks included: ids are unique across a whole document. */
 export function blockIds(...lists: readonly (readonly DesignBlock[])[]): Set<string> {
-  return new Set(lists.flatMap((list) => list.map((block) => block.id)));
+  return new Set(lists.flatMap((list) => list.flatMap((block) => (block.type === "card" ? [block.id, ...block.blocks.map((inner) => inner.id)] : [block.id]))));
+}
+
+/** How many blocks a list holds, a card's own blocks included — what MAX_CONTENT_BLOCKS counts. */
+export function blockCount(blocks: readonly DesignBlock[]): number {
+  return blocks.reduce((total, block) => total + 1 + (block.type === "card" ? block.blocks.length : 0), 0);
 }
 
 /**
@@ -306,6 +455,17 @@ export function createBlock(type: DesignBlockType, id: string): DesignBlock {
       return { type, id, height: 24 };
     case "footer":
       return { type, id, content: emptyRichText(), align: "center", font_size: 12 };
+    case "rows":
+      return { type, id, items: [{ title: "Item", description: "What it includes." }], align: "left", dividers: true };
+    case "card":
+      // A card starts with one rows block inside, its id derived from the card's — unique, as the card's is.
+      return {
+        type,
+        id,
+        blocks: [{ type: "rows", id: `${id}-rows`, items: [{ title: "Item", description: "What it includes." }], align: "center", dividers: true }],
+        align: "center",
+        title: "Summary",
+      };
   }
 }
 
@@ -358,7 +518,16 @@ export function duplicateBlock(
   if (index === -1) return { blocks, id: null };
 
   const copy = structuredClone(blocks[index]);
-  copy.id = newBlockId(copy.type, new Set([...(options.taken ?? []), ...blocks.map((block) => block.id)]), options.random);
+  const taken = new Set([...(options.taken ?? []), ...blockIds(blocks)]);
+  copy.id = newBlockId(copy.type, taken, options.random);
+  taken.add(copy.id);
+  // A card's blocks are copied too, and each needs an id of its own: ids are unique across the document.
+  if (copy.type === "card") {
+    for (const inner of copy.blocks) {
+      inner.id = newBlockId(inner.type, taken, options.random);
+      taken.add(inner.id);
+    }
+  }
 
   return { blocks: [...blocks.slice(0, index + 1), copy, ...blocks.slice(index + 1)], id: copy.id };
 }
@@ -525,7 +694,29 @@ export function blockSummary(block: DesignBlock): string {
       return `${block.thickness}px line`;
     case "spacer":
       return `${block.height}px of space`;
+    case "rows":
+      return block.items.length === 1 ? `1 row · ${block.items[0].title}` : `${block.items.length} rows`;
+    case "card":
+      return [block.title || block.eyebrow, `${block.blocks.length} ${block.blocks.length === 1 ? "block" : "blocks"} inside`].filter(Boolean).join(" · ");
   }
+}
+
+// ── Rows ──────────────────────────────────────────────────────────────────────────────────────
+
+/** A rows item with its description set, or removed when blank — "no description" is absent, not "". */
+export function withRowDescription(item: { title: string; description?: string }, description: string): { title: string; description?: string } {
+  return description === "" ? { title: item.title } : { ...item, description };
+}
+
+/** A card with its eyebrow or title set, or removed when blank. */
+export function withCardText(card: CardBlock, field: "eyebrow" | "title", value: string): CardBlock {
+  const next: CardBlock = { ...card };
+  if (value === "") {
+    delete next[field];
+  } else {
+    next[field] = value;
+  }
+  return next;
 }
 
 /** "4.3 KB" — the preview's HTML size against the Gmail guard. */
@@ -599,9 +790,17 @@ export function documentProblems(
     const list = regions[root as DesignRegion];
 
     if (list && /^\d+$/.test(parts[2] ?? "")) {
-      const block = list[Number(parts[2])];
+      let block: DesignBlock | undefined = list[Number(parts[2])];
+      let rest = parts.slice(3);
+      // A card's own block: `blocks.1.blocks.0.url` belongs to the card's first block, by its id.
+      if (block?.type === "card" && rest[0] === "blocks" && /^\d+$/.test(rest[1] ?? "") && block.blocks[Number(rest[1])]) {
+        block = block.blocks[Number(rest[1])];
+        rest = rest.slice(2);
+      }
       if (block) {
-        (problems.blocks[block.id] ??= []).push({ field: parts[3] ?? "", message });
+        // A rows item keeps its index and field (`items.2.title`) so the message lands on that row.
+        const field = rest[0] === "items" && /^\d+$/.test(rest[1] ?? "") ? rest.slice(0, 3).join(".") : (rest[0] ?? "");
+        (problems.blocks[block.id] ??= []).push({ field, message });
         continue;
       }
     } else if (FIELD_ROOTS.has(root)) {

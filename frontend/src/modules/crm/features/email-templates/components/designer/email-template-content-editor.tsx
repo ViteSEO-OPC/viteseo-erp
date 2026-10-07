@@ -31,6 +31,7 @@ import {
 import { ADD_CUSTOM_OPTION } from "@/modules/crm/features/email-templates/lib/template-options";
 import {
   ColorControl,
+  OptionalRangeControl,
   TextLineControl,
   TokenChips,
 } from "@/modules/crm/features/email-templates/components/designer/design-controls";
@@ -44,17 +45,24 @@ import {
 } from "@/modules/crm/features/email-templates/hooks/use-email-templates-admin";
 import {
   ADDABLE_BLOCKS,
+  ADDITIONAL_COLOR_FIELDS,
+  ADDITIONAL_STYLE_LABELS,
   BLOCK_LABELS,
   COLOR_STYLE_FIELDS,
   FONT_OPTIONS,
   MAX_CONTENT_BLOCKS,
+  NUMERIC_STYLES,
+  NUMERIC_STYLE_FIELDS,
   STYLE_LABELS,
   TEXT_LIMITS,
   documentProblems,
   documentRegions,
+  effectiveAdditionalColor,
+  effectiveNumericStyle,
   effectiveStyle,
   mergeProblems,
   serializeDocument,
+  withNumericOverride,
   withPreheader,
   withSignOff,
   withStyleOverride,
@@ -66,11 +74,13 @@ import {
   placeholderProblem,
 } from "@/modules/crm/features/email-templates/lib/email-template-text";
 import type {
+  AdditionalColorStyleKey,
   DesignFont,
   DesignProblems,
   DesignStyleKey,
   DesignStyles,
   EmailDesign,
+  NumericStyleKey,
   TemplateContent,
   TemplateEditorSeed,
 } from "@/modules/crm/features/email-templates/types/email-design-types";
@@ -205,13 +215,23 @@ export function EmailTemplateContentEditor({ template, seed, catalog, onClose }:
     setSaveFailure(null);
   }
 
-  function changeOverride(key: DesignStyleKey, value: string | undefined) {
+  function changeOverride(key: DesignStyleKey | AdditionalColorStyleKey, value: string | undefined) {
     changeContent((current) => withStyleOverride(current, key, value));
   }
 
+  function changeSizeOverride(key: NumericStyleKey, value: number | undefined) {
+    changeContent((current) => withNumericOverride(current, key, value));
+  }
+
   const blockLabel = (id: string) => {
-    const index = content.blocks.findIndex((block) => block.id === id);
-    return index === -1 ? "A removed block" : `${BLOCK_LABELS[content.blocks[index].type]} (block ${index + 1})`;
+    for (const [index, block] of content.blocks.entries()) {
+      if (block.id === id) return `${BLOCK_LABELS[block.type]} (block ${index + 1})`;
+      if (block.type === "card") {
+        const inner = block.blocks.findIndex((child) => child.id === id);
+        if (inner !== -1) return `Card (block ${index + 1}) · ${BLOCK_LABELS[block.blocks[inner].type]} (block ${inner + 1})`;
+      }
+    }
+    return "A removed block";
   };
 
   const fieldLabel = (field: string) => {
@@ -219,7 +239,9 @@ export function EmailTemplateContentEditor({ template, seed, catalog, onClose }:
     if (root === "preheader") return "Preview text";
     if (root === "sign_off") return "Sign-off";
     if (root === "style_overrides") {
-      return key in STYLE_LABELS ? `Template style · ${STYLE_LABELS[key as DesignStyleKey]}` : "Template style";
+      if (key in STYLE_LABELS) return `Template style · ${STYLE_LABELS[key as DesignStyleKey]}`;
+      if (key in ADDITIONAL_STYLE_LABELS) return `Template style · ${ADDITIONAL_STYLE_LABELS[key as keyof typeof ADDITIONAL_STYLE_LABELS]}`;
+      return "Template style";
     }
     return field;
   };
@@ -573,6 +595,33 @@ export function EmailTemplateContentEditor({ template, seed, catalog, onClose }:
                           />
                         ))}
                       </div>
+                      <div className="flex flex-wrap gap-4">
+                        {ADDITIONAL_COLOR_FIELDS.map((key) => (
+                          <ColorControl
+                            key={key}
+                            label={ADDITIONAL_STYLE_LABELS[key]}
+                            value={overrides[key]}
+                            inherited={effectiveAdditionalColor(designChain, key)}
+                            onChange={(value) => changeOverride(key, value)}
+                            disabled={pending}
+                            error={problems.fields[`style_overrides.${key}`]}
+                          />
+                        ))}
+                      </div>
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        {NUMERIC_STYLE_FIELDS.map((key) => (
+                          <OptionalRangeControl
+                            key={key}
+                            label={ADDITIONAL_STYLE_LABELS[key]}
+                            value={overrides[key]}
+                            inherited={effectiveNumericStyle(designChain, key)}
+                            range={NUMERIC_STYLES[key][1]}
+                            onChange={(value) => changeSizeOverride(key, value)}
+                            disabled={pending}
+                            error={problems.fields[`style_overrides.${key}`]}
+                          />
+                        ))}
+                      </div>
                     </div>
                   ) : null}
                 </div>
@@ -589,7 +638,7 @@ export function EmailTemplateContentEditor({ template, seed, catalog, onClose }:
                 tokens={catalog.tokens}
                 styleChain={styleChain}
                 disabled={pending}
-                emptyMessage="No content yet. Add a heading or some text below."
+                emptyMessage="No content yet. Add a heading, some text or a card below."
                 initiallyExpanded={seed.content.blocks[0]?.id ?? null}
               />
             </div>

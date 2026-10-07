@@ -1,8 +1,9 @@
 "use client";
 
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { AlignCenter, AlignLeft, AlignRight, RotateCcw } from "lucide-react";
 import { FormField } from "@/modules/crm/components/forms/form-field/form-field";
+import { Switch } from "@/modules/crm/components/ui/switch";
 import { FIELD } from "@/modules/crm/features/settings/components/form-styles";
 import { cn } from "@/modules/crm/lib/utils";
 import { insertAt } from "@/modules/crm/features/email-templates/lib/email-template-text";
@@ -144,6 +145,7 @@ export function RangeControl({
   onChange,
   disabled,
   error,
+  bare = false,
 }: {
   label: string;
   value: number;
@@ -152,28 +154,127 @@ export function RangeControl({
   onChange: (value: number) => void;
   disabled?: boolean;
   error?: string;
+  /** Without its visible label, for a control that already shows one (OptionalRangeControl). */
+  bare?: boolean;
 }) {
+  const slider = (
+    <div className="flex h-9 items-center gap-3">
+      <input
+        type="range"
+        min={range[0]}
+        max={range[1]}
+        step={1}
+        value={value}
+        onChange={(event) => onChange(Number(event.target.value))}
+        disabled={disabled}
+        aria-label={label}
+        aria-valuetext={`${value}${unit}`}
+        className="w-full accent-teal-600"
+      />
+      <span className="w-14 shrink-0 text-right font-mono text-xs text-foreground">
+        {value}
+        {unit}
+      </span>
+    </div>
+  );
+
+  if (bare) {
+    return (
+      <div className="flex flex-col gap-1">
+        {slider}
+        {error ? (
+          <p role="alert" className="text-xs text-red-500">
+            {error}
+          </p>
+        ) : null}
+      </div>
+    );
+  }
+
   return (
     <FormField label={label} error={error}>
-      <div className="flex h-9 items-center gap-3">
-        <input
-          type="range"
-          min={range[0]}
-          max={range[1]}
-          step={1}
-          value={value}
-          onChange={(event) => onChange(Number(event.target.value))}
-          disabled={disabled}
-          aria-label={label}
-          aria-valuetext={`${value}${unit}`}
-          className="w-full accent-teal-600"
-        />
-        <span className="w-14 shrink-0 text-right font-mono text-xs text-foreground">
-          {value}
-          {unit}
-        </span>
-      </div>
+      {slider}
     </FormField>
+  );
+}
+
+/**
+ * A setting that is either inherited or set: off, it shows what it inherits and stores nothing; on, a range
+ * control sets a whole number. Turning it off again removes the value, so it inherits once more.
+ */
+export function OptionalRangeControl({
+  label,
+  value,
+  inherited,
+  range,
+  onChange,
+  disabled,
+  error,
+}: {
+  label: string;
+  /** The value set here, or undefined when it inherits. */
+  value: number | undefined;
+  /** What an unset value resolves to — shown, and where the range starts when it is switched on. */
+  inherited: number;
+  range: readonly [number, number];
+  onChange: (value: number | undefined) => void;
+  disabled?: boolean;
+  error?: string;
+}) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <label className="flex w-fit items-center gap-2 text-sm text-foreground">
+        <Switch
+          checked={value !== undefined}
+          onCheckedChange={(checked) => onChange(checked ? inherited : undefined)}
+          disabled={disabled}
+          aria-label={`Set ${label}`}
+        />
+        <span>
+          {label}
+          {value === undefined ? <span className="ml-1.5 text-xs text-muted-foreground">Default ({inherited}px)</span> : null}
+        </span>
+      </label>
+      {value !== undefined ? (
+        <RangeControl bare label={label} value={value} range={range} onChange={onChange} disabled={disabled} error={error} />
+      ) : error ? (
+        <p role="alert" className="text-xs text-red-500">
+          {error}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/** An on/off setting with a sentence saying what "on" does. */
+export function SwitchControl({
+  label,
+  description,
+  checked,
+  onChange,
+  disabled,
+  error,
+}: {
+  label: string;
+  description?: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  disabled?: boolean;
+  error?: string;
+}) {
+  return (
+    <div className="flex flex-col gap-1">
+      <label className="flex w-fit items-center gap-2 text-sm text-foreground">
+        <Switch checked={checked} onCheckedChange={onChange} disabled={disabled} aria-label={label} />
+        <span>{label}</span>
+      </label>
+      {description ? <p className="pl-11 text-xs text-muted-foreground">{description}</p> : null}
+      {error ? (
+        <p role="alert" className="pl-11 text-xs text-red-500">
+          {error}
+        </p>
+      ) : null}
+    </div>
   );
 }
 
@@ -206,12 +307,19 @@ export function TokenChips({
   );
 }
 
-/** A single-line text field; with tokens, a row of placeholder chips that insert at the caret. */
+/**
+ * A single-line text field; with tokens, a row of placeholder chips that insert at the caret.
+ *
+ * `tokensOnFocus` shows the chips only while focus is inside the field — its input or one of its chips — for
+ * forms that repeat the field many times (a rows block's titles and descriptions). Pressing a chip keeps focus
+ * in the input (TokenChips cancels the mousedown), so the chips do not vanish before the press lands.
+ */
 export function TextLineControl({
   label,
   value,
   onChange,
   tokens = [],
+  tokensOnFocus = false,
   maxLength,
   placeholder,
   required,
@@ -222,6 +330,7 @@ export function TextLineControl({
   value: string;
   onChange: (value: string) => void;
   tokens?: readonly TemplateToken[];
+  tokensOnFocus?: boolean;
   maxLength: number;
   placeholder?: string;
   required?: boolean;
@@ -229,6 +338,8 @@ export function TextLineControl({
   error?: string;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const [focused, setFocused] = useState(false);
+  const showTokens = tokens.length > 0 && (!tokensOnFocus || focused);
 
   function insertToken(key: string) {
     const input = inputRef.current;
@@ -242,7 +353,17 @@ export function TextLineControl({
 
   return (
     <FormField label={label} required={required} error={error}>
-      <div className="flex flex-col gap-1.5">
+      <div
+        className="flex flex-col gap-1.5"
+        onFocus={tokensOnFocus ? () => setFocused(true) : undefined}
+        onBlur={
+          tokensOnFocus
+            ? (event) => {
+                if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFocused(false);
+              }
+            : undefined
+        }
+      >
         <input
           ref={inputRef}
           value={value}
@@ -253,7 +374,7 @@ export function TextLineControl({
           aria-label={label}
           className={FIELD}
         />
-        {tokens.length > 0 ? <TokenChips tokens={tokens} onInsert={insertToken} disabled={disabled} /> : null}
+        {showTokens ? <TokenChips tokens={tokens} onInsert={insertToken} disabled={disabled} /> : null}
       </div>
     </FormField>
   );

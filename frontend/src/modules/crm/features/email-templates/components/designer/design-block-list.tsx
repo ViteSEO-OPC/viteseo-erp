@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import {
   closestCenter,
   DndContext,
@@ -16,6 +16,8 @@ import { Button } from "@/modules/crm/components/ui/button";
 import { DesignBlockCard } from "@/modules/crm/features/email-templates/components/designer/design-block-card";
 import {
   BLOCK_LABELS,
+  blockCount,
+  blockIds,
   createBlock,
   duplicateBlock,
   moveBlock,
@@ -51,12 +53,18 @@ type Props = {
   disabled: boolean;
   emptyMessage: string;
   initiallyExpanded?: string | null;
+  /** A card's own list: a smaller heading, inside its card's settings. */
+  nested?: boolean;
 };
 
 /**
- * One ordered list of blocks — a design's header or footer, or a template's content — with its own drag
- * context, its expanded block, and the Add buttons for the block types that part of the email may hold.
- * Every change goes out through `onChange`; the list holds no document state of its own.
+ * One ordered list of blocks — a design's header or footer, a template's content, or a card's own blocks —
+ * with its own drag context, its expanded block, and the Add buttons for the block types that part of the email
+ * may hold. Every change goes out through `onChange`; the list holds no document state of its own.
+ *
+ * A card's settings hold another of these lists for the card's blocks, so cards are edited with the very same
+ * list, cards and controls as everything else. The count against `max` includes a card's blocks, as the
+ * server's content limit does, and every new id avoids every id in the document.
  */
 export function DesignBlockList({
   title,
@@ -72,10 +80,14 @@ export function DesignBlockList({
   disabled,
   emptyMessage,
   initiallyExpanded = null,
+  nested = false,
 }: Props) {
   const headingId = useId();
   const [expandedId, setExpandedId] = useState<string | null>(initiallyExpanded);
-  const full = blocks.length >= max;
+  const count = blockCount(blocks);
+  const full = count >= max;
+  // Every id this list may not reuse: the rest of the document's, and its own (cards' blocks included).
+  const takenIds = useMemo(() => new Set([...otherIds, ...blockIds(blocks)]), [otherIds, blocks]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
@@ -84,8 +96,13 @@ export function DesignBlockList({
 
   function add(type: DesignBlockType) {
     if (full) return;
-    const id = newBlockId(type, new Set([...otherIds, ...blocks.map((block) => block.id)]));
-    onChange((current) => [...current, createBlock(type, id)]);
+    const id = newBlockId(type, takenIds);
+    const block = createBlock(type, id);
+    // A new card's first block derives its id from the card's; make sure nothing else uses it either.
+    if (block.type === "card") {
+      block.blocks = block.blocks.map((inner) => ({ ...inner, id: newBlockId(inner.type, new Set([...takenIds, id])) }));
+    }
+    onChange((current) => [...current, block]);
     setExpandedId(id);
   }
 
@@ -112,13 +129,13 @@ export function DesignBlockList({
     <section aria-labelledby={headingId} className="flex flex-col gap-3">
       <div className="flex items-baseline justify-between gap-2">
         <div className="flex flex-col gap-0.5">
-          <h3 id={headingId} className="text-sm font-semibold text-foreground">
+          <h3 id={headingId} className={nested ? "text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground" : "text-sm font-semibold text-foreground"}>
             {title}
           </h3>
           {description ? <p className="text-xs text-muted-foreground">{description}</p> : null}
         </div>
         <span className="shrink-0 text-xs text-muted-foreground">
-          {blocks.length} of {max}
+          {count} of {max}
         </span>
       </div>
 
@@ -136,6 +153,8 @@ export function DesignBlockList({
                   count={blocks.length}
                   expanded={expandedId === block.id}
                   problems={problems[block.id] ?? []}
+                  allProblems={problems}
+                  takenIds={takenIds}
                   tokens={tokens}
                   styleChain={styleChain}
                   disabled={disabled}
