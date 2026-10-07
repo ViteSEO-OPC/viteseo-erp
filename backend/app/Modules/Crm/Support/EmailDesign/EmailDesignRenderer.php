@@ -136,7 +136,7 @@ final class EmailDesignRenderer
         foreach ([...$layout['header'], ...$content['blocks']] as $block) {
             $rows[] = $this->blockHtml($block, $theme, $extra, $font, $tokens, $context, $inset);
         }
-        $rows[] = $this->signatureRow($layout['signature'], $content, $font, $theme, $tokens, $context, $inset);
+        $rows[] = $this->signatureRow($layout['signature'], $content, $font, $theme, $extra, $tokens, $context, $inset);
         foreach ($layout['footer'] as $block) {
             $rows[] = $this->blockHtml($block, $theme, $extra, $font, $tokens, $context, $inset);
         }
@@ -272,13 +272,13 @@ final class EmailDesignRenderer
             'logo' => $this->imageRow($context->logoUrl, $block['width'], $this->cleanValue($context->logoAlt), $block['align'], $this->logoLink($block, $context), $context, $inset),
             'heading' => $this->headingRow($block, $font, $tokens, $this->blockColor($block, 'color', $theme), $inset),
             'text' => $this->documentRow($block, $font, $this->blockColor($block, 'color', $theme), $this->linkCss($theme, $extra), $tokens, 12, $inset),
-            'button' => $this->buttonRow($block, $font, $tokens, $this->buttonColor($block, 'background_color', $theme, $extra), $this->buttonColor($block, 'text_color', $theme, $extra), $inset),
+            'button' => $this->buttonRow($block, $font, $tokens, $this->buttonColor($block, 'background_color', $theme, $extra), $this->buttonColor($block, 'text_color', $theme, $extra), $this->buttonPadding($extra), $inset),
             'image' => $this->imageRow($context->assetUrls[$block['asset_id']] ?? null, $block['width'], $block['alt'], $block['align'], $block['link_url'] ?? null, $context, $inset),
             'divider' => $this->dividerRow($block, $this->blockColor($block, 'color', $theme), $inset),
             'spacer' => $this->spacerRow($block['height']),
             'footer' => $this->documentRow($block, $font, $this->blockColor($block, 'color', $theme), $this->linkCss($theme, $extra), $tokens, 8, $inset),
             'card' => $this->cardRow($block, $theme, $extra, $font, $tokens, $context, $inset),
-            'rows' => $this->rowsRow($block, $theme, $font, $tokens, $inset),
+            'rows' => $this->rowsRow($block, $theme, $extra, $font, $tokens, $inset),
             'actions' => $this->actionsRow($block, $theme, $extra, $font, $tokens, $inset),
             // Unreachable for a validated document, and deliberately renders nothing.
             default => '',
@@ -343,11 +343,11 @@ final class EmailDesignRenderer
 
         $html = '';
         if ($eyebrow !== '') {
-            $html .= '<p style="margin:'.($title !== '' ? '0 0 4px 0' : '0').';font-family:'.$font.';font-size:'.EmailDesignSchema::CARD_EYEBROW_SIZE.'px;'
+            $html .= '<p style="margin:'.($title !== '' ? '0 0 4px 0' : '0').';font-family:'.$font.';font-size:'.$extra['card_eyebrow_size'].'px;'
                 .'line-height:1.4;font-weight:bold;color:'.$extra['eyebrow_color'].';">'.$this->escape($eyebrow).'</p>';
         }
         if ($title !== '') {
-            $html .= '<p style="margin:0;font-family:'.$font.';font-size:'.EmailDesignSchema::CARD_TITLE_SIZE.'px;'
+            $html .= '<p style="margin:0;font-family:'.$font.';font-size:'.$extra['card_title_size'].'px;'
                 .'line-height:1.3;font-weight:bold;color:'.$theme['text_color'].';">'.$this->escape($title).'</p>';
         }
 
@@ -360,9 +360,10 @@ final class EmailDesignRenderer
      *
      * @param  array<string, mixed>  $block
      * @param  array<string, string>  $theme
+     * @param  array<string, string|int|bool>  $extra
      * @param  array<string, string>  $tokens
      */
-    private function rowsRow(array $block, array $theme, string $font, array $tokens, int $inset): string
+    private function rowsRow(array $block, array $theme, array $extra, string $font, array $tokens, int $inset): string
     {
         $items = $this->rowsItems($block, $tokens);
         if ($items === []) {
@@ -374,19 +375,20 @@ final class EmailDesignRenderer
         $descriptionColor = $this->blockColor($block, 'description_color', $theme);
         $ruleColor = $this->blockColor($block, 'divider_color', $theme);
         $last = count($items) - 1;
+        $padding = (int) $extra['row_padding'];
 
         $html = '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;">';
         foreach ($items as $i => [$title, $description]) {
             if ($i > 0 && $block['dividers'] === true) {
                 $html .= '<tr><td height="1" bgcolor="'.$ruleColor.'" style="height:1px;font-size:0;line-height:0;background-color:'.$ruleColor.';">&nbsp;</td></tr>';
             }
-            $html .= '<tr><td align="'.$align.'" style="padding:'.($i === 0 ? 0 : 10).'px 0 '.($i === $last ? 0 : 10).'px 0;text-align:'.$align.';">';
+            $html .= '<tr><td align="'.$align.'" style="padding:'.($i === 0 ? 0 : $padding).'px 0 '.($i === $last ? 0 : $padding).'px 0;text-align:'.$align.';">';
             if ($title !== '') {
-                $html .= '<p style="margin:0;font-family:'.$font.';font-size:'.EmailDesignSchema::ROW_TITLE_SIZE.'px;line-height:1.4;font-weight:bold;color:'.$titleColor.';">'
+                $html .= '<p style="margin:0;font-family:'.$font.';font-size:'.$extra['row_title_size'].'px;line-height:1.4;font-weight:bold;color:'.$titleColor.';">'
                     .$this->escape($title).'</p>';
             }
             if ($description !== '') {
-                $html .= '<p style="margin:'.($title !== '' ? '4px 0 0 0' : '0').';font-family:'.$font.';font-size:'.EmailDesignSchema::ROW_DESCRIPTION_SIZE.'px;line-height:1.5;color:'.$descriptionColor.';">'
+                $html .= '<p style="margin:'.($title !== '' ? '4px 0 0 0' : '0').';font-family:'.$font.';font-size:'.$extra['row_description_size'].'px;line-height:1.5;color:'.$descriptionColor.';">'
                     .$this->escape($description).'</p>';
             }
             $html .= '</td></tr>';
@@ -553,24 +555,34 @@ final class EmailDesignRenderer
      * @param  array<string, mixed>  $block
      * @param  array<string, string>  $tokens
      */
-    private function buttonRow(array $block, string $font, array $tokens, string $background, string $labelColor, int $inset): string
+    private function buttonRow(array $block, string $font, array $tokens, string $background, string $labelColor, string $padding, int $inset): string
     {
         return $this->row(
             $block['align'],
-            $this->buttonTable($block['url'], $this->substitute($block['label'], $tokens), $font, $background, $labelColor, (int) $block['radius'], self::MARGINS[$block['align']]),
+            $this->buttonTable($block['url'], $this->substitute($block['label'], $tokens), $font, $background, $labelColor, (int) $block['radius'], self::MARGINS[$block['align']], $padding),
             $inset,
         );
+    }
+
+    /**
+     * A button's padding: the design's vertical and side padding, 12px and 24px unless set.
+     *
+     * @param  array<string, string|int|bool>  $extra
+     */
+    private function buttonPadding(array $extra): string
+    {
+        return $extra['button_padding_y'].'px '.$extra['button_padding_x'].'px';
     }
 
     /**
      * The bulletproof button itself — a colored cell holding the link — shared by button blocks and the buttons of
      * an actions row.
      */
-    private function buttonTable(string $url, string $label, string $font, string $background, string $labelColor, int $radius, string $margin): string
+    private function buttonTable(string $url, string $label, string $font, string $background, string $labelColor, int $radius, string $margin, string $padding): string
     {
         return '<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;margin:'.$margin.';">'
             .'<tr><td align="center" bgcolor="'.$background.'" style="border-radius:'.$radius.'px;background-color:'.$background.';">'
-            .'<a href="'.$this->escape($url).'" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:12px 24px;'
+            .'<a href="'.$this->escape($url).'" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:'.$padding.';'
             .'font-family:'.$font.';font-size:16px;line-height:20px;font-weight:bold;color:'.$labelColor.';'
             .'text-decoration:none;border-radius:'.$radius.'px;">'
             .$this->escape($label)
@@ -607,9 +619,10 @@ final class EmailDesignRenderer
                     $secondary ? (string) $extra['secondary_text_color'] : $theme['accent_text_color'],
                     (int) $block['radius'],
                     '0',
+                    $this->buttonPadding($extra),
                 );
             } else {
-                $inner = '<a href="'.$this->escape($item['url']).'" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:12px 0;'
+                $inner = '<a href="'.$this->escape($item['url']).'" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:'.$extra['button_padding_y'].'px 0;'
                     .'font-family:'.$font.';font-size:16px;line-height:20px;'.$this->linkCss($theme, $extra).'">'.$this->escape($label).'</a>';
             }
 
@@ -724,7 +737,7 @@ final class EmailDesignRenderer
      * @param  array<string, mixed>  $content
      * @param  array<string, string>  $tokens
      */
-    private function signatureRow(array $signature, array $content, string $font, array $theme, array $tokens, EmailDesignContext $context, int $inset): string
+    private function signatureRow(array $signature, array $content, string $font, array $theme, array $extra, array $tokens, EmailDesignContext $context, int $inset): string
     {
         $lines = $this->signatureLines($signature, $content, $tokens);
         $extras = $this->signatureExtras($signature, $context);
@@ -732,17 +745,20 @@ final class EmailDesignRenderer
             return '';
         }
 
-        $base = 'font-family:'.$font.';font-size:14px;line-height:1.5;color:'.$theme['text_color'].';';
+        // The sign-off and the sender's name at the signature size; every other line at the detail size.
+        $text = fn (int $size): string => 'font-family:'.$font.';font-size:'.$size.'px;line-height:1.5;color:'.$theme['text_color'].';';
+        $lead = $text((int) $extra['signature_size']);
+        $base = $text((int) $extra['signature_detail_size']);
         $html = '';
         $count = count($lines) + count($extras);
-        foreach ($lines as [$text, $isSignOff, $isName]) {
+        foreach ($lines as [$line, $isSignOff, $isName]) {
             $margin = $isSignOff && $count > 1 ? '0 0 8px 0' : '0';
-            $escaped = $this->escape($text);
-            $html .= '<p style="margin:'.$margin.';'.$base.'">'.($isName ? '<strong>'.$escaped.'</strong>' : $escaped).'</p>';
+            $escaped = $this->escape($line);
+            $html .= '<p style="margin:'.$margin.';'.($isSignOff || $isName ? $lead : $base).'">'.($isName ? '<strong>'.$escaped.'</strong>' : $escaped).'</p>';
         }
 
         if (isset($extras['company'])) {
-            $html .= '<p style="margin:0;font-family:'.$font.';font-size:14px;line-height:1.5;color:'.$theme['muted_text_color'].';">'.$this->escape($extras['company']).'</p>';
+            $html .= '<p style="margin:0;font-family:'.$font.';font-size:'.$extra['signature_detail_size'].'px;line-height:1.5;color:'.$theme['muted_text_color'].';">'.$this->escape($extras['company']).'</p>';
         }
 
         $contacts = [];

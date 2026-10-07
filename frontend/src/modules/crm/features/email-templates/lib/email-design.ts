@@ -165,6 +165,15 @@ export const NUMERIC_STYLES = {
   card_radius: [12, [0, 32]],
   card_padding: [24, [8, 40]],
   card_border_width: [0, [0, 4]],
+  card_eyebrow_size: [12, [10, 18]],
+  card_title_size: [20, [14, 32]],
+  row_title_size: [15, [12, 22]],
+  row_description_size: [14, [11, 20]],
+  row_padding: [10, [4, 24]],
+  signature_size: [14, [12, 22]],
+  signature_detail_size: [14, [11, 20]],
+  button_padding_y: [12, [6, 24]],
+  button_padding_x: [24, [12, 48]],
 } as const satisfies Record<NumericStyleKey, readonly [number, readonly [number, number]]>;
 
 export const NUMERIC_STYLE_FIELDS = Object.keys(NUMERIC_STYLES) as NumericStyleKey[];
@@ -180,6 +189,15 @@ export const ADDITIONAL_STYLE_LABELS: Record<AdditionalColorStyleKey | NumericSt
   card_radius: "Card corner radius",
   card_padding: "Card padding",
   card_border_width: "Card border width",
+  card_eyebrow_size: "Card label size",
+  card_title_size: "Card title size",
+  row_title_size: "Row title size",
+  row_description_size: "Row description size",
+  row_padding: "Space between rows",
+  signature_size: "Sign-off and name size",
+  signature_detail_size: "Signature details size",
+  button_padding_y: "Button height padding",
+  button_padding_x: "Button side padding",
 };
 
 /** EmailDesignSchema::BLOCK_COLOR_FALLBACKS — block type → color field → the style it inherits. */

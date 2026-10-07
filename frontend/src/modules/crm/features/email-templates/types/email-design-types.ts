@@ -64,6 +64,17 @@ export type NumericStyles = {
   card_radius?: number;
   card_padding?: number;
   card_border_width?: number;
+  card_eyebrow_size?: number;
+  card_title_size?: number;
+  row_title_size?: number;
+  row_description_size?: number;
+  row_padding?: number;
+  /** The signature's sign-off and sender name. */
+  signature_size?: number;
+  /** The signature's other lines: company, email and phone. */
+  signature_detail_size?: number;
+  button_padding_y?: number;
+  button_padding_x?: number;
 };
 
 /** Optional on/off styles (EmailDesignSchema::BOOLEAN_STYLES). Unset, each takes its default. */

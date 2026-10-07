@@ -956,7 +956,8 @@ gate("E  caret insertion", [
   const phpNumeric = Object.fromEntries(
     [...(php.match(/public const NUMERIC_STYLES = \[([\s\S]*?)\n    \];/)?.[1] ?? "").matchAll(/'(\w+)' => \[([\w:_]+), \[(\d+), (\d+)\]\]/g)].map((m) => [
       m[1],
-      [m[2] === "self::CONTENT_PADDING" ? constant("CONTENT_PADDING") : Number(m[2]), [Number(m[3]), Number(m[4])]],
+      // A default may name another schema constant (self::CONTENT_PADDING, self::CARD_TITLE_SIZE …).
+      [m[2].startsWith("self::") ? constant(m[2].slice(6)) : Number(m[2]), [Number(m[3]), Number(m[4])]],
     ]),
   );
   const headingRange = php.match(/public const HEADING_FONT_SIZE = \[(\d+), (\d+)\];/);
@@ -1001,7 +1002,7 @@ gate("E  caret insertion", [
     ["links are underlined unless turned off, nearest first", effectiveBooleanStyle([], "link_underline") === true && effectiveBooleanStyle([{}, { link_underline: false }], "link_underline") === false && effectiveBooleanStyle([{ link_underline: true }, { link_underline: false }], "link_underline") === true],
     ["turning the underline back on removes the key", same(withBooleanStyle({ link_underline: false }, "link_underline", undefined), {}) && !("style_overrides" in withBooleanOverride({ version: 1, blocks: [], style_overrides: { link_underline: false } }, "link_underline", undefined))],
     ["additional colors match the PHP, in order", same(pairs("ADDITIONAL_COLOR_STYLES"), ADDITIONAL_COLOR_STYLES) && same(Object.keys(pairs("ADDITIONAL_COLOR_STYLES")), Object.keys(ADDITIONAL_COLOR_STYLES))],
-    ["numeric styles, defaults and ranges match the PHP", Object.keys(phpNumeric).length === 5 && same(phpNumeric, NUMERIC_STYLES)],
+    ["numeric styles, defaults and ranges match the PHP", Object.keys(phpNumeric).length === 14 && same(phpNumeric, NUMERIC_STYLES)],
     ["signature switches match", same(listConst("SIGNATURE_OPTIONS"), SIGNATURE_OPTIONS)],
     ["button variants match", same(listConst("BUTTON_VARIANTS"), BUTTON_VARIANTS)],
     ["card blocks match", same(listConst("CARD_BLOCKS"), CARD_BLOCKS)],
