@@ -35,10 +35,19 @@ use App\Modules\Crm\Support\EmailTemplateCatalog;
  * branding reaches every template that did not override it. EmailDesignRenderer::effectiveStyles() is the
  * one implementation of the chain.
  *
+ * ── Additional styles ──
+ * ADDITIONAL_COLOR_STYLES and NUMERIC_STYLES are optional style keys beside SYSTEM_DEFAULTS, inherited through the
+ * same chain. An unset additional color takes the resolved value of the style it names (a card's background is
+ * the page background unless set); an unset number takes its default. `content_padding` is the side inset of
+ * every block row and `container_radius` rounds the email's corners; the card styles shape content cards. A
+ * document that sets none of them renders exactly as it did before they existed.
+ *
  * ── The signature area belongs to the design ──
  * The design decides whether a signature is shown, its sign-off and its alignment; the sender's name, title
  * and phone are filled in at render time. A template may override only the sign-off text: an absent
- * `sign_off` uses the design's, an empty one shows no sign-off line.
+ * `sign_off` uses the design's, an empty one shows no sign-off line. SIGNATURE_OPTIONS, all off unless set,
+ * add the organization's name, the organization's reply address and the sender's own phone number — values the
+ * caller supplies in the render context, never stored in the design.
  *
  * ── The logo is a branding reference ──
  * A logo block records only placement — width, alignment and where it links. Its image and alt text are the
@@ -114,6 +123,9 @@ final class EmailDesignSchema
     /** The signature area's fields, all required. */
     public const SIGNATURE_FIELDS = ['enabled', 'sign_off', 'align'];
 
+    /** The signature area's optional switches, each a boolean that is off when absent. */
+    public const SIGNATURE_OPTIONS = ['show_company', 'show_email', 'show_phone'];
+
     /** A template's content fields. */
     public const CONTENT_FIELDS = ['required' => ['version', 'blocks'], 'optional' => ['preheader', 'sign_off', 'style_overrides']];
 
@@ -171,6 +183,43 @@ final class EmailDesignSchema
     ];
 
     /**
+     * Optional color styles → the resolved style each takes when neither the template, the design nor the
+     * branding sets it.
+     *
+     *   card_background_color  behind a content card       (the page background)
+     *   card_border_color      a content card's border      (the divider color)
+     *   eyebrow_color          a card's small label         (the muted text color)
+     *   secondary_color        a secondary button           (the text color)
+     *   secondary_text_color   a secondary button's label   (the email's background)
+     *
+     * @var array<string, string>
+     */
+    public const ADDITIONAL_COLOR_STYLES = [
+        'card_background_color' => 'background_color',
+        'card_border_color' => 'divider_color',
+        'eyebrow_color' => 'muted_text_color',
+        'secondary_color' => 'text_color',
+        'secondary_text_color' => 'content_background_color',
+    ];
+
+    /**
+     * Optional numeric styles, in px → [default, [min, max]]. Each default is what the renderer did before the
+     * style existed, so leaving it unset changes nothing.
+     *
+     * @var array<string, array{int, array{int, int}}>
+     */
+    public const NUMERIC_STYLES = [
+        'container_radius' => [0, [0, 32]],
+        'content_padding' => [self::CONTENT_PADDING, [8, 48]],
+        'card_radius' => [12, [0, 32]],
+        'card_padding' => [24, [8, 40]],
+        'card_border_width' => [0, [0, 4]],
+    ];
+
+    /** @var list<string> */
+    public const BUTTON_VARIANTS = ['primary', 'secondary'];
+
+    /**
      * Block type → color field → the style it inherits when the block does not set it.
      *
      * @var array<string, array<string, string>>
@@ -195,9 +244,9 @@ final class EmailDesignSchema
      */
     public const BLOCK_FIELDS = [
         'logo' => ['required' => ['type', 'id', 'width', 'align'], 'optional' => ['link_target', 'link_url']],
-        'heading' => ['required' => ['type', 'id', 'level', 'text', 'align'], 'optional' => ['color']],
+        'heading' => ['required' => ['type', 'id', 'level', 'text', 'align'], 'optional' => ['color', 'font_size']],
         'text' => ['required' => ['type', 'id', 'content', 'align', 'font_size'], 'optional' => ['color']],
-        'button' => ['required' => ['type', 'id', 'label', 'url', 'align', 'radius'], 'optional' => ['background_color', 'text_color']],
+        'button' => ['required' => ['type', 'id', 'label', 'url', 'align', 'radius'], 'optional' => ['background_color', 'text_color', 'variant']],
         'image' => ['required' => ['type', 'id', 'asset_id', 'alt', 'width', 'align'], 'optional' => ['link_url']],
         'divider' => ['required' => ['type', 'id', 'thickness'], 'optional' => ['color']],
         'spacer' => ['required' => ['type', 'id', 'height'], 'optional' => []],
@@ -226,6 +275,9 @@ final class EmailDesignSchema
 
     /** Heading level → font size in px. */
     public const HEADING_SIZES = [1 => 28, 2 => 22, 3 => 18];
+
+    /** A heading's own font size, when it sets one instead of its level's. */
+    public const HEADING_FONT_SIZE = [14, 48];
 
     // ── Text limits, in characters ───────────────────────────────────────────────────────────
 
@@ -305,6 +357,16 @@ final class EmailDesignSchema
 
     /** Token values the signature area prints after the sign-off, one line each, in this order. */
     public const SIGNATURE_TOKENS = ['sender_name', 'sender_title', 'sender_phone'];
+
+    /**
+     * Every key a styles object may hold: SYSTEM_DEFAULTS', then the additional colors, then the numbers.
+     *
+     * @return list<string>
+     */
+    public static function styleKeys(): array
+    {
+        return [...array_keys(self::SYSTEM_DEFAULTS), ...array_keys(self::ADDITIONAL_COLOR_STYLES), ...array_keys(self::NUMERIC_STYLES)];
+    }
 
     /** @return list<string> */
     public static function blockTypes(): array

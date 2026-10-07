@@ -31,6 +31,9 @@ final readonly class EmailDesignContext
      *                                                frame loads no remote image, so a preview shows these
      *                                                inline instead. A send context never sets this: email
      *                                                clients get the public URL, and Gmail blocks inline data.
+     * @param  string  $organizationName  the organization's name, for a signature that shows the company
+     * @param  string|null  $organizationEmail  the address replies reach, for a signature that shows an email
+     * @param  string|null  $senderPhone  the sender's own phone number, for a signature that shows a phone
      */
     public function __construct(
         public array $tokens = [],
@@ -40,6 +43,9 @@ final readonly class EmailDesignContext
         public array $brandStyles = [],
         public ?string $brandWebsite = null,
         public array $previewImages = [],
+        public string $organizationName = '',
+        public ?string $organizationEmail = null,
+        public ?string $senderPhone = null,
     ) {}
 
     /**

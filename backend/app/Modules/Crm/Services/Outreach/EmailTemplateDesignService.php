@@ -2,6 +2,7 @@
 
 namespace App\Modules\Crm\Services\Outreach;
 
+use App\Models\Org;
 use App\Models\User;
 use App\Modules\Crm\Models\EmailDesign;
 use App\Modules\Crm\Models\EmailTemplate;
@@ -11,6 +12,9 @@ use App\Modules\Crm\Support\EmailDesign\EmailDesignRenderer;
 use App\Modules\Crm\Support\EmailDesign\EmailDesignSchema;
 use App\Modules\Crm\Support\EmailDesign\EmailDesignValidator;
 use App\Modules\Crm\Support\EmailTemplateCatalog;
+use App\Support\CurrentOrg;
+use App\Support\Mail\Module;
+use App\Support\Mail\ModuleSenderResolver;
 
 /**
  * Designed email templates: whether a design layout or a template's content may be saved, the plain-text
@@ -67,11 +71,15 @@ class EmailTemplateDesignService
     /** A realistic organization website, so a logo's default link is measured too. */
     private const STAND_IN_WEBSITE = 'https://www.organization-website.example/';
 
+    /** The sample sender's phone in Settings previews and the Gmail guard's measurement. */
+    private const SAMPLE_SENDER_PHONE = '+63 917 123 4567';
+
     public function __construct(
         private readonly EmailDesignValidator $validator,
         private readonly EmailDesignRenderer $renderer,
         private readonly TemplateRenderer $templates,
         private readonly EmailBrandingService $branding,
+        private readonly ModuleSenderResolver $senders,
     ) {}
 
     /**
@@ -174,6 +182,9 @@ class EmailTemplateDesignService
             logoUrl: sprintf(self::STAND_IN_ASSET_URL, self::STAND_IN_LOGO_ID),
             logoAlt: 'Company logo',
             brandWebsite: self::STAND_IN_WEBSITE,
+            organizationName: $this->organizationName(),
+            organizationEmail: $this->organizationEmail(),
+            senderPhone: self::SAMPLE_SENDER_PHONE,
         )));
     }
 
@@ -212,13 +223,17 @@ class EmailTemplateDesignService
             logoUrl: $logo['url'] ?? null,
             logoAlt: $logo['alt'] ?? '',
             previewImages: $logo === null ? [] : [$logo['url'] => $logo['png']],
+            organizationName: $this->organizationName(),
+            organizationEmail: $this->organizationEmail(),
+            senderPhone: self::SAMPLE_SENDER_PHONE,
         );
     }
 
     /**
      * The context a REAL send renders with — the preview's context with real values in place of samples.
      *
-     * THE ONLY DIFFERENCE FROM {@see sampleContext()} IS THE TOKENS, and that is the whole point: if the
+     * THE ONLY DIFFERENCES FROM {@see sampleContext()} ARE THE TOKENS AND THE SENDER'S PHONE (the sample
+     * sender's stands in for a preview), and that is the whole point: if the
      * two contexts diverged anywhere else, the preview would stop being a promise about the email. Logo
      * resolution is the same call on the same branding, `assetUrls` is empty in both until image uploads
      * exist, and `brandStyles`/`brandWebsite` are empty in both because `crm_email_brandings` stores only
@@ -237,6 +252,9 @@ class EmailTemplateDesignService
             logoUrl: $logo['url'] ?? null,
             logoAlt: $logo['alt'] ?? '',
             previewImages: [],
+            organizationName: $this->organizationName(),
+            organizationEmail: $this->organizationEmail(),
+            senderPhone: $sender?->phone,
         );
     }
 
@@ -445,6 +463,21 @@ class EmailTemplateDesignService
     private function keyed(string $field, array $problem): array
     {
         return ['key' => $problem['path'] === '' ? $field : $field.'.'.$problem['path'], 'message' => $problem['message']];
+    }
+
+    /** The current organization's name, for a signature that shows the company. */
+    private function organizationName(): string
+    {
+        return trim((string) Org::query()->whereKey(CurrentOrg::id())->value('name'));
+    }
+
+    /**
+     * The organization's CRM mailbox: the From address every CRM email is sent from, which is also where replies
+     * land (no Reply-To is applied to CRM mail; see ModuleSender).
+     */
+    private function organizationEmail(): string
+    {
+        return $this->senders->for(Module::Crm)->address;
     }
 
     /** @return array<string, string> */
