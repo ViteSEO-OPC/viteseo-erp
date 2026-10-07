@@ -224,12 +224,13 @@ final class EmailDesignRenderer
      * The optional additional styles an email renders with, through the same chain as {@see effectiveStyles()}:
      * the template's override, the design's style, the context's brand style, then — for a color — the resolved
      * style EmailDesignSchema::ADDITIONAL_COLOR_STYLES names, and for a number its default. A color that is not a
-     * six-digit hex, or a number that is not a whole number in its range, is skipped at every step.
+     * six-digit hex, a number that is not a whole number in its range, or a switch that is not a boolean, is skipped
+     * at every step.
      *
      * @param  array<string, mixed>  $designStyles
      * @param  array<string, mixed>  $overrides
      * @param  array<string, string>  $theme  the effectiveStyles() of the same render
-     * @return array<string, string|int>
+     * @return array<string, string|int|bool>
      */
     public function additionalStyles(array $designStyles, array $overrides, EmailDesignContext $context, array $theme): array
     {
@@ -244,6 +245,12 @@ final class EmailDesignRenderer
             $styles[$key] = $this->numericStyle($overrides[$key] ?? null, $range)
                 ?? $this->numericStyle($designStyles[$key] ?? null, $range)
                 ?? $this->numericStyle($context->brandStyles[$key] ?? null, $range)
+                ?? $default;
+        }
+        foreach (EmailDesignSchema::BOOLEAN_STYLES as $key => $default) {
+            $styles[$key] = $this->booleanStyle($overrides[$key] ?? null)
+                ?? $this->booleanStyle($designStyles[$key] ?? null)
+                ?? $this->booleanStyle($context->brandStyles[$key] ?? null)
                 ?? $default;
         }
 
@@ -264,14 +271,15 @@ final class EmailDesignRenderer
         return match ($block['type']) {
             'logo' => $this->imageRow($context->logoUrl, $block['width'], $this->cleanValue($context->logoAlt), $block['align'], $this->logoLink($block, $context), $context, $inset),
             'heading' => $this->headingRow($block, $font, $tokens, $this->blockColor($block, 'color', $theme), $inset),
-            'text' => $this->documentRow($block, $font, $this->blockColor($block, 'color', $theme), $theme['link_color'], $tokens, 12, $inset),
+            'text' => $this->documentRow($block, $font, $this->blockColor($block, 'color', $theme), $this->linkCss($theme, $extra), $tokens, 12, $inset),
             'button' => $this->buttonRow($block, $font, $tokens, $this->buttonColor($block, 'background_color', $theme, $extra), $this->buttonColor($block, 'text_color', $theme, $extra), $inset),
             'image' => $this->imageRow($context->assetUrls[$block['asset_id']] ?? null, $block['width'], $block['alt'], $block['align'], $block['link_url'] ?? null, $context, $inset),
             'divider' => $this->dividerRow($block, $this->blockColor($block, 'color', $theme), $inset),
             'spacer' => $this->spacerRow($block['height']),
-            'footer' => $this->documentRow($block, $font, $this->blockColor($block, 'color', $theme), $theme['link_color'], $tokens, 8, $inset),
+            'footer' => $this->documentRow($block, $font, $this->blockColor($block, 'color', $theme), $this->linkCss($theme, $extra), $tokens, 8, $inset),
             'card' => $this->cardRow($block, $theme, $extra, $font, $tokens, $context, $inset),
             'rows' => $this->rowsRow($block, $theme, $font, $tokens, $inset),
+            'actions' => $this->actionsRow($block, $theme, $extra, $font, $tokens, $inset),
             // Unreachable for a validated document, and deliberately renders nothing.
             default => '',
         };
@@ -449,7 +457,7 @@ final class EmailDesignRenderer
      * @param  array<string, mixed>  $block
      * @param  array<string, string>  $tokens
      */
-    private function documentRow(array $block, string $font, string $color, string $linkColor, array $tokens, int $gap, int $inset): string
+    private function documentRow(array $block, string $font, string $color, string $linkCss, array $tokens, int $gap, int $inset): string
     {
         $base = 'font-family:'.$font.';font-size:'.(int) $block['font_size'].'px;line-height:1.5;color:'.$color.';';
         $nodes = $block['content']['content'];
@@ -459,8 +467,8 @@ final class EmailDesignRenderer
         foreach ($nodes as $i => $node) {
             $margin = $i === $last ? '0' : '0 0 '.$gap.'px 0';
             $html .= $node['type'] === 'paragraph'
-                ? '<p style="margin:'.$margin.';'.$base.'">'.$this->inlineHtml($node, $linkColor, $tokens, '&nbsp;').'</p>'
-                : $this->listHtml($node, $margin, $base, $linkColor, $tokens);
+                ? '<p style="margin:'.$margin.';'.$base.'">'.$this->inlineHtml($node, $linkCss, $tokens, '&nbsp;').'</p>'
+                : $this->listHtml($node, $margin, $base, $linkCss, $tokens);
         }
 
         return $this->row($block['align'], $html, $inset);
@@ -470,7 +478,7 @@ final class EmailDesignRenderer
      * @param  array<string, mixed>  $list
      * @param  array<string, string>  $tokens
      */
-    private function listHtml(array $list, string $margin, string $base, string $linkColor, array $tokens): string
+    private function listHtml(array $list, string $margin, string $base, string $linkCss, array $tokens): string
     {
         $tag = $list['type'] === 'orderedList' ? 'ol' : 'ul';
         $start = $tag === 'ol' ? $this->listStart($list) : 1;
@@ -481,10 +489,10 @@ final class EmailDesignRenderer
             $afterParagraph = false;
             foreach ($item['content'] as $child) {
                 if ($child['type'] === 'paragraph') {
-                    $inner .= ($afterParagraph ? '<br>' : '').$this->inlineHtml($child, $linkColor, $tokens, '');
+                    $inner .= ($afterParagraph ? '<br>' : '').$this->inlineHtml($child, $linkCss, $tokens, '');
                     $afterParagraph = true;
                 } else {
-                    $inner .= $this->listHtml($child, '4px 0 0 0', $base, $linkColor, $tokens);
+                    $inner .= $this->listHtml($child, '4px 0 0 0', $base, $linkCss, $tokens);
                     $afterParagraph = false;
                 }
             }
@@ -498,11 +506,11 @@ final class EmailDesignRenderer
      * @param  array<string, mixed>  $paragraph
      * @param  array<string, string>  $tokens
      */
-    private function inlineHtml(array $paragraph, string $linkColor, array $tokens, string $empty): string
+    private function inlineHtml(array $paragraph, string $linkCss, array $tokens, string $empty): string
     {
         $html = '';
         foreach ($paragraph['content'] ?? [] as $node) {
-            $html .= $node['type'] === 'hardBreak' ? '<br>' : $this->textHtml($node, $linkColor, $tokens);
+            $html .= $node['type'] === 'hardBreak' ? '<br>' : $this->textHtml($node, $linkCss, $tokens);
         }
 
         return $html === '' ? $empty : $html;
@@ -512,7 +520,7 @@ final class EmailDesignRenderer
      * @param  array<string, mixed>  $node
      * @param  array<string, string>  $tokens
      */
-    private function textHtml(array $node, string $linkColor, array $tokens): string
+    private function textHtml(array $node, string $linkCss, array $tokens): string
     {
         $present = [];
         $href = null;
@@ -535,7 +543,7 @@ final class EmailDesignRenderer
 
         return $href === null
             ? $html
-            : '<a href="'.$this->escape($href).'" target="_blank" rel="noopener noreferrer" style="color:'.$linkColor.';text-decoration:underline;">'.$html.'</a>';
+            : '<a href="'.$this->escape($href).'" target="_blank" rel="noopener noreferrer" style="'.$linkCss.'">'.$html.'</a>';
     }
 
     /**
@@ -547,19 +555,101 @@ final class EmailDesignRenderer
      */
     private function buttonRow(array $block, string $font, array $tokens, string $background, string $labelColor, int $inset): string
     {
-        $radius = (int) $block['radius'];
-
         return $this->row(
             $block['align'],
-            '<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;margin:'.self::MARGINS[$block['align']].';">'
-            .'<tr><td align="center" bgcolor="'.$background.'" style="border-radius:'.$radius.'px;background-color:'.$background.';">'
-            .'<a href="'.$this->escape($block['url']).'" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:12px 24px;'
-            .'font-family:'.$font.';font-size:16px;line-height:20px;font-weight:bold;color:'.$labelColor.';'
-            .'text-decoration:none;border-radius:'.$radius.'px;">'
-            .$this->escape($this->substitute($block['label'], $tokens))
-            .'</a></td></tr></table>',
+            $this->buttonTable($block['url'], $this->substitute($block['label'], $tokens), $font, $background, $labelColor, (int) $block['radius'], self::MARGINS[$block['align']]),
             $inset,
         );
+    }
+
+    /**
+     * The bulletproof button itself — a colored cell holding the link — shared by button blocks and the buttons of
+     * an actions row.
+     */
+    private function buttonTable(string $url, string $label, string $font, string $background, string $labelColor, int $radius, string $margin): string
+    {
+        return '<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;margin:'.$margin.';">'
+            .'<tr><td align="center" bgcolor="'.$background.'" style="border-radius:'.$radius.'px;background-color:'.$background.';">'
+            .'<a href="'.$this->escape($url).'" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:12px 24px;'
+            .'font-family:'.$font.';font-size:16px;line-height:20px;font-weight:bold;color:'.$labelColor.';'
+            .'text-decoration:none;border-radius:'.$radius.'px;">'
+            .$this->escape($label)
+            .'</a></td></tr></table>';
+    }
+
+    /**
+     * A row of calls to action side by side: each button or link an inline block, so they share a line and wrap
+     * onto the next on a narrow screen without a media query. Outlook desktop ignores inline blocks, so a table
+     * only it reads keeps them on one line there. A link is as tall as a button, so the two line up.
+     *
+     * @param  array<string, mixed>  $block
+     * @param  array<string, string>  $theme
+     * @param  array<string, string|int|bool>  $extra
+     * @param  array<string, string>  $tokens
+     */
+    private function actionsRow(array $block, array $theme, array $extra, string $font, array $tokens, int $inset): string
+    {
+        $items = $this->actionItems($block, $tokens);
+        if ($items === []) {
+            return '';
+        }
+
+        $align = $this->escape($block['align']);
+        $html = '<!--[if mso]><table role="presentation" cellpadding="0" cellspacing="0" border="0" align="'.$align.'"><tr><![endif]-->';
+        foreach ($items as [$item, $label]) {
+            if ($item['kind'] === 'button') {
+                $secondary = ($item['variant'] ?? null) === 'secondary';
+                $inner = $this->buttonTable(
+                    $item['url'],
+                    $label,
+                    $font,
+                    $secondary ? (string) $extra['secondary_color'] : $theme['accent_color'],
+                    $secondary ? (string) $extra['secondary_text_color'] : $theme['accent_text_color'],
+                    (int) $block['radius'],
+                    '0',
+                );
+            } else {
+                $inner = '<a href="'.$this->escape($item['url']).'" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:12px 0;'
+                    .'font-family:'.$font.';font-size:16px;line-height:20px;'.$this->linkCss($theme, $extra).'">'.$this->escape($label).'</a>';
+            }
+
+            $html .= '<!--[if mso]><td style="padding:0 6px;"><![endif]-->'
+                .'<div style="display:inline-block;vertical-align:middle;margin:4px 6px;">'.$inner.'</div>'
+                .'<!--[if mso]></td><![endif]-->';
+        }
+
+        return $this->row($block['align'], $html.'<!--[if mso]></tr></table><![endif]-->', $inset);
+    }
+
+    /**
+     * An actions block's items with their labels filled in, leaving out any whose label is blank once filled in.
+     *
+     * @param  array<string, mixed>  $block
+     * @param  array<string, string>  $tokens
+     * @return list<array{array<string, mixed>, string}>
+     */
+    private function actionItems(array $block, array $tokens): array
+    {
+        $items = [];
+        foreach ($block['items'] as $item) {
+            $label = trim($this->substitute($item['label'], $tokens));
+            if ($label !== '') {
+                $items[] = [$item, $label];
+            }
+        }
+
+        return $items;
+    }
+
+    /**
+     * How a link is drawn: the link color, underlined unless the design's `link_underline` turns it off.
+     *
+     * @param  array<string, string>  $theme
+     * @param  array<string, string|int|bool>  $extra
+     */
+    private function linkCss(array $theme, array $extra): string
+    {
+        return 'color:'.$theme['link_color'].';text-decoration:'.($extra['link_underline'] === false ? 'none' : 'underline').';';
     }
 
     /**
@@ -754,6 +844,7 @@ final class EmailDesignRenderer
                 : ($block['alt'] === '' ? $block['link_url'] : $block['alt'].': '.$block['link_url']),
             'divider' => self::TEXT_RULE,
             'card' => $this->cardText($block, $tokens),
+            'actions' => implode("\n", array_map(fn (array $pair): string => $pair[1].': '.$pair[0]['url'], $this->actionItems($block, $tokens))),
             'rows' => implode("\n\n", array_map(
                 fn (array $item): string => trim($item[0]."\n".$item[1], "\n"),
                 $this->rowsItems($block, $tokens),
@@ -986,6 +1077,12 @@ final class EmailDesignRenderer
 
         return $this->styleValue($field, $block[$field] ?? null)
             ?? (string) $extra[$field === 'background_color' ? 'secondary_color' : 'secondary_text_color'];
+    }
+
+    /** A usable on/off style — a boolean — or null. */
+    private function booleanStyle(mixed $value): ?bool
+    {
+        return is_bool($value) ? $value : null;
     }
 
     /**

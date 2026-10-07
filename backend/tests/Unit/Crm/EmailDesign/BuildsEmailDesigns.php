@@ -89,6 +89,7 @@ trait BuildsEmailDesigns
             'footer' => $this->footer($overrides),
             'card' => $this->card($overrides),
             'rows' => $this->rows($overrides),
+            'actions' => $this->actions($overrides),
             default => throw new LogicException("There is no {$type} block."),
         };
     }
@@ -202,6 +203,21 @@ trait BuildsEmailDesigns
             'title_color' => '#18181B',
             'description_color' => '#71717A',
             'divider_color' => '#E4E4E7',
+        ], ...$overrides];
+    }
+
+    /** @param  array<string, mixed>  $overrides */
+    protected function actions(array $overrides = []): array
+    {
+        return [...[
+            'type' => 'actions',
+            'id' => 'actions',
+            'items' => [
+                ['kind' => 'button', 'label' => 'Contact us', 'url' => 'mailto:hello@viteseo.ph', 'variant' => 'secondary'],
+                ['kind' => 'link', 'label' => 'See our portfolio ›', 'url' => 'https://viteseo.ph/work'],
+            ],
+            'align' => 'center',
+            'radius' => 24,
         ], ...$overrides];
     }
 

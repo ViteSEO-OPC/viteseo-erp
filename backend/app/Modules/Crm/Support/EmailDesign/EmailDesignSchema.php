@@ -51,6 +51,16 @@ use App\Modules\Crm\Support\EmailTemplateCatalog;
  * `rows` is a list of `items`, each a `title` and an optional `description` — a quotation's lines, a package's
  * features — drawn one under another, optionally with a rule between them. Text only: placeholders yes, markup no.
  *
+ * ── Actions ──
+ * `actions` is a row of up to MAX_ACTION_ITEMS calls to action side by side — a button beside a "See more ›"
+ * link, two buttons — each `{kind: button|link, label, url}`, a button optionally `variant: secondary`. They sit
+ * on one line and wrap onto the next on a narrow screen; Outlook desktop keeps them on one line. Links follow the
+ * design's link color and `link_underline`.
+ *
+ * ── Link underline ──
+ * BOOLEAN_STYLES holds `link_underline`: whether links in text, footers and actions are underlined. Unset, they
+ * are, as they always have been.
+ *
  * ── The signature area belongs to the design ──
  * The design decides whether a signature is shown, its sign-off and its alignment; the sender's name, title
  * and phone are filled in at render time. A template may override only the sign-off text: an absent
@@ -160,8 +170,8 @@ final class EmailDesignSchema
      */
     public const REGION_BLOCKS = [
         'header' => ['logo', 'heading', 'text', 'button', 'image', 'divider', 'spacer'],
-        'footer' => ['footer', 'text', 'logo', 'button', 'image', 'divider', 'spacer'],
-        'blocks' => ['heading', 'text', 'button', 'image', 'divider', 'spacer', 'card', 'rows'],
+        'footer' => ['footer', 'text', 'logo', 'button', 'image', 'divider', 'spacer', 'actions'],
+        'blocks' => ['heading', 'text', 'button', 'image', 'divider', 'spacer', 'card', 'rows', 'actions'],
     ];
 
     /**
@@ -170,7 +180,7 @@ final class EmailDesignSchema
      *
      * @var list<string>
      */
-    public const CARD_BLOCKS = ['heading', 'text', 'rows', 'divider', 'button', 'spacer'];
+    public const CARD_BLOCKS = ['heading', 'text', 'rows', 'divider', 'button', 'spacer', 'actions'];
 
     // ── Styles ───────────────────────────────────────────────────────────────────────────────
 
@@ -233,8 +243,27 @@ final class EmailDesignSchema
         'card_border_width' => [0, [0, 4]],
     ];
 
+    /**
+     * Optional on/off styles → their default, which is what the renderer did before the style existed.
+     *
+     *   link_underline   links in text, footers and actions are underlined
+     *
+     * @var array<string, bool>
+     */
+    public const BOOLEAN_STYLES = [
+        'link_underline' => true,
+    ];
+
     /** @var list<string> */
     public const BUTTON_VARIANTS = ['primary', 'secondary'];
+
+    /** @var list<string> */
+    public const ACTION_KINDS = ['button', 'link'];
+
+    /** The fields every action item has; a button may also have a `variant`. */
+    public const ACTION_ITEM_REQUIRED = ['kind', 'label', 'url'];
+
+    public const ACTION_BUTTON_OPTIONAL = ['variant'];
 
     /**
      * Block type → color field → the style it inherits when the block does not set it.
@@ -272,6 +301,7 @@ final class EmailDesignSchema
         'footer' => ['required' => ['type', 'id', 'content', 'align', 'font_size'], 'optional' => ['color']],
         'card' => ['required' => ['type', 'id', 'blocks', 'align'], 'optional' => ['eyebrow', 'title', 'background_color', 'border_color']],
         'rows' => ['required' => ['type', 'id', 'items', 'align', 'dividers'], 'optional' => ['title_color', 'description_color', 'divider_color']],
+        'actions' => ['required' => ['type', 'id', 'items', 'align', 'radius'], 'optional' => []],
     ];
 
     /** A rows item's fields. */
@@ -334,6 +364,9 @@ final class EmailDesignSchema
 
     /** Items one rows block may hold. */
     public const MAX_ROWS_ITEMS = 30;
+
+    /** Calls to action one actions block may hold side by side. */
+    public const MAX_ACTION_ITEMS = 3;
 
     /** A card's title and a row's title and description, in px. */
     public const CARD_EYEBROW_SIZE = 12;
@@ -406,13 +439,13 @@ final class EmailDesignSchema
     public const SIGNATURE_TOKENS = ['sender_name', 'sender_title', 'sender_phone'];
 
     /**
-     * Every key a styles object may hold: SYSTEM_DEFAULTS', then the additional colors, then the numbers.
+     * Every key a styles object may hold: SYSTEM_DEFAULTS', then the additional colors, the numbers and the switches.
      *
      * @return list<string>
      */
     public static function styleKeys(): array
     {
-        return [...array_keys(self::SYSTEM_DEFAULTS), ...array_keys(self::ADDITIONAL_COLOR_STYLES), ...array_keys(self::NUMERIC_STYLES)];
+        return [...array_keys(self::SYSTEM_DEFAULTS), ...array_keys(self::ADDITIONAL_COLOR_STYLES), ...array_keys(self::NUMERIC_STYLES), ...array_keys(self::BOOLEAN_STYLES)];
     }
 
     /** @return list<string> */

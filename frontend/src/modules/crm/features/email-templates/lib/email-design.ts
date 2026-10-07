@@ -12,7 +12,9 @@
  * re-validates every preview and save regardless.
  */
 import type {
+  ActionItem,
   AdditionalColorStyleKey,
+  BooleanStyleKey,
   ButtonBlock,
   ButtonVariant,
   CardBlock,
@@ -49,6 +51,21 @@ export const MAX_CARD_BLOCKS = 20;
 
 /** Items one rows block may hold. */
 export const MAX_ROWS_ITEMS = 30;
+
+/** Calls to action one actions block may hold — EmailDesignSchema::MAX_ACTION_ITEMS. */
+export const MAX_ACTION_ITEMS = 3;
+
+/** EmailDesignSchema::ACTION_KINDS. */
+export const ACTION_KINDS: readonly ActionItem["kind"][] = ["button", "link"];
+
+/** The fields every action item has (ACTION_ITEM_REQUIRED); a button may also have these (ACTION_BUTTON_OPTIONAL). */
+export const ACTION_ITEM_REQUIRED = ["kind", "label", "url"] as const;
+export const ACTION_BUTTON_OPTIONAL = ["variant"] as const;
+
+/** EmailDesignSchema::BOOLEAN_STYLES — optional on/off styles → their default. */
+export const BOOLEAN_STYLES = { link_underline: true } as const satisfies Record<BooleanStyleKey, boolean>;
+
+export const BOOLEAN_STYLE_LABELS: Record<BooleanStyleKey, string> = { link_underline: "Underline links" };
 
 export const FONT_OPTIONS: readonly { value: DesignFont; label: string }[] = [
   { value: "arial", label: "Arial" },
@@ -207,12 +224,12 @@ export const CONTENT_FIELDS: { required: readonly (keyof TemplateContent)[]; opt
 /** Each part of an email → the blocks it may hold — EmailDesignSchema::REGION_BLOCKS. */
 export const REGION_BLOCKS: Record<DesignRegion, readonly DesignBlockType[]> = {
   header: ["logo", "heading", "text", "button", "image", "divider", "spacer"],
-  footer: ["footer", "text", "logo", "button", "image", "divider", "spacer"],
-  blocks: ["heading", "text", "button", "image", "divider", "spacer", "card", "rows"],
+  footer: ["footer", "text", "logo", "button", "image", "divider", "spacer", "actions"],
+  blocks: ["heading", "text", "button", "image", "divider", "spacer", "card", "rows", "actions"],
 };
 
 /** The blocks a card may hold — EmailDesignSchema::CARD_BLOCKS. Never a card, never an image. */
-export const CARD_BLOCKS: readonly DesignBlockType[] = ["heading", "text", "rows", "divider", "button", "spacer"];
+export const CARD_BLOCKS: readonly DesignBlockType[] = ["heading", "text", "rows", "divider", "button", "spacer", "actions"];
 
 /** A rows item's fields — EmailDesignSchema::ROWS_ITEM_FIELDS. */
 export const ROWS_ITEM_FIELDS = { required: ["title"], optional: ["description"] } as const;
@@ -231,6 +248,7 @@ export const BLOCK_FIELDS: Record<DesignBlockType, { required: readonly string[]
   footer: { required: ["type", "id", "content", "align", "font_size"], optional: ["color"] },
   card: { required: ["type", "id", "blocks", "align"], optional: ["eyebrow", "title", "background_color", "border_color"] },
   rows: { required: ["type", "id", "items", "align", "dividers"], optional: ["title_color", "description_color", "divider_color"] },
+  actions: { required: ["type", "id", "items", "align", "radius"], optional: [] },
 };
 
 export const BLOCK_LABELS: Record<DesignBlockType, string> = {
@@ -244,6 +262,7 @@ export const BLOCK_LABELS: Record<DesignBlockType, string> = {
   footer: "Footer text",
   card: "Card",
   rows: "Rows",
+  actions: "Actions",
 };
 
 /**
@@ -252,8 +271,8 @@ export const BLOCK_LABELS: Record<DesignBlockType, string> = {
  */
 export const ADDABLE_BLOCKS: Record<DesignRegion, readonly DesignBlockType[]> = {
   header: ["logo", "heading", "text", "button", "divider", "spacer"],
-  footer: ["footer", "text", "logo", "button", "divider", "spacer"],
-  blocks: ["heading", "text", "button", "divider", "spacer", "card", "rows"],
+  footer: ["footer", "text", "logo", "button", "divider", "spacer", "actions"],
+  blocks: ["heading", "text", "button", "divider", "spacer", "card", "rows", "actions"],
 };
 
 /** What "Add block" offers inside a card: everything a card may hold. */
@@ -271,6 +290,7 @@ export const BLOCK_CONTROL_FIELDS: Record<DesignBlockType, readonly string[]> = 
   footer: ["content", "align", "font_size", "color"],
   card: ["eyebrow", "title", "align", "background_color", "border_color", "blocks"],
   rows: ["items", "align", "dividers", "title_color", "description_color", "divider_color"],
+  actions: ["items", "align", "radius"],
 };
 
 // ── Style inheritance ─────────────────────────────────────────────────────────────────────────
@@ -296,6 +316,26 @@ export function effectiveAdditionalColor(chain: readonly DesignStyles[], key: Ad
     if (value !== undefined) return value;
   }
   return effectiveStyle(chain, ADDITIONAL_COLOR_STYLES[key]);
+}
+
+/** An on/off style's value: the first of `chain` that sets it, otherwise its default. */
+export function effectiveBooleanStyle(chain: readonly DesignStyles[], key: BooleanStyleKey): boolean {
+  for (const styles of chain) {
+    const value = styles[key];
+    if (value !== undefined) return value;
+  }
+  return BOOLEAN_STYLES[key];
+}
+
+/** `styles` with an on/off style set, or removed — back to its default — when `value` is undefined. */
+export function withBooleanStyle(styles: DesignStyles, key: BooleanStyleKey, value: boolean | undefined): DesignStyles {
+  const next: DesignStyles = { ...styles };
+  if (value === undefined) {
+    delete next[key];
+  } else {
+    next[key] = value;
+  }
+  return next;
 }
 
 /** An optional size's value in px: the first of `chain` that sets it, otherwise its default. */
@@ -356,6 +396,11 @@ function withOverrides(content: TemplateContent, overrides: DesignStyles): Templ
     next.style_overrides = overrides;
   }
   return next;
+}
+
+/** Template content with one on/off override set or cleared. */
+export function withBooleanOverride(content: TemplateContent, key: BooleanStyleKey, value: boolean | undefined): TemplateContent {
+  return withOverrides(content, withBooleanStyle(content.style_overrides ?? {}, key, value));
 }
 
 /** Template content with one size override set or cleared. */
@@ -457,6 +502,17 @@ export function createBlock(type: DesignBlockType, id: string): DesignBlock {
       return { type, id, content: emptyRichText(), align: "center", font_size: 12 };
     case "rows":
       return { type, id, items: [{ title: "Item", description: "What it includes." }], align: "left", dividers: true };
+    case "actions":
+      return {
+        type,
+        id,
+        items: [
+          { kind: "button", label: "Get in touch", url: "" },
+          { kind: "link", label: "Learn more ›", url: "" },
+        ],
+        align: "center",
+        radius: 24,
+      };
     case "card":
       // A card starts with one rows block inside, its id derived from the card's — unique, as the card's is.
       return {
@@ -696,6 +752,8 @@ export function blockSummary(block: DesignBlock): string {
       return `${block.height}px of space`;
     case "rows":
       return block.items.length === 1 ? `1 row · ${block.items[0].title}` : `${block.items.length} rows`;
+    case "actions":
+      return block.items.map((item) => item.label).join(" · ");
     case "card":
       return [block.title || block.eyebrow, `${block.blocks.length} ${block.blocks.length === 1 ? "block" : "blocks"} inside`].filter(Boolean).join(" · ");
   }
