@@ -98,6 +98,9 @@ const SIGNATURE_SWITCHES: readonly { key: SignatureOption; label: string; descri
 /** The design-wide sizes and the colors cards and secondary buttons use, grouped as the editor shows them. */
 const LAYOUT_SIZES: readonly NumericStyleKey[] = ["content_padding", "container_radius"];
 const CARD_SIZES: readonly NumericStyleKey[] = ["card_padding", "card_radius", "card_border_width"];
+const CARD_TEXT_SIZES: readonly NumericStyleKey[] = ["card_eyebrow_size", "card_title_size", "row_title_size", "row_description_size", "row_padding"];
+const BUTTON_SIZES: readonly NumericStyleKey[] = ["button_padding_y", "button_padding_x"];
+const SIGNATURE_SIZES: readonly NumericStyleKey[] = ["signature_size", "signature_detail_size"];
 const CARD_COLORS: readonly AdditionalColorStyleKey[] = ["card_background_color", "card_border_color", "eyebrow_color"];
 const SECONDARY_COLORS: readonly AdditionalColorStyleKey[] = ["secondary_color", "secondary_text_color"];
 
@@ -379,9 +382,18 @@ export function EmailDesignEditor({ design, tokens, onClose }: Props) {
                 <div className="flex flex-wrap gap-4">{CARD_COLORS.map(additionalColorControl)}</div>
                 <div className="grid gap-4 sm:grid-cols-2">{CARD_SIZES.map(sizeControl)}</div>
                 <div className="flex flex-col gap-1">
-                  <h4 className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">Secondary buttons</h4>
-                  <p className="text-xs text-muted-foreground">Buttons set to the Secondary style, such as a quieter second call to action.</p>
+                  <h4 className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">Card and row text</h4>
+                  <p className="text-xs text-muted-foreground">Text sizes of a card&apos;s label and title, and of rows, with the space between rows.</p>
                 </div>
+                <div className="grid gap-4 sm:grid-cols-2">{CARD_TEXT_SIZES.map(sizeControl)}</div>
+                <div className="flex flex-col gap-1">
+                  <h4 className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">Buttons</h4>
+                  <p className="text-xs text-muted-foreground">
+                    The size of every button, including those in action rows. Secondary colors are for buttons set to the
+                    Secondary style, such as a quieter second call to action.
+                  </p>
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2">{BUTTON_SIZES.map(sizeControl)}</div>
                 <div className="flex flex-wrap gap-4">{SECONDARY_COLORS.map(additionalColorControl)}</div>
               </section>
 
@@ -439,6 +451,7 @@ export function EmailDesignEditor({ design, tokens, onClose }: Props) {
                       disabled={pending}
                       error={problems.fields["signature.align"]}
                     />
+                    <div className="grid gap-4 sm:grid-cols-2">{SIGNATURE_SIZES.map(sizeControl)}</div>
                     <div className="flex flex-col gap-3">
                       {SIGNATURE_SWITCHES.map((option) => (
                         <SwitchControl

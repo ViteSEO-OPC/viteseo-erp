@@ -39,7 +39,9 @@ use App\Modules\Crm\Support\EmailTemplateCatalog;
  * ADDITIONAL_COLOR_STYLES and NUMERIC_STYLES are optional style keys beside SYSTEM_DEFAULTS, inherited through the
  * same chain. An unset additional color takes the resolved value of the style it names (a card's background is
  * the page background unless set); an unset number takes its default. `content_padding` is the side inset of
- * every block row and `container_radius` rounds the email's corners; the card styles shape content cards. A
+ * every block row and `container_radius` rounds the email's corners; the card styles shape content cards; the
+ * text-size styles size a card's label and title, a row's title and description and the signature (its sign-off
+ * and name, then its details), `row_padding` spaces rows, and `button_padding_y`/`_x` size every button. A
  * document that sets none of them renders exactly as it did before they existed.
  *
  * ── Cards and rows ──
@@ -241,6 +243,16 @@ final class EmailDesignSchema
         'card_radius' => [12, [0, 32]],
         'card_padding' => [24, [8, 40]],
         'card_border_width' => [0, [0, 4]],
+        // Text sizes and spacing of cards, rows, the signature and buttons — what each was fixed at before.
+        'card_eyebrow_size' => [self::CARD_EYEBROW_SIZE, [10, 18]],
+        'card_title_size' => [self::CARD_TITLE_SIZE, [14, 32]],
+        'row_title_size' => [self::ROW_TITLE_SIZE, [12, 22]],
+        'row_description_size' => [self::ROW_DESCRIPTION_SIZE, [11, 20]],
+        'row_padding' => [10, [4, 24]],
+        'signature_size' => [14, [12, 22]],
+        'signature_detail_size' => [14, [11, 20]],
+        'button_padding_y' => [12, [6, 24]],
+        'button_padding_x' => [24, [12, 48]],
     ];
 
     /**
