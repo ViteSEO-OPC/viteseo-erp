@@ -1,0 +1,8 @@
+Heading
+
+Hi {{first_name}},
+
+I've put together a proposal for {{business_name}} and would love to walk you through it. Please take a look and let me know your thoughts.
+
+Best regards,
+{{sender_name}}

@@ -1,0 +1,19 @@
+{
+    "footer": [],
+    "header": [
+        {
+            "id": "heading-rkvspzmp",
+            "text": "Heading",
+            "type": "heading",
+            "align": "left",
+            "level": 2
+        }
+    ],
+    "styles": [],
+    "version": 1,
+    "signature": {
+        "align": "left",
+        "enabled": true,
+        "sign_off": "Best regards,"
+    }
+}

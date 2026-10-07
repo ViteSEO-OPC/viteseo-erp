@@ -1,0 +1,77 @@
+{
+    "version": 1,
+    "blocks": [
+        {
+            "type": "heading",
+            "id": "heading",
+            "level": 1,
+            "text": "Hi {{first_name}},",
+            "align": "left",
+            "color": "#18181B"
+        },
+        {
+            "type": "text",
+            "id": "text",
+            "content": {
+                "type": "doc",
+                "content": [
+                    {
+                        "type": "paragraph",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "We would like to help "
+                            },
+                            {
+                                "type": "text",
+                                "text": "{{business_name}}",
+                                "marks": [
+                                    {
+                                        "type": "bold"
+                                    }
+                                ]
+                            },
+                            {
+                                "type": "text",
+                                "text": " grow online."
+                            }
+                        ]
+                    }
+                ]
+            },
+            "align": "left",
+            "font_size": 14,
+            "color": "#3F3F46"
+        },
+        {
+            "type": "button",
+            "id": "button",
+            "label": "Book a call",
+            "url": "https://viteseo.ph/book",
+            "align": "center",
+            "background_color": "#0D9488",
+            "text_color": "#FFFFFF",
+            "radius": 6
+        },
+        {
+            "type": "image",
+            "id": "image",
+            "asset_id": "0b9f5a8e-3c2d-4e1f-9a7b-6c5d4e3f2a1b",
+            "alt": "Our work",
+            "width": 552,
+            "align": "center"
+        },
+        {
+            "type": "divider",
+            "id": "divider",
+            "color": "#E4E4E7",
+            "thickness": 1
+        },
+        {
+            "type": "spacer",
+            "id": "spacer",
+            "height": 24
+        }
+    ],
+    "sign_off": "Cheers, {{first_name}}!"
+}

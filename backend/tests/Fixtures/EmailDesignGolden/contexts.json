@@ -1,0 +1,159 @@
+{
+    "send": {
+        "tokens": {
+            "first_name": "Maria",
+            "contact_name": "Maria Santos",
+            "business_name": "Acme Bakery",
+            "industry": "Bakery",
+            "city": "Quezon City",
+            "sender_name": "Jamie Reyes"
+        },
+        "assetUrls": [],
+        "logoUrl": "https://crm.viteseo.test/api/v1/crm/email-assets/0b3d6c1e-7a2f-4c55-9e1d-2f6a8b7c9d01.png",
+        "logoAlt": "Acme",
+        "brandStyles": [],
+        "brandWebsite": null,
+        "previewImages": []
+    },
+    "send-no-logo": {
+        "tokens": {
+            "first_name": "Maria",
+            "contact_name": "Maria Santos",
+            "business_name": "Acme Bakery",
+            "industry": "Bakery",
+            "city": "Quezon City",
+            "sender_name": "Jamie Reyes"
+        },
+        "assetUrls": [],
+        "logoUrl": null,
+        "logoAlt": "",
+        "brandStyles": [],
+        "brandWebsite": null,
+        "previewImages": []
+    },
+    "sample": {
+        "tokens": {
+            "first_name": "Maria",
+            "contact_name": "Maria Santos",
+            "business_name": "Santos Bakery",
+            "industry": "Bakery",
+            "city": "Quezon City",
+            "sender_name": "Alex Reyes"
+        },
+        "assetUrls": [],
+        "logoUrl": "https://crm.viteseo.test/api/v1/crm/email-assets/0b3d6c1e-7a2f-4c55-9e1d-2f6a8b7c9d01.png",
+        "logoAlt": "Acme",
+        "brandStyles": [],
+        "brandWebsite": null,
+        "previewImages": {
+            "https://crm.viteseo.test/api/v1/crm/email-assets/0b3d6c1e-7a2f-4c55-9e1d-2f6a8b7c9d01.png": "iVBORw0KGgpnb2xkZW4tcHJldmlldy1sb2dv"
+        }
+    },
+    "guard": {
+        "tokens": {
+            "first_name": "Maria",
+            "contact_name": "Maria Santos",
+            "business_name": "Santos Bakery",
+            "industry": "Bakery",
+            "city": "Quezon City",
+            "sender_name": "Alex Reyes"
+        },
+        "assetUrls": {
+            "0b9f5a8e-3c2d-4e1f-9a7b-6c5d4e3f2a1b": "https://assets.example.invalid/api/v1/crm/email-assets/0b9f5a8e-3c2d-4e1f-9a7b-6c5d4e3f2a1b.png"
+        },
+        "logoUrl": "https://assets.example.invalid/api/v1/crm/email-assets/00000000-0000-4000-8000-000000000000.png",
+        "logoAlt": "Company logo",
+        "brandStyles": [],
+        "brandWebsite": "https://www.organization-website.example/",
+        "previewImages": []
+    },
+    "placeholders": {
+        "tokens": {
+            "first_name": "{{first_name}}",
+            "contact_name": "{{contact_name}}",
+            "business_name": "{{business_name}}",
+            "industry": "{{industry}}",
+            "city": "{{city}}",
+            "sender_name": "{{sender_name}}"
+        },
+        "assetUrls": [],
+        "logoUrl": null,
+        "logoAlt": "",
+        "brandStyles": [],
+        "brandWebsite": null,
+        "previewImages": []
+    },
+    "full": {
+        "tokens": {
+            "first_name": "Maria",
+            "contact_name": "Maria Santos",
+            "business_name": "Acme Bakery",
+            "industry": "Bakery",
+            "city": "Quezon City",
+            "sender_name": "Jamie Reyes",
+            "sender_title": "Growth Consultant",
+            "sender_phone": "+63 917 123 4567"
+        },
+        "assetUrls": {
+            "0b9f5a8e-3c2d-4e1f-9a7b-6c5d4e3f2a1b": "https://system.viteseo.ph/api/v1/crm/email-assets/0b9f5a8e-3c2d-4e1f-9a7b-6c5d4e3f2a1b.png"
+        },
+        "logoUrl": "https://crm.viteseo.test/api/v1/crm/email-assets/0b3d6c1e-7a2f-4c55-9e1d-2f6a8b7c9d01.png",
+        "logoAlt": "Vite SEO",
+        "brandStyles": {
+            "font": "georgia",
+            "background_color": "#EEF2FF",
+            "content_background_color": "#FFFFFF",
+            "text_color": "#111827",
+            "muted_text_color": "#6B7280",
+            "link_color": "#4338CA",
+            "accent_color": "#4338CA",
+            "accent_text_color": "#FFFFFF",
+            "divider_color": "#C7D2FE"
+        },
+        "brandWebsite": "https://viteseo.ph",
+        "previewImages": []
+    },
+    "hostile": {
+        "tokens": {
+            "first_name": "<script>alert(1)</script>\"'&",
+            "contact_name": "Mar‮ia\u2028San\u0007tos",
+            "business_name": "{{first_name}} & Co <b>",
+            "industry": "Line1\nLine2\r\n",
+            "city": "⁦City⁩",
+            "sender_name": "Jamie \"J\" O'Neil",
+            "sender_title": "<img src=x onerror=1>",
+            "sender_phone": "+63917"
+        },
+        "assetUrls": {
+            "0b9f5a8e-3c2d-4e1f-9a7b-6c5d4e3f2a1b": "javascript:alert(1)"
+        },
+        "logoUrl": "https://evil.test/a\"onerror=\"x.png",
+        "logoAlt": "\"><script>x</script>",
+        "brandStyles": {
+            "font": "comic-sans",
+            "text_color": "red;background:url(x)",
+            "accent_color": "#12345",
+            "link_color": "#ABCDEF"
+        },
+        "brandWebsite": "javascript:alert(1)",
+        "previewImages": {
+            "https://evil.test/a\"onerror=\"x.png": "bm90IGEgcG5n"
+        }
+    },
+    "local-http-logo": {
+        "tokens": {
+            "first_name": "Maria",
+            "contact_name": "Maria Santos",
+            "business_name": "Acme Bakery",
+            "industry": "Bakery",
+            "city": "Quezon City",
+            "sender_name": "Jamie Reyes"
+        },
+        "assetUrls": [],
+        "logoUrl": "http://localhost:8001/api/v1/crm/email-assets/0b3d6c1e-7a2f-4c55-9e1d-2f6a8b7c9d01.png",
+        "logoAlt": "Acme",
+        "brandStyles": [],
+        "brandWebsite": "https://acme.example/",
+        "previewImages": []
+    }
+}

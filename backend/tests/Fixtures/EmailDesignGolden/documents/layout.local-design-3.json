@@ -1,0 +1,43 @@
+{
+    "footer": [
+        {
+            "id": "footer-eq2l8xxw",
+            "type": "footer",
+            "align": "center",
+            "content": {
+                "type": "doc",
+                "content": [
+                    {
+                        "type": "paragraph",
+                        "content": [
+                            {
+                                "text": "PWyeezs Footer ACME v2",
+                                "type": "text"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "font_size": 12
+        }
+    ],
+    "header": [
+        {
+            "id": "header-logo",
+            "type": "logo",
+            "align": "center",
+            "width": 160
+        }
+    ],
+    "styles": {
+        "text_color": "#dedede",
+        "accent_color": "#aa3300",
+        "content_background_color": "#000000"
+    },
+    "version": 1,
+    "signature": {
+        "align": "left",
+        "enabled": true,
+        "sign_off": "Best regards,"
+    }
+}

@@ -1,0 +1,54 @@
+{
+    "version": 1,
+    "styles": {
+        "font": "georgia",
+        "text_color": "#1A1A2E",
+        "link_color": "#B91C1C"
+    },
+    "header": [],
+    "signature": {
+        "enabled": true,
+        "sign_off": "Warm regards,",
+        "align": "center"
+    },
+    "footer": [
+        {
+            "type": "footer",
+            "id": "i-f",
+            "content": {
+                "type": "doc",
+                "content": [
+                    {
+                        "type": "paragraph",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "Vite SEO Digital Advertising OPC"
+                            },
+                            {
+                                "type": "hardBreak"
+                            },
+                            {
+                                "type": "text",
+                                "text": "Visit us",
+                                "marks": [
+                                    {
+                                        "type": "link",
+                                        "attrs": {
+                                            "href": "https://viteseo.ph",
+                                            "target": "_blank",
+                                            "rel": "noopener noreferrer nofollow",
+                                            "class": null
+                                        }
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            },
+            "align": "center",
+            "font_size": 12
+        }
+    ]
+}

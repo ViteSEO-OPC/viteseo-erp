@@ -1,0 +1,70 @@
+{
+    "version": 1,
+    "styles": {
+        "font": "arial",
+        "background_color": "#F4F4F5",
+        "content_background_color": "#FFFFFF",
+        "text_color": "#18181B",
+        "link_color": "#0D9488"
+    },
+    "header": [
+        {
+            "type": "logo",
+            "id": "logo",
+            "width": 160,
+            "align": "center"
+        }
+    ],
+    "signature": {
+        "enabled": false,
+        "sign_off": "Best regards,",
+        "align": "left"
+    },
+    "footer": [
+        {
+            "type": "divider",
+            "id": "footer-divider",
+            "color": "#E4E4E7",
+            "thickness": 1
+        },
+        {
+            "type": "footer",
+            "id": "footer",
+            "content": {
+                "type": "doc",
+                "content": [
+                    {
+                        "type": "paragraph",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "Vite SEO Digital Advertising OPC"
+                            },
+                            {
+                                "type": "hardBreak"
+                            },
+                            {
+                                "type": "text",
+                                "text": "Visit us",
+                                "marks": [
+                                    {
+                                        "type": "link",
+                                        "attrs": {
+                                            "href": "https://viteseo.ph",
+                                            "target": "_blank",
+                                            "rel": "noopener noreferrer nofollow",
+                                            "class": null
+                                        }
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            },
+            "align": "center",
+            "font_size": 12,
+            "color": "#71717A"
+        }
+    ]
+}

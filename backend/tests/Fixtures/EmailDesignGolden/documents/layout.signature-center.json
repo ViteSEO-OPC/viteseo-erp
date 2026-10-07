@@ -1,0 +1,17 @@
+{
+    "version": 1,
+    "styles": {
+        "font": "arial",
+        "background_color": "#F4F4F5",
+        "content_background_color": "#FFFFFF",
+        "text_color": "#18181B",
+        "link_color": "#0D9488"
+    },
+    "header": [],
+    "signature": {
+        "enabled": true,
+        "sign_off": "Best regards,",
+        "align": "center"
+    },
+    "footer": []
+}

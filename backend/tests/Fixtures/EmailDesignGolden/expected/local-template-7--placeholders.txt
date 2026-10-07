@@ -1,0 +1,10 @@
+Heading
+
+Hi {{first_name}},
+
+I came across {{business_name}} and thought there may be a strong fit with what we do for {{industry}} businesses.
+
+Would you be open to a short intro call?
+
+Best regards,
+{{sender_name}}

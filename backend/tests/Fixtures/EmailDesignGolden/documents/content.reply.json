@@ -1,0 +1,111 @@
+{
+    "version": 1,
+    "blocks": [
+        {
+            "type": "text",
+            "id": "reply",
+            "content": {
+                "type": "doc",
+                "content": [
+                    {
+                        "type": "paragraph",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "Thanks for getting back to us, Maria."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "paragraph",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "Here is "
+                            },
+                            {
+                                "type": "text",
+                                "text": "what we suggest",
+                                "marks": [
+                                    {
+                                        "type": "bold"
+                                    }
+                                ]
+                            },
+                            {
+                                "type": "text",
+                                "text": ":"
+                            }
+                        ]
+                    },
+                    {
+                        "type": "bulletList",
+                        "content": [
+                            {
+                                "type": "listItem",
+                                "content": [
+                                    {
+                                        "type": "paragraph",
+                                        "content": [
+                                            {
+                                                "type": "text",
+                                                "text": "A faster website"
+                                            }
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "type": "listItem",
+                                "content": [
+                                    {
+                                        "type": "paragraph",
+                                        "content": [
+                                            {
+                                                "type": "text",
+                                                "text": "Local SEO",
+                                                "marks": [
+                                                    {
+                                                        "type": "italic"
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "type": "paragraph",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "Escaped <angle> & \"quotes\""
+                            }
+                        ]
+                    },
+                    {
+                        "type": "paragraph",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "second line",
+                                "marks": [
+                                    {
+                                        "type": "underline"
+                                    },
+                                    {
+                                        "type": "strike"
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            },
+            "align": "left",
+            "font_size": 14
+        }
+    ]
+}

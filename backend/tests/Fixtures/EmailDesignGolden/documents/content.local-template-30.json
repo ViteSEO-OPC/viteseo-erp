@@ -1,0 +1,32 @@
+{
+    "blocks": [
+        {
+            "id": "heading",
+            "text": "PWyeezs Content C heading",
+            "type": "heading",
+            "align": "left",
+            "level": 2
+        },
+        {
+            "id": "text",
+            "type": "text",
+            "align": "left",
+            "content": {
+                "type": "doc",
+                "content": [
+                    {
+                        "type": "paragraph",
+                        "content": [
+                            {
+                                "text": "Write your message here.",
+                                "type": "text"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "font_size": 14
+        }
+    ],
+    "version": 1
+}

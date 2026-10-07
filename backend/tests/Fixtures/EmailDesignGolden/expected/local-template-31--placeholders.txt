@@ -1,0 +1,8 @@
+Hello {{first_name}},
+
+PWyeezs plain body D.
+
+Best regards,
+{{sender_name}}
+
+PWyeezs Footer ACME v2

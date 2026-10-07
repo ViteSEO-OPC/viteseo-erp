@@ -9,3 +9,6 @@
 /.github export-ignore
 CHANGELOG.md export-ignore
 .styleci.yml export-ignore
+
+# Frozen golden email output: byte-exact, compared by EmailDesignGoldenTest. No line-ending conversion.
+tests/Fixtures/EmailDesignGolden/** -text
