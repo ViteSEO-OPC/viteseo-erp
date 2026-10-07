@@ -58,6 +58,10 @@ final class EmailDesignValidator
 
     public const INVALID_COLOR = 'Use a six-digit hex color such as #1a2b3c.';
 
+    public const INVALID_SWITCH = 'This setting must be on or off.';
+
+    public const INVALID_VARIANT = 'Choose a primary or secondary button.';
+
     public const INVALID_ALIGNMENT = 'Alignment must be left, center or right.';
 
     public const OUT_OF_RANGE = 'Use a whole number from %d to %d.';
@@ -257,7 +261,8 @@ final class EmailDesignValidator
     }
 
     /**
-     * A styles object: optional keys from SYSTEM_DEFAULTS, each absent, null, a known font key or a hex color.
+     * A styles object: optional keys from EmailDesignSchema::styleKeys(), each absent, null, a known font key,
+     * a hex color, or — for a numeric style — a whole number in its range.
      *
      * @return array{path: string, message: string}|null
      */
@@ -267,20 +272,22 @@ final class EmailDesignValidator
             return $this->fail($path, self::MALFORMED);
         }
 
-        $problem = $this->fieldsProblem($styles, [], array_keys(EmailDesignSchema::SYSTEM_DEFAULTS), $path);
+        $problem = $this->fieldsProblem($styles, [], EmailDesignSchema::styleKeys(), $path);
         if ($problem !== null) {
             return $problem;
         }
 
-        foreach (array_keys(EmailDesignSchema::SYSTEM_DEFAULTS) as $key) {
+        foreach (EmailDesignSchema::styleKeys() as $key) {
             $value = $styles[$key] ?? null;
             if ($value === null) {
                 continue;
             }
 
-            $problem = $key === 'font'
-                ? $this->fontProblem($value, $path.'.font')
-                : $this->colorProblem($value, $path.'.'.$key);
+            $problem = match (true) {
+                $key === 'font' => $this->fontProblem($value, $path.'.font'),
+                array_key_exists($key, EmailDesignSchema::NUMERIC_STYLES) => $this->rangeProblem($value, EmailDesignSchema::NUMERIC_STYLES[$key][1], $path.'.'.$key),
+                default => $this->colorProblem($value, $path.'.'.$key),
+            };
             if ($problem !== null) {
                 return $problem;
             }
@@ -296,10 +303,21 @@ final class EmailDesignValidator
             return $this->fail('signature', self::MALFORMED);
         }
 
-        return $this->fieldsProblem($signature, EmailDesignSchema::SIGNATURE_FIELDS, [], 'signature')
+        $problem = $this->fieldsProblem($signature, EmailDesignSchema::SIGNATURE_FIELDS, EmailDesignSchema::SIGNATURE_OPTIONS, 'signature')
             ?? (is_bool($signature['enabled']) ? null : $this->fail('signature.enabled', self::MALFORMED))
             ?? $this->lineProblem($signature['sign_off'], 'signature.sign_off', EmailDesignSchema::MAX_SIGN_OFF, required: false, placeholders: true)
             ?? $this->alignmentProblem($signature['align'], 'signature.align');
+        if ($problem !== null) {
+            return $problem;
+        }
+
+        foreach (EmailDesignSchema::SIGNATURE_OPTIONS as $option) {
+            if (array_key_exists($option, $signature) && ! is_bool($signature[$option])) {
+                return $this->fail('signature.'.$option, self::INVALID_SWITCH);
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -390,7 +408,8 @@ final class EmailDesignValidator
                 'heading' => $this->rangeProblem($block['level'], EmailDesignSchema::HEADING_LEVELS, $path.'.level')
                     ?? $this->lineProblem($block['text'], $path.'.text', EmailDesignSchema::MAX_HEADING_TEXT, required: true, placeholders: true)
                     ?? $this->alignmentProblem($block['align'], $path.'.align')
-                    ?? $this->optionalColorProblem($block, 'color', $path),
+                    ?? $this->optionalColorProblem($block, 'color', $path)
+                    ?? $this->optionalProblem($block, 'font_size', fn (mixed $size): ?array => $this->rangeProblem($size, EmailDesignSchema::HEADING_FONT_SIZE, $path.'.font_size')),
                 'text' => $this->richTextProblem($block['content'], EmailDesignSchema::TEXT_CHILDREN, $path.'.content')
                     ?? $this->alignmentProblem($block['align'], $path.'.align')
                     ?? $this->rangeProblem($block['font_size'], EmailDesignSchema::TEXT_FONT_SIZE, $path.'.font_size')
@@ -400,7 +419,8 @@ final class EmailDesignValidator
                     ?? $this->alignmentProblem($block['align'], $path.'.align')
                     ?? $this->optionalColorProblem($block, 'background_color', $path)
                     ?? $this->optionalColorProblem($block, 'text_color', $path)
-                    ?? $this->rangeProblem($block['radius'], EmailDesignSchema::BUTTON_RADIUS, $path.'.radius'),
+                    ?? $this->rangeProblem($block['radius'], EmailDesignSchema::BUTTON_RADIUS, $path.'.radius')
+                    ?? $this->optionalProblem($block, 'variant', fn (mixed $variant): ?array => in_array($variant, EmailDesignSchema::BUTTON_VARIANTS, true) ? null : $this->fail($path.'.variant', self::INVALID_VARIANT)),
                 'image' => (is_string($block['asset_id']) && preg_match(self::ASSET_ID, $block['asset_id']) === 1 ? null : $this->fail($path.'.asset_id', self::INVALID_ASSET))
                     ?? $this->lineProblem($block['alt'], $path.'.alt', EmailDesignSchema::MAX_ALT_TEXT, required: false, placeholders: false)
                     ?? $this->rangeProblem($block['width'], EmailDesignSchema::IMAGE_WIDTH, $path.'.width')
