@@ -1,0 +1,10 @@
+Heading
+
+Hi {{first_name}},
+
+just checking in on the proposal we shared for {{business_name}}. I'd be happy to walk you through it and answer any questions.
+
+Would a quick call this week work for you?
+
+Best regards,
+{{sender_name}}

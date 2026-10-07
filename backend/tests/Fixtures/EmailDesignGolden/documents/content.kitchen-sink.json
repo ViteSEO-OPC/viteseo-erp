@@ -1,0 +1,503 @@
+{
+    "version": 1,
+    "blocks": [
+        {
+            "type": "heading",
+            "id": "c-h1",
+            "level": 1,
+            "text": "Hi {{first_name}},",
+            "align": "left",
+            "color": "#18181B"
+        },
+        {
+            "type": "heading",
+            "id": "c-h2",
+            "level": 2,
+            "text": "Level two for {{city}}",
+            "align": "center",
+            "color": "#18181B"
+        },
+        {
+            "type": "heading",
+            "id": "c-h3",
+            "level": 3,
+            "text": "Level three, inherited color",
+            "align": "right",
+            "color": "#18181B"
+        },
+        {
+            "type": "text",
+            "id": "c-rich",
+            "content": {
+                "type": "doc",
+                "content": [
+                    {
+                        "type": "paragraph",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "Plain, "
+                            },
+                            {
+                                "type": "text",
+                                "text": "bold",
+                                "marks": [
+                                    {
+                                        "type": "bold"
+                                    }
+                                ]
+                            },
+                            {
+                                "type": "text",
+                                "text": ", "
+                            },
+                            {
+                                "type": "text",
+                                "text": "italic",
+                                "marks": [
+                                    {
+                                        "type": "italic"
+                                    }
+                                ]
+                            },
+                            {
+                                "type": "text",
+                                "text": ", "
+                            },
+                            {
+                                "type": "text",
+                                "text": "underline",
+                                "marks": [
+                                    {
+                                        "type": "underline"
+                                    }
+                                ]
+                            },
+                            {
+                                "type": "text",
+                                "text": ", "
+                            },
+                            {
+                                "type": "text",
+                                "text": "strike",
+                                "marks": [
+                                    {
+                                        "type": "strike"
+                                    }
+                                ]
+                            },
+                            {
+                                "type": "text",
+                                "text": "."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "paragraph",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "All marks, reversed order",
+                                "marks": [
+                                    {
+                                        "type": "strike"
+                                    },
+                                    {
+                                        "type": "underline"
+                                    },
+                                    {
+                                        "type": "italic"
+                                    },
+                                    {
+                                        "type": "bold"
+                                    }
+                                ]
+                            },
+                            {
+                                "type": "text",
+                                "text": " then "
+                            },
+                            {
+                                "type": "text",
+                                "text": "a bold link",
+                                "marks": [
+                                    {
+                                        "type": "bold"
+                                    },
+                                    {
+                                        "type": "link",
+                                        "attrs": {
+                                            "href": "https://viteseo.ph/a?x=1&y=2",
+                                            "target": "_blank",
+                                            "rel": "noopener noreferrer nofollow",
+                                            "class": null
+                                        }
+                                    }
+                                ]
+                            },
+                            {
+                                "type": "text",
+                                "text": " and "
+                            },
+                            {
+                                "type": "text",
+                                "text": "mail",
+                                "marks": [
+                                    {
+                                        "type": "link",
+                                        "attrs": {
+                                            "href": "mailto:hello@viteseo.ph",
+                                            "target": "_blank",
+                                            "rel": "noopener noreferrer nofollow",
+                                            "class": null
+                                        }
+                                    }
+                                ]
+                            },
+                            {
+                                "type": "text",
+                                "text": " / "
+                            },
+                            {
+                                "type": "text",
+                                "text": "call",
+                                "marks": [
+                                    {
+                                        "type": "link",
+                                        "attrs": {
+                                            "href": "tel:+639171234567",
+                                            "target": "_blank",
+                                            "rel": "noopener noreferrer nofollow",
+                                            "class": null
+                                        }
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "type": "paragraph"
+                    },
+                    {
+                        "type": "paragraph",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "Line one"
+                            },
+                            {
+                                "type": "hardBreak"
+                            },
+                            {
+                                "type": "text",
+                                "text": "line two for {{first_name}} at {{business_name}}"
+                            }
+                        ]
+                    },
+                    {
+                        "type": "bulletList",
+                        "content": [
+                            {
+                                "type": "listItem",
+                                "content": [
+                                    {
+                                        "type": "paragraph",
+                                        "content": [
+                                            {
+                                                "type": "text",
+                                                "text": "First bullet"
+                                            }
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "type": "listItem",
+                                "content": [
+                                    {
+                                        "type": "paragraph",
+                                        "content": [
+                                            {
+                                                "type": "text",
+                                                "text": "Second bullet"
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "type": "paragraph",
+                                        "content": [
+                                            {
+                                                "type": "text",
+                                                "text": "second paragraph"
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "type": "orderedList",
+                                        "attrs": {
+                                            "start": 3,
+                                            "type": "a"
+                                        },
+                                        "content": [
+                                            {
+                                                "type": "listItem",
+                                                "content": [
+                                                    {
+                                                        "type": "paragraph",
+                                                        "content": [
+                                                            {
+                                                                "type": "text",
+                                                                "text": "nested a"
+                                                            }
+                                                        ]
+                                                    }
+                                                ]
+                                            },
+                                            {
+                                                "type": "listItem",
+                                                "content": [
+                                                    {
+                                                        "type": "paragraph",
+                                                        "content": [
+                                                            {
+                                                                "type": "text",
+                                                                "text": "nested b"
+                                                            },
+                                                            {
+                                                                "type": "hardBreak"
+                                                            },
+                                                            {
+                                                                "type": "text",
+                                                                "text": "broken"
+                                                            }
+                                                        ]
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "type": "orderedList",
+                        "attrs": {
+                            "start": 7,
+                            "type": "I"
+                        },
+                        "content": [
+                            {
+                                "type": "listItem",
+                                "content": [
+                                    {
+                                        "type": "paragraph",
+                                        "content": [
+                                            {
+                                                "type": "text",
+                                                "text": "seventh"
+                                            }
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "type": "listItem",
+                                "content": [
+                                    {
+                                        "type": "paragraph",
+                                        "content": [
+                                            {
+                                                "type": "text",
+                                                "text": "eighth",
+                                                "marks": [
+                                                    {
+                                                        "type": "link",
+                                                        "attrs": {
+                                                            "href": "https://viteseo.ph/8",
+                                                            "target": "_blank",
+                                                            "rel": "noopener noreferrer nofollow",
+                                                            "class": null
+                                                        }
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "type": "orderedList",
+                        "attrs": {
+                            "start": 1,
+                            "type": null
+                        },
+                        "content": [
+                            {
+                                "type": "listItem",
+                                "content": [
+                                    {
+                                        "type": "paragraph",
+                                        "content": [
+                                            {
+                                                "type": "text",
+                                                "text": "numbered from one"
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            },
+            "align": "left",
+            "font_size": 16,
+            "color": "#3F3F46"
+        },
+        {
+            "type": "text",
+            "id": "c-small",
+            "content": {
+                "type": "doc",
+                "content": [
+                    {
+                        "type": "paragraph",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "We would like to help "
+                            },
+                            {
+                                "type": "text",
+                                "text": "{{business_name}}",
+                                "marks": [
+                                    {
+                                        "type": "bold"
+                                    }
+                                ]
+                            },
+                            {
+                                "type": "text",
+                                "text": " grow online."
+                            }
+                        ]
+                    }
+                ]
+            },
+            "align": "center",
+            "font_size": 12,
+            "color": "#3F3F46"
+        },
+        {
+            "type": "text",
+            "id": "c-large",
+            "content": {
+                "type": "doc",
+                "content": [
+                    {
+                        "type": "paragraph",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "We would like to help "
+                            },
+                            {
+                                "type": "text",
+                                "text": "{{business_name}}",
+                                "marks": [
+                                    {
+                                        "type": "bold"
+                                    }
+                                ]
+                            },
+                            {
+                                "type": "text",
+                                "text": " grow online."
+                            }
+                        ]
+                    }
+                ]
+            },
+            "align": "right",
+            "font_size": 22,
+            "color": "#3F3F46"
+        },
+        {
+            "type": "button",
+            "id": "c-btn",
+            "label": "Book a call",
+            "url": "https://viteseo.ph/book",
+            "align": "center",
+            "background_color": "#0D9488",
+            "text_color": "#FFFFFF",
+            "radius": 6
+        },
+        {
+            "type": "button",
+            "id": "c-btn-left",
+            "label": "Call {{first_name}}",
+            "url": "tel:+639171234567",
+            "align": "left",
+            "background_color": "#0D9488",
+            "text_color": "#FFFFFF",
+            "radius": 0
+        },
+        {
+            "type": "button",
+            "id": "c-btn-right",
+            "label": "Book a call",
+            "url": "https://viteseo.ph/book",
+            "align": "right",
+            "background_color": "#0D9488",
+            "text_color": "#FFFFFF",
+            "radius": 24
+        },
+        {
+            "type": "image",
+            "id": "c-img",
+            "asset_id": "0b9f5a8e-3c2d-4e1f-9a7b-6c5d4e3f2a1b",
+            "alt": "Our work",
+            "width": 552,
+            "align": "center"
+        },
+        {
+            "type": "image",
+            "id": "c-img-link",
+            "asset_id": "0b9f5a8e-3c2d-4e1f-9a7b-6c5d4e3f2a1b",
+            "alt": "",
+            "width": 300,
+            "align": "left",
+            "link_url": "https://viteseo.ph/work"
+        },
+        {
+            "type": "image",
+            "id": "c-img-missing",
+            "asset_id": "ffffffff-ffff-4fff-8fff-ffffffffffff",
+            "alt": "Our work",
+            "width": 552,
+            "align": "center",
+            "link_url": "https://viteseo.ph/missing"
+        },
+        {
+            "type": "divider",
+            "id": "c-div",
+            "color": "#E4E4E7",
+            "thickness": 1
+        },
+        {
+            "type": "divider",
+            "id": "c-div-4",
+            "color": "#0D9488",
+            "thickness": 4
+        },
+        {
+            "type": "spacer",
+            "id": "c-sp",
+            "height": 24
+        }
+    ],
+    "preheader": "A quick idea for {{business_name}}"
+}

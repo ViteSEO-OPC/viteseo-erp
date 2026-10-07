@@ -1,0 +1,650 @@
+{
+    "local-design-1-design-preview--sample": {
+        "note": "Local design #1 \"Vite SEO Digital Advertising OPC 2\" in its Settings preview.",
+        "context": "sample",
+        "layout": "layout.local-design-1",
+        "content": "content.design-preview-sample"
+    },
+    "local-design-1-reply--hostile": {
+        "note": "Local design #1 \"Vite SEO Digital Advertising OPC 2\" with a designed reply and hostile context values.",
+        "context": "hostile",
+        "layout": "layout.local-design-1",
+        "content": "content.reply"
+    },
+    "local-design-1-reply--send": {
+        "note": "Local design #1 \"Vite SEO Digital Advertising OPC 2\" with a designed reply.",
+        "context": "send",
+        "layout": "layout.local-design-1",
+        "content": "content.reply"
+    },
+    "local-design-10-design-preview--sample": {
+        "note": "Local design #10 \"Design 1\" in its Settings preview.",
+        "context": "sample",
+        "layout": "layout.local-design-10",
+        "content": "content.design-preview-sample"
+    },
+    "local-design-10-reply--hostile": {
+        "note": "Local design #10 \"Design 1\" with a designed reply and hostile context values.",
+        "context": "hostile",
+        "layout": "layout.local-design-10",
+        "content": "content.reply"
+    },
+    "local-design-10-reply--send": {
+        "note": "Local design #10 \"Design 1\" with a designed reply.",
+        "context": "send",
+        "layout": "layout.local-design-10",
+        "content": "content.reply"
+    },
+    "local-design-2-design-preview--sample": {
+        "note": "Local design #2 \"test only\" in its Settings preview.",
+        "context": "sample",
+        "layout": "layout.local-design-2",
+        "content": "content.design-preview-sample"
+    },
+    "local-design-2-reply--hostile": {
+        "note": "Local design #2 \"test only\" with a designed reply and hostile context values.",
+        "context": "hostile",
+        "layout": "layout.local-design-2",
+        "content": "content.reply"
+    },
+    "local-design-2-reply--send": {
+        "note": "Local design #2 \"test only\" with a designed reply.",
+        "context": "send",
+        "layout": "layout.local-design-2",
+        "content": "content.reply"
+    },
+    "local-design-3-design-preview--sample": {
+        "note": "Local design #3 \"PWyeezs Shared Design\" in its Settings preview.",
+        "context": "sample",
+        "layout": "layout.local-design-3",
+        "content": "content.design-preview-sample"
+    },
+    "local-design-3-reply--hostile": {
+        "note": "Local design #3 \"PWyeezs Shared Design\" with a designed reply and hostile context values.",
+        "context": "hostile",
+        "layout": "layout.local-design-3",
+        "content": "content.reply"
+    },
+    "local-design-3-reply--send": {
+        "note": "Local design #3 \"PWyeezs Shared Design\" with a designed reply.",
+        "context": "send",
+        "layout": "layout.local-design-3",
+        "content": "content.reply"
+    },
+    "local-design-4-design-preview--sample": {
+        "note": "Local design #4 \"PWyeezs Unused Design\" (soft-deleted) in its Settings preview.",
+        "context": "sample",
+        "layout": "layout.local-design-4",
+        "content": "content.design-preview-sample"
+    },
+    "local-design-4-reply--hostile": {
+        "note": "Local design #4 \"PWyeezs Unused Design\" (soft-deleted) with a designed reply and hostile context values.",
+        "context": "hostile",
+        "layout": "layout.local-design-4",
+        "content": "content.reply"
+    },
+    "local-design-4-reply--send": {
+        "note": "Local design #4 \"PWyeezs Unused Design\" (soft-deleted) with a designed reply.",
+        "context": "send",
+        "layout": "layout.local-design-4",
+        "content": "content.reply"
+    },
+    "local-design-9-design-preview--sample": {
+        "note": "Local design #9 \"PW Options Org Default\" in its Settings preview.",
+        "context": "sample",
+        "layout": "layout.local-design-9",
+        "content": "content.design-preview-sample"
+    },
+    "local-design-9-reply--hostile": {
+        "note": "Local design #9 \"PW Options Org Default\" with a designed reply and hostile context values.",
+        "context": "hostile",
+        "layout": "layout.local-design-9",
+        "content": "content.reply"
+    },
+    "local-design-9-reply--send": {
+        "note": "Local design #9 \"PW Options Org Default\" with a designed reply.",
+        "context": "send",
+        "layout": "layout.local-design-9",
+        "content": "content.reply"
+    },
+    "local-template-1--guard": {
+        "note": "Local template #1 (Proposal Check-in · Warm & professional) in design #1.",
+        "context": "guard",
+        "layout": "layout.local-design-1",
+        "content": "content.local-template-1"
+    },
+    "local-template-1--placeholders": {
+        "note": "Local template #1 (Proposal Check-in · Warm & professional) in design #1.",
+        "context": "placeholders",
+        "layout": "layout.local-design-1",
+        "content": "content.local-template-1"
+    },
+    "local-template-1--sample": {
+        "note": "Local template #1 (Proposal Check-in · Warm & professional) in design #1.",
+        "context": "sample",
+        "layout": "layout.local-design-1",
+        "content": "content.local-template-1"
+    },
+    "local-template-1--send": {
+        "note": "Local template #1 (Proposal Check-in · Warm & professional) in design #1.",
+        "context": "send",
+        "layout": "layout.local-design-1",
+        "content": "content.local-template-1"
+    },
+    "local-template-10--guard": {
+        "note": "Local template #10 (proposal · Warm & professional) in design #1.",
+        "context": "guard",
+        "layout": "layout.local-design-1",
+        "content": "content.local-template-10"
+    },
+    "local-template-10--placeholders": {
+        "note": "Local template #10 (proposal · Warm & professional) in design #1.",
+        "context": "placeholders",
+        "layout": "layout.local-design-1",
+        "content": "content.local-template-10"
+    },
+    "local-template-10--sample": {
+        "note": "Local template #10 (proposal · Warm & professional) in design #1.",
+        "context": "sample",
+        "layout": "layout.local-design-1",
+        "content": "content.local-template-10"
+    },
+    "local-template-10--send": {
+        "note": "Local template #10 (proposal · Warm & professional) in design #1.",
+        "context": "send",
+        "layout": "layout.local-design-1",
+        "content": "content.local-template-10"
+    },
+    "local-template-12--guard": {
+        "note": "Local template #12 (meeting_reminder · Warm & professional) in design #1.",
+        "context": "guard",
+        "layout": "layout.local-design-1",
+        "content": "content.local-template-12"
+    },
+    "local-template-12--placeholders": {
+        "note": "Local template #12 (meeting_reminder · Warm & professional) in design #1.",
+        "context": "placeholders",
+        "layout": "layout.local-design-1",
+        "content": "content.local-template-12"
+    },
+    "local-template-12--sample": {
+        "note": "Local template #12 (meeting_reminder · Warm & professional) in design #1.",
+        "context": "sample",
+        "layout": "layout.local-design-1",
+        "content": "content.local-template-12"
+    },
+    "local-template-12--send": {
+        "note": "Local template #12 (meeting_reminder · Warm & professional) in design #1.",
+        "context": "send",
+        "layout": "layout.local-design-1",
+        "content": "content.local-template-12"
+    },
+    "local-template-2--guard": {
+        "note": "Local template #2 (Proposal Check-in · Formal) in design #1.",
+        "context": "guard",
+        "layout": "layout.local-design-1",
+        "content": "content.local-template-2"
+    },
+    "local-template-2--placeholders": {
+        "note": "Local template #2 (Proposal Check-in · Formal) in design #1.",
+        "context": "placeholders",
+        "layout": "layout.local-design-1",
+        "content": "content.local-template-2"
+    },
+    "local-template-2--sample": {
+        "note": "Local template #2 (Proposal Check-in · Formal) in design #1.",
+        "context": "sample",
+        "layout": "layout.local-design-1",
+        "content": "content.local-template-2"
+    },
+    "local-template-2--send": {
+        "note": "Local template #2 (Proposal Check-in · Formal) in design #1.",
+        "context": "send",
+        "layout": "layout.local-design-1",
+        "content": "content.local-template-2"
+    },
+    "local-template-28--guard": {
+        "note": "Local template #28 (proposal · Formal) in design #3.",
+        "context": "guard",
+        "layout": "layout.local-design-3",
+        "content": "content.local-template-28"
+    },
+    "local-template-28--placeholders": {
+        "note": "Local template #28 (proposal · Formal) in design #3.",
+        "context": "placeholders",
+        "layout": "layout.local-design-3",
+        "content": "content.local-template-28"
+    },
+    "local-template-28--sample": {
+        "note": "Local template #28 (proposal · Formal) in design #3.",
+        "context": "sample",
+        "layout": "layout.local-design-3",
+        "content": "content.local-template-28"
+    },
+    "local-template-28--send": {
+        "note": "Local template #28 (proposal · Formal) in design #3.",
+        "context": "send",
+        "layout": "layout.local-design-3",
+        "content": "content.local-template-28"
+    },
+    "local-template-29--guard": {
+        "note": "Local template #29 (proposal · Casual) in design #3.",
+        "context": "guard",
+        "layout": "layout.local-design-3",
+        "content": "content.local-template-29"
+    },
+    "local-template-29--placeholders": {
+        "note": "Local template #29 (proposal · Casual) in design #3.",
+        "context": "placeholders",
+        "layout": "layout.local-design-3",
+        "content": "content.local-template-29"
+    },
+    "local-template-29--sample": {
+        "note": "Local template #29 (proposal · Casual) in design #3.",
+        "context": "sample",
+        "layout": "layout.local-design-3",
+        "content": "content.local-template-29"
+    },
+    "local-template-29--send": {
+        "note": "Local template #29 (proposal · Casual) in design #3.",
+        "context": "send",
+        "layout": "layout.local-design-3",
+        "content": "content.local-template-29"
+    },
+    "local-template-3--guard": {
+        "note": "Local template #3 (Proposal Check-in · Casual) in design #1.",
+        "context": "guard",
+        "layout": "layout.local-design-1",
+        "content": "content.local-template-3"
+    },
+    "local-template-3--placeholders": {
+        "note": "Local template #3 (Proposal Check-in · Casual) in design #1.",
+        "context": "placeholders",
+        "layout": "layout.local-design-1",
+        "content": "content.local-template-3"
+    },
+    "local-template-3--sample": {
+        "note": "Local template #3 (Proposal Check-in · Casual) in design #1.",
+        "context": "sample",
+        "layout": "layout.local-design-1",
+        "content": "content.local-template-3"
+    },
+    "local-template-3--send": {
+        "note": "Local template #3 (Proposal Check-in · Casual) in design #1.",
+        "context": "send",
+        "layout": "layout.local-design-1",
+        "content": "content.local-template-3"
+    },
+    "local-template-30--guard": {
+        "note": "Local template #30 (proposal_follow_up · Formal) in design #3.",
+        "context": "guard",
+        "layout": "layout.local-design-3",
+        "content": "content.local-template-30"
+    },
+    "local-template-30--placeholders": {
+        "note": "Local template #30 (proposal_follow_up · Formal) in design #3.",
+        "context": "placeholders",
+        "layout": "layout.local-design-3",
+        "content": "content.local-template-30"
+    },
+    "local-template-30--sample": {
+        "note": "Local template #30 (proposal_follow_up · Formal) in design #3.",
+        "context": "sample",
+        "layout": "layout.local-design-3",
+        "content": "content.local-template-30"
+    },
+    "local-template-30--send": {
+        "note": "Local template #30 (proposal_follow_up · Formal) in design #3.",
+        "context": "send",
+        "layout": "layout.local-design-3",
+        "content": "content.local-template-30"
+    },
+    "local-template-31--guard": {
+        "note": "Local template #31 (proposal_follow_up · Casual) in design #3.",
+        "context": "guard",
+        "layout": "layout.local-design-3",
+        "content": "content.local-template-31"
+    },
+    "local-template-31--placeholders": {
+        "note": "Local template #31 (proposal_follow_up · Casual) in design #3.",
+        "context": "placeholders",
+        "layout": "layout.local-design-3",
+        "content": "content.local-template-31"
+    },
+    "local-template-31--sample": {
+        "note": "Local template #31 (proposal_follow_up · Casual) in design #3.",
+        "context": "sample",
+        "layout": "layout.local-design-3",
+        "content": "content.local-template-31"
+    },
+    "local-template-31--send": {
+        "note": "Local template #31 (proposal_follow_up · Casual) in design #3.",
+        "context": "send",
+        "layout": "layout.local-design-3",
+        "content": "content.local-template-31"
+    },
+    "local-template-4--guard": {
+        "note": "Local template #4 (Follow-up · Warm & professional) in design #1.",
+        "context": "guard",
+        "layout": "layout.local-design-1",
+        "content": "content.local-template-4"
+    },
+    "local-template-4--placeholders": {
+        "note": "Local template #4 (Follow-up · Warm & professional) in design #1.",
+        "context": "placeholders",
+        "layout": "layout.local-design-1",
+        "content": "content.local-template-4"
+    },
+    "local-template-4--sample": {
+        "note": "Local template #4 (Follow-up · Warm & professional) in design #1.",
+        "context": "sample",
+        "layout": "layout.local-design-1",
+        "content": "content.local-template-4"
+    },
+    "local-template-4--send": {
+        "note": "Local template #4 (Follow-up · Warm & professional) in design #1.",
+        "context": "send",
+        "layout": "layout.local-design-1",
+        "content": "content.local-template-4"
+    },
+    "local-template-5--guard": {
+        "note": "Local template #5 (Follow-up · Formal) in design #1.",
+        "context": "guard",
+        "layout": "layout.local-design-1",
+        "content": "content.local-template-5"
+    },
+    "local-template-5--placeholders": {
+        "note": "Local template #5 (Follow-up · Formal) in design #1.",
+        "context": "placeholders",
+        "layout": "layout.local-design-1",
+        "content": "content.local-template-5"
+    },
+    "local-template-5--sample": {
+        "note": "Local template #5 (Follow-up · Formal) in design #1.",
+        "context": "sample",
+        "layout": "layout.local-design-1",
+        "content": "content.local-template-5"
+    },
+    "local-template-5--send": {
+        "note": "Local template #5 (Follow-up · Formal) in design #1.",
+        "context": "send",
+        "layout": "layout.local-design-1",
+        "content": "content.local-template-5"
+    },
+    "local-template-6--guard": {
+        "note": "Local template #6 (Follow-up · Casual) in design #3.",
+        "context": "guard",
+        "layout": "layout.local-design-3",
+        "content": "content.local-template-6"
+    },
+    "local-template-6--placeholders": {
+        "note": "Local template #6 (Follow-up · Casual) in design #3.",
+        "context": "placeholders",
+        "layout": "layout.local-design-3",
+        "content": "content.local-template-6"
+    },
+    "local-template-6--sample": {
+        "note": "Local template #6 (Follow-up · Casual) in design #3.",
+        "context": "sample",
+        "layout": "layout.local-design-3",
+        "content": "content.local-template-6"
+    },
+    "local-template-6--send": {
+        "note": "Local template #6 (Follow-up · Casual) in design #3.",
+        "context": "send",
+        "layout": "layout.local-design-3",
+        "content": "content.local-template-6"
+    },
+    "local-template-7--guard": {
+        "note": "Local template #7 (Introduction · Warm & professional) in design #1.",
+        "context": "guard",
+        "layout": "layout.local-design-1",
+        "content": "content.local-template-7"
+    },
+    "local-template-7--placeholders": {
+        "note": "Local template #7 (Introduction · Warm & professional) in design #1.",
+        "context": "placeholders",
+        "layout": "layout.local-design-1",
+        "content": "content.local-template-7"
+    },
+    "local-template-7--sample": {
+        "note": "Local template #7 (Introduction · Warm & professional) in design #1.",
+        "context": "sample",
+        "layout": "layout.local-design-1",
+        "content": "content.local-template-7"
+    },
+    "local-template-7--send": {
+        "note": "Local template #7 (Introduction · Warm & professional) in design #1.",
+        "context": "send",
+        "layout": "layout.local-design-1",
+        "content": "content.local-template-7"
+    },
+    "local-template-8--guard": {
+        "note": "Local template #8 (Introduction · Formal) in design #1.",
+        "context": "guard",
+        "layout": "layout.local-design-1",
+        "content": "content.local-template-8"
+    },
+    "local-template-8--placeholders": {
+        "note": "Local template #8 (Introduction · Formal) in design #1.",
+        "context": "placeholders",
+        "layout": "layout.local-design-1",
+        "content": "content.local-template-8"
+    },
+    "local-template-8--sample": {
+        "note": "Local template #8 (Introduction · Formal) in design #1.",
+        "context": "sample",
+        "layout": "layout.local-design-1",
+        "content": "content.local-template-8"
+    },
+    "local-template-8--send": {
+        "note": "Local template #8 (Introduction · Formal) in design #1.",
+        "context": "send",
+        "layout": "layout.local-design-1",
+        "content": "content.local-template-8"
+    },
+    "local-template-9--guard": {
+        "note": "Local template #9 (Introduction · Casual) in design #1.",
+        "context": "guard",
+        "layout": "layout.local-design-1",
+        "content": "content.local-template-9"
+    },
+    "local-template-9--placeholders": {
+        "note": "Local template #9 (Introduction · Casual) in design #1.",
+        "context": "placeholders",
+        "layout": "layout.local-design-1",
+        "content": "content.local-template-9"
+    },
+    "local-template-9--sample": {
+        "note": "Local template #9 (Introduction · Casual) in design #1.",
+        "context": "sample",
+        "layout": "layout.local-design-1",
+        "content": "content.local-template-9"
+    },
+    "local-template-9--send": {
+        "note": "Local template #9 (Introduction · Casual) in design #1.",
+        "context": "send",
+        "layout": "layout.local-design-1",
+        "content": "content.local-template-9"
+    },
+    "synthetic-design-preview--sample": {
+        "note": "Settings → Email Designs preview (sampleContent).",
+        "context": "sample",
+        "layout": "layout.kitchen-sink",
+        "content": "content.design-preview-sample"
+    },
+    "synthetic-inheritance--full": {
+        "note": "Colors inherited through template override → design → brand → defaults.",
+        "context": "full",
+        "layout": "layout.inheritance",
+        "content": "content.inheritance"
+    },
+    "synthetic-inheritance--hostile": {
+        "note": "Colors inherited through template override → design → brand → defaults.",
+        "context": "hostile",
+        "layout": "layout.inheritance",
+        "content": "content.inheritance"
+    },
+    "synthetic-inheritance--send": {
+        "note": "Colors inherited through template override → design → brand → defaults.",
+        "context": "send",
+        "layout": "layout.inheritance",
+        "content": "content.inheritance"
+    },
+    "synthetic-kitchen-sink--full": {
+        "note": "Every v1 block type and option in every region it may appear.",
+        "context": "full",
+        "layout": "layout.kitchen-sink",
+        "content": "content.kitchen-sink"
+    },
+    "synthetic-kitchen-sink--guard": {
+        "note": "Every v1 block type and option in every region it may appear.",
+        "context": "guard",
+        "layout": "layout.kitchen-sink",
+        "content": "content.kitchen-sink"
+    },
+    "synthetic-kitchen-sink--hostile": {
+        "note": "Every v1 block type and option in every region it may appear.",
+        "context": "hostile",
+        "layout": "layout.kitchen-sink",
+        "content": "content.kitchen-sink"
+    },
+    "synthetic-kitchen-sink--local-http-logo": {
+        "note": "Every v1 block type and option in every region it may appear.",
+        "context": "local-http-logo",
+        "layout": "layout.kitchen-sink",
+        "content": "content.kitchen-sink"
+    },
+    "synthetic-kitchen-sink--placeholders": {
+        "note": "Every v1 block type and option in every region it may appear.",
+        "context": "placeholders",
+        "layout": "layout.kitchen-sink",
+        "content": "content.kitchen-sink"
+    },
+    "synthetic-kitchen-sink--sample": {
+        "note": "Every v1 block type and option in every region it may appear.",
+        "context": "sample",
+        "layout": "layout.kitchen-sink",
+        "content": "content.kitchen-sink"
+    },
+    "synthetic-kitchen-sink--send": {
+        "note": "Every v1 block type and option in every region it may appear.",
+        "context": "send",
+        "layout": "layout.kitchen-sink",
+        "content": "content.kitchen-sink"
+    },
+    "synthetic-kitchen-sink--send-no-logo": {
+        "note": "Every v1 block type and option in every region it may appear.",
+        "context": "send-no-logo",
+        "layout": "layout.kitchen-sink",
+        "content": "content.kitchen-sink"
+    },
+    "synthetic-logo-custom--full": {
+        "note": "Logo link targets against contexts with and without a website.",
+        "context": "full",
+        "layout": "layout.logo-custom",
+        "content": "content.minimal"
+    },
+    "synthetic-logo-custom--local-http-logo": {
+        "note": "Logo link targets against contexts with and without a website.",
+        "context": "local-http-logo",
+        "layout": "layout.logo-custom",
+        "content": "content.minimal"
+    },
+    "synthetic-logo-custom--send": {
+        "note": "Logo link targets against contexts with and without a website.",
+        "context": "send",
+        "layout": "layout.logo-custom",
+        "content": "content.minimal"
+    },
+    "synthetic-logo-legacy-url--full": {
+        "note": "Logo link targets against contexts with and without a website.",
+        "context": "full",
+        "layout": "layout.logo-legacy-url",
+        "content": "content.minimal"
+    },
+    "synthetic-logo-legacy-url--local-http-logo": {
+        "note": "Logo link targets against contexts with and without a website.",
+        "context": "local-http-logo",
+        "layout": "layout.logo-legacy-url",
+        "content": "content.minimal"
+    },
+    "synthetic-logo-legacy-url--send": {
+        "note": "Logo link targets against contexts with and without a website.",
+        "context": "send",
+        "layout": "layout.logo-legacy-url",
+        "content": "content.minimal"
+    },
+    "synthetic-logo-none--full": {
+        "note": "Logo link targets against contexts with and without a website.",
+        "context": "full",
+        "layout": "layout.logo-none",
+        "content": "content.minimal"
+    },
+    "synthetic-logo-none--local-http-logo": {
+        "note": "Logo link targets against contexts with and without a website.",
+        "context": "local-http-logo",
+        "layout": "layout.logo-none",
+        "content": "content.minimal"
+    },
+    "synthetic-logo-none--send": {
+        "note": "Logo link targets against contexts with and without a website.",
+        "context": "send",
+        "layout": "layout.logo-none",
+        "content": "content.minimal"
+    },
+    "synthetic-logo-website--full": {
+        "note": "Logo link targets against contexts with and without a website.",
+        "context": "full",
+        "layout": "layout.logo-website",
+        "content": "content.minimal"
+    },
+    "synthetic-logo-website--local-http-logo": {
+        "note": "Logo link targets against contexts with and without a website.",
+        "context": "local-http-logo",
+        "layout": "layout.logo-website",
+        "content": "content.minimal"
+    },
+    "synthetic-logo-website--send": {
+        "note": "Logo link targets against contexts with and without a website.",
+        "context": "send",
+        "layout": "layout.logo-website",
+        "content": "content.minimal"
+    },
+    "synthetic-minimal--placeholders": {
+        "note": "The plain-text body stored beside a designed template.",
+        "context": "placeholders",
+        "layout": "layout.minimal",
+        "content": "content.minimal"
+    },
+    "synthetic-minimal--send": {
+        "note": "Empty header and footer, signature off, no styles.",
+        "context": "send",
+        "layout": "layout.minimal",
+        "content": "content.minimal"
+    },
+    "synthetic-reply--send": {
+        "note": "A Lead Details designed reply (EmailTemplateDesignService::replyContent) in the kitchen-sink design.",
+        "context": "send",
+        "layout": "layout.kitchen-sink",
+        "content": "content.reply"
+    },
+    "synthetic-signature-empty-sign-off--full": {
+        "note": "An empty template sign-off: sender lines only.",
+        "context": "full",
+        "layout": "layout.default",
+        "content": "content.empty-sign-off"
+    },
+    "synthetic-signature-off--full": {
+        "note": "Signature switched off.",
+        "context": "full",
+        "layout": "layout.signature-off",
+        "content": "content.default"
+    },
+    "synthetic-signature-template-sign-off--send": {
+        "note": "A template sign-off replaces the design one.",
+        "context": "send",
+        "layout": "layout.signature-center",
+        "content": "content.template-sign-off"
+    }
+}

@@ -1,0 +1,20 @@
+{
+    "version": 1,
+    "styles": [],
+    "header": [
+        {
+            "type": "logo",
+            "id": "l",
+            "width": 300,
+            "align": "right",
+            "link_target": "custom",
+            "link_url": "mailto:hello@viteseo.ph"
+        }
+    ],
+    "signature": {
+        "enabled": true,
+        "sign_off": "Best regards,",
+        "align": "left"
+    },
+    "footer": []
+}

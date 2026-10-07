@@ -16,3 +16,8 @@ indent_size = 2
 
 [{compose,docker-compose}.{yml,yaml}]
 indent_size = 4
+
+# Frozen golden email output: byte-exact, compared by EmailDesignGoldenTest. Never let an editor rewrite it.
+[tests/Fixtures/EmailDesignGolden/**]
+insert_final_newline = false
+trim_trailing_whitespace = false

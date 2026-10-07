@@ -1,0 +1,19 @@
+{
+    "version": 1,
+    "styles": [],
+    "header": [
+        {
+            "type": "logo",
+            "id": "l",
+            "width": 40,
+            "align": "left",
+            "link_target": "none"
+        }
+    ],
+    "signature": {
+        "enabled": true,
+        "sign_off": "Best regards,",
+        "align": "left"
+    },
+    "footer": []
+}

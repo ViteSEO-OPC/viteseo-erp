@@ -1,0 +1,44 @@
+{
+    "blocks": [
+        {
+            "id": "text",
+            "type": "text",
+            "align": "left",
+            "content": {
+                "type": "doc",
+                "content": [
+                    {
+                        "type": "paragraph",
+                        "content": [
+                            {
+                                "text": "Hi {{first_name}},",
+                                "type": "text"
+                            }
+                        ]
+                    },
+                    {
+                        "type": "paragraph",
+                        "content": [
+                            {
+                                "text": "just checking in on the proposal we shared for {{business_name}}. I'd be happy to walk you through it and answer any questions.",
+                                "type": "text"
+                            }
+                        ]
+                    },
+                    {
+                        "type": "paragraph",
+                        "content": [
+                            {
+                                "text": "Would a quick call this week work for you?",
+                                "type": "text"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "font_size": 14
+        }
+    ],
+    "version": 1,
+    "sign_off": "Best regards,"
+}

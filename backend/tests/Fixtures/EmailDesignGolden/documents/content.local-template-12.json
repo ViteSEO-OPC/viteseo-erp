@@ -1,0 +1,35 @@
+{
+    "blocks": [
+        {
+            "id": "text",
+            "type": "text",
+            "align": "left",
+            "content": {
+                "type": "doc",
+                "content": [
+                    {
+                        "type": "paragraph",
+                        "content": [
+                            {
+                                "text": "Hi {{first_name}},",
+                                "type": "text"
+                            }
+                        ]
+                    },
+                    {
+                        "type": "paragraph",
+                        "content": [
+                            {
+                                "text": "a quick reminder about our upcoming meeting regarding {{business_name}}. Looking forward to speaking with you.",
+                                "type": "text"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "font_size": 14
+        }
+    ],
+    "version": 1,
+    "sign_off": "Best regards,"
+}

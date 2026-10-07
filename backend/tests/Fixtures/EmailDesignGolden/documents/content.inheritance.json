@@ -1,0 +1,62 @@
+{
+    "version": 1,
+    "blocks": [
+        {
+            "type": "heading",
+            "id": "i-h",
+            "level": 1,
+            "text": "Hi {{first_name}},",
+            "align": "left"
+        },
+        {
+            "type": "text",
+            "id": "i-t",
+            "content": {
+                "type": "doc",
+                "content": [
+                    {
+                        "type": "paragraph",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "We would like to help "
+                            },
+                            {
+                                "type": "text",
+                                "text": "{{business_name}}",
+                                "marks": [
+                                    {
+                                        "type": "bold"
+                                    }
+                                ]
+                            },
+                            {
+                                "type": "text",
+                                "text": " grow online."
+                            }
+                        ]
+                    }
+                ]
+            },
+            "align": "left",
+            "font_size": 14
+        },
+        {
+            "type": "button",
+            "id": "i-b",
+            "label": "Book a call",
+            "url": "https://viteseo.ph/book",
+            "align": "center",
+            "radius": 6
+        },
+        {
+            "type": "divider",
+            "id": "i-d",
+            "thickness": 1
+        }
+    ],
+    "style_overrides": {
+        "accent_color": "#B91C1C",
+        "font": "times"
+    }
+}

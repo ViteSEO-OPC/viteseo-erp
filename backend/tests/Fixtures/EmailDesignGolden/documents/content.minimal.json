@@ -1,0 +1,25 @@
+{
+    "version": 1,
+    "blocks": [
+        {
+            "type": "text",
+            "id": "only",
+            "content": {
+                "type": "doc",
+                "content": [
+                    {
+                        "type": "paragraph",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "Hello {{first_name}}."
+                            }
+                        ]
+                    }
+                ]
+            },
+            "align": "left",
+            "font_size": 14
+        }
+    ]
+}

@@ -1,0 +1,44 @@
+{
+    "blocks": [
+        {
+            "id": "text",
+            "type": "text",
+            "align": "left",
+            "content": {
+                "type": "doc",
+                "content": [
+                    {
+                        "type": "paragraph",
+                        "content": [
+                            {
+                                "text": "Hi {{first_name}},",
+                                "type": "text"
+                            }
+                        ]
+                    },
+                    {
+                        "type": "paragraph",
+                        "content": [
+                            {
+                                "text": "following up on our recent conversation about {{business_name}}. I'd love to hear your thoughts and figure out the best next step.",
+                                "type": "text"
+                            }
+                        ]
+                    },
+                    {
+                        "type": "paragraph",
+                        "content": [
+                            {
+                                "text": "Is there a good time to connect?",
+                                "type": "text"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "font_size": 14
+        }
+    ],
+    "version": 1,
+    "sign_off": "Best regards,"
+}

@@ -1,0 +1,10 @@
+Heading
+
+Dear {{contact_name}},
+
+following up on our recent conversation about {{business_name}}. I'd love to hear your thoughts and figure out the best next step.
+
+Is there a good time to connect?
+
+Sincerely,
+{{sender_name}}

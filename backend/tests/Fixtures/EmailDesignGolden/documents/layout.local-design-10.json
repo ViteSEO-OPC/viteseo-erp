@@ -1,0 +1,50 @@
+{
+    "footer": [
+        {
+            "id": "button-2hr64z8p",
+            "url": "https://google.com",
+            "type": "button",
+            "align": "center",
+            "label": "Book a call",
+            "radius": 6
+        },
+        {
+            "id": "footer-nap1ul4o",
+            "type": "footer",
+            "align": "left",
+            "content": {
+                "type": "doc",
+                "content": [
+                    {
+                        "type": "paragraph",
+                        "content": [
+                            {
+                                "text": "Footer Size",
+                                "type": "text"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "font_size": 12
+        }
+    ],
+    "header": [
+        {
+            "id": "header-logo",
+            "type": "logo",
+            "align": "center",
+            "width": 83
+        }
+    ],
+    "styles": {
+        "text_color": "#f0f0f0",
+        "content_background_color": "#211c1c"
+    },
+    "version": 1,
+    "signature": {
+        "align": "left",
+        "enabled": true,
+        "sign_off": "Best regards,"
+    }
+}

@@ -1,0 +1,8 @@
+Heading
+
+Hi {{first_name}},
+
+a quick reminder about our upcoming meeting regarding {{business_name}}. Looking forward to speaking with you.
+
+Best regards,
+{{sender_name}}

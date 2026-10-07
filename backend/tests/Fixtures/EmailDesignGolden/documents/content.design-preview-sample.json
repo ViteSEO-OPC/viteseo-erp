@@ -1,0 +1,32 @@
+{
+    "version": 1,
+    "blocks": [
+        {
+            "type": "heading",
+            "id": "sample-heading",
+            "level": 2,
+            "text": "Hi {{first_name}},",
+            "align": "left"
+        },
+        {
+            "type": "text",
+            "id": "sample-text",
+            "content": {
+                "type": "doc",
+                "content": [
+                    {
+                        "type": "paragraph",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "Each template shows its own message here. We would love to help {{business_name}} grow online."
+                            }
+                        ]
+                    }
+                ]
+            },
+            "align": "left",
+            "font_size": 14
+        }
+    ]
+}

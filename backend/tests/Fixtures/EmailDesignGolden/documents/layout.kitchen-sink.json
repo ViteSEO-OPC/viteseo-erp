@@ -1,0 +1,211 @@
+{
+    "version": 1,
+    "styles": {
+        "font": "arial",
+        "background_color": "#F4F4F5",
+        "content_background_color": "#FFFFFF",
+        "text_color": "#18181B",
+        "link_color": "#0D9488",
+        "muted_text_color": "#71717A",
+        "accent_color": "#0D9488",
+        "accent_text_color": "#FFFFFF",
+        "divider_color": "#E4E4E7"
+    },
+    "header": [
+        {
+            "type": "logo",
+            "id": "h-logo",
+            "width": 160,
+            "align": "center"
+        },
+        {
+            "type": "heading",
+            "id": "h-heading",
+            "level": 2,
+            "text": "{{business_name}} × Vite SEO",
+            "align": "center",
+            "color": "#18181B"
+        },
+        {
+            "type": "text",
+            "id": "h-text",
+            "content": {
+                "type": "doc",
+                "content": [
+                    {
+                        "type": "paragraph",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "We would like to help "
+                            },
+                            {
+                                "type": "text",
+                                "text": "{{business_name}}",
+                                "marks": [
+                                    {
+                                        "type": "bold"
+                                    }
+                                ]
+                            },
+                            {
+                                "type": "text",
+                                "text": " grow online."
+                            }
+                        ]
+                    }
+                ]
+            },
+            "align": "center",
+            "font_size": 12,
+            "color": "#3F3F46"
+        },
+        {
+            "type": "button",
+            "id": "h-button",
+            "label": "Header CTA",
+            "url": "https://viteseo.ph/header",
+            "align": "center",
+            "background_color": "#0D9488",
+            "text_color": "#FFFFFF",
+            "radius": 0
+        },
+        {
+            "type": "image",
+            "id": "h-image",
+            "asset_id": "0b9f5a8e-3c2d-4e1f-9a7b-6c5d4e3f2a1b",
+            "alt": "Our work",
+            "width": 200,
+            "align": "right"
+        },
+        {
+            "type": "divider",
+            "id": "h-divider",
+            "color": "#E4E4E7",
+            "thickness": 2
+        },
+        {
+            "type": "spacer",
+            "id": "h-spacer",
+            "height": 4
+        }
+    ],
+    "signature": {
+        "enabled": true,
+        "sign_off": "Best regards,",
+        "align": "right"
+    },
+    "footer": [
+        {
+            "type": "divider",
+            "id": "f-divider",
+            "color": "#E4E4E7",
+            "thickness": 1
+        },
+        {
+            "type": "footer",
+            "id": "f-footer",
+            "content": {
+                "type": "doc",
+                "content": [
+                    {
+                        "type": "paragraph",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "Vite SEO Digital Advertising OPC"
+                            },
+                            {
+                                "type": "hardBreak"
+                            },
+                            {
+                                "type": "text",
+                                "text": "Visit us",
+                                "marks": [
+                                    {
+                                        "type": "link",
+                                        "attrs": {
+                                            "href": "https://viteseo.ph",
+                                            "target": "_blank",
+                                            "rel": "noopener noreferrer nofollow",
+                                            "class": null
+                                        }
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            },
+            "align": "center",
+            "font_size": 12,
+            "color": "#71717A"
+        },
+        {
+            "type": "text",
+            "id": "f-text",
+            "content": {
+                "type": "doc",
+                "content": [
+                    {
+                        "type": "paragraph",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "We would like to help "
+                            },
+                            {
+                                "type": "text",
+                                "text": "{{business_name}}",
+                                "marks": [
+                                    {
+                                        "type": "bold"
+                                    }
+                                ]
+                            },
+                            {
+                                "type": "text",
+                                "text": " grow online."
+                            }
+                        ]
+                    }
+                ]
+            },
+            "align": "right",
+            "font_size": 13,
+            "color": "#3F3F46"
+        },
+        {
+            "type": "logo",
+            "id": "f-logo",
+            "width": 40,
+            "align": "left",
+            "link_target": "custom",
+            "link_url": "https://viteseo.ph/home"
+        },
+        {
+            "type": "button",
+            "id": "f-button",
+            "label": "Footer CTA",
+            "url": "mailto:hello@viteseo.ph",
+            "align": "left",
+            "background_color": "#0D9488",
+            "text_color": "#FFFFFF",
+            "radius": 24
+        },
+        {
+            "type": "image",
+            "id": "f-image",
+            "asset_id": "0b9f5a8e-3c2d-4e1f-9a7b-6c5d4e3f2a1b",
+            "alt": "Our work",
+            "width": 16,
+            "align": "left",
+            "link_url": "https://viteseo.ph/img"
+        },
+        {
+            "type": "spacer",
+            "id": "f-spacer",
+            "height": 96
+        }
+    ]
+}

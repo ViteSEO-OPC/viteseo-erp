@@ -1,0 +1,34 @@
+{
+    "blocks": [
+        {
+            "id": "text",
+            "type": "text",
+            "align": "left",
+            "content": {
+                "type": "doc",
+                "content": [
+                    {
+                        "type": "paragraph",
+                        "content": [
+                            {
+                                "text": "Hello {{first_name}},",
+                                "type": "text"
+                            }
+                        ]
+                    },
+                    {
+                        "type": "paragraph",
+                        "content": [
+                            {
+                                "text": "PWyeezs plain body D.",
+                                "type": "text"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "font_size": 14
+        }
+    ],
+    "version": 1
+}

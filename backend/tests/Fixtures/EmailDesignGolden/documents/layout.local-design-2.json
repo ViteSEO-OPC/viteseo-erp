@@ -1,0 +1,46 @@
+{
+    "footer": [
+        {
+            "id": "footer-0ezfprgf",
+            "type": "footer",
+            "align": "center",
+            "content": {
+                "type": "doc",
+                "content": [
+                    {
+                        "type": "paragraph",
+                        "content": [
+                            {
+                                "text": "footer",
+                                "type": "text"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "font_size": 12
+        }
+    ],
+    "header": [
+        {
+            "id": "header-logo",
+            "type": "logo",
+            "align": "center",
+            "width": 160
+        },
+        {
+            "id": "heading-0ssd9ye6",
+            "text": "Heading",
+            "type": "heading",
+            "align": "left",
+            "level": 2
+        }
+    ],
+    "styles": [],
+    "version": 1,
+    "signature": {
+        "align": "left",
+        "enabled": true,
+        "sign_off": "Best regards,"
+    }
+}
