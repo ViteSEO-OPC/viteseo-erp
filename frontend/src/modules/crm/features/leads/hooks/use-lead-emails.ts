@@ -19,6 +19,8 @@ type EmailApi = {
   bodyDoc?: JSONContent | null;
   /** Optional for the same reason: absent or null means there is no HTML part to show. */
   bodyHtml?: string | null;
+  /** Optional too: absent or null means the email was not a reply sent in a chosen design. */
+  emailDesignId?: string | null;
   status: string;
   timestamp: string | null;
   sentAt: string | null;
@@ -53,6 +55,7 @@ export function useLeadEmails(id: string) {
     body: api.body,
     bodyDoc: api.bodyDoc ?? null,
     bodyHtml: api.bodyHtml ?? null,
+    emailDesignId: api.emailDesignId ?? null,
     status: api.status,
     timestamp: api.timestamp ?? api.receivedAt ?? api.sentAt ?? "",
     fromName: api.fromName,

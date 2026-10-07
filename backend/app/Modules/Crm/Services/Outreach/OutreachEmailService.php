@@ -4,6 +4,7 @@ namespace App\Modules\Crm\Services\Outreach;
 
 use App\Modules\Crm\Events\OutboundEmailSent;
 use App\Modules\Crm\Models\Email;
+use App\Modules\Crm\Models\EmailDesign;
 use App\Modules\Crm\Models\EmailEvent;
 use App\Modules\Crm\Models\Lead;
 use App\Models\User;
@@ -57,8 +58,10 @@ class OutreachEmailService
      * @param  array<string, mixed>|null  $bodyDoc  a VALIDATED email document for a formatted reply
      *                                              (see SendEmailRequest), or null for plain text.
      *                                              `$body` must already be its text projection.
+     * @param  int|null  $emailDesignId  the Email Design a Lead Details reply is sent in (validated, this
+     *                                   org, live), or null — every other send.
      *
-     * @throws ValidationException when no recipient can be resolved
+     * @throws ValidationException when no recipient can be resolved, or the chosen design cannot carry the reply
      */
     public function sendToLead(
         Lead $lead,
@@ -68,10 +71,18 @@ class OutreachEmailService
         ?string $to = null,
         ?array $bodyDoc = null,
         ?int $emailTemplateId = null,
+        ?int $emailDesignId = null,
     ): Email {
         // Pre-flight recipient validation (422) BEFORE anything is persisted — a missing recipient is a
         // request error, not a delivery failure, so it must never create a history row.
         $toEmail = $this->resolveRecipient($lead, $to);
+
+        // A designed reply is rendered once here, BEFORE anything is persisted, for the same reason: a design
+        // that cannot carry this reply (too large for Gmail, a stored layout that no longer validates) is a
+        // 422 the BD can act on — never a failed history row, and never plain text they did not choose.
+        if ($emailDesignId !== null) {
+            $this->designedReplyOrRefuse(EmailDesign::query()->findOrFail($emailDesignId), $bodyDoc, $lead, $sender);
+        }
 
         // EMAIL-001: persist BEFORE transport. The row exists as `sending` the moment we commit to the
         // send, so a provider failure is recorded as `failed` history (with the reason) instead of
@@ -93,6 +104,8 @@ class OutreachEmailService
             // The designed template this was composed from, when it was. Recorded so the send path can
             // re-render its design; NULL — the usual case — sends plain text exactly as before.
             'email_template_id' => $emailTemplateId,
+            // The design a Lead Details reply is sent in, when the BD chose one; NULL sends as before.
+            'email_design_id' => $emailDesignId,
             'status' => 'sending',
             'attempts' => 1,
             // NOTE: queued_at is intentionally NOT set — it means "claimed by the background sender job"
@@ -151,8 +164,12 @@ class OutreachEmailService
 
         $toEmail = $this->resolveRecipient($lead, $email->to_email);
         $subject = (string) $email->subject;
-        $html = $this->htmlFor($email, $sender);
-        $sent = $this->dispatch($lead, $toEmail, $subject, (string) $email->body, $html);
+        // A designed reply sends both parts from its design — the text part is the design's text form, so
+        // its signature reaches a plain-text reader too — while `body` stays the reply the BD wrote, which is
+        // what CRM lists and notifications show. Every other email takes htmlFor() and `body`, as before.
+        $designedReply = $this->designedReplyParts($email, $lead, $sender);
+        $html = $designedReply['html'] ?? $this->htmlFor($email, $sender);
+        $sent = $this->dispatch($lead, $toEmail, $subject, $designedReply['text'] ?? (string) $email->body, $html);
 
         $email = DB::transaction(function () use ($email, $lead, $sender, $subject, $toEmail, $sent, $html): Email {
             $email->update([
@@ -181,6 +198,61 @@ class OutreachEmailService
         $this->announceIfSent($email);
 
         return $email;
+    }
+
+    /**
+     * Both parts of a Lead Details reply sent in an Email Design, or null when this email has no design.
+     *
+     * Only Send-Now writes `email_design_id` (SendEmailRequest refuses it with scheduled_at), and it has
+     * already rendered this exact reply once before persisting, so a refusal here means the design changed
+     * in between. That fails the send — recorded as a failed row by sendToLead() — rather than quietly
+     * sending plain text the BD did not choose.
+     *
+     * @return array{html: string, text: string}|null
+     */
+    private function designedReplyParts(Email $email, Lead $lead, User $sender): ?array
+    {
+        if ($email->email_design_id === null) {
+            return null;
+        }
+
+        $design = $email->emailDesign;
+        if ($design === null || $design->trashed()) {
+            throw new \RuntimeException('The email design this reply was sent in is no longer available.');
+        }
+
+        return $this->designedReplyOrRefuse($design, $email->body_doc, $lead, $sender);
+    }
+
+    /**
+     * Render a designed reply, or refuse it with a 422 the BD can act on.
+     *
+     * @param  array<string, mixed>|null  $bodyDoc
+     * @return array{html: string, text: string}
+     *
+     * @throws ValidationException
+     */
+    private function designedReplyOrRefuse(EmailDesign $design, ?array $bodyDoc, Lead $lead, User $sender): array
+    {
+        if (! is_array($bodyDoc) || EmailDocument::problem($bodyDoc) !== null) {
+            throw ValidationException::withMessages(['body_doc' => 'Write your reply before choosing a design.']);
+        }
+
+        $rendered = $this->designs->designedReplyHtml($design, $bodyDoc, $lead, $sender);
+
+        if ($rendered['html'] === null || $rendered['text'] === null) {
+            Log::warning('outreach.designed_reply.refused', [
+                'email_design_id' => $design->id,
+                'reason' => $rendered['reason'],
+                'bytes' => $rendered['bytes'],
+            ]);
+
+            throw ValidationException::withMessages([
+                'email_design_id' => EmailTemplateDesignService::replyRefusalMessage((string) $rendered['reason']),
+            ]);
+        }
+
+        return ['html' => $rendered['html'], 'text' => $rendered['text']];
     }
 
     /**

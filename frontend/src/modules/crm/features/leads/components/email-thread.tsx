@@ -2,18 +2,22 @@
 
 import { useState } from "react";
 import type { Editor } from "@tiptap/react";
-import { Send } from "lucide-react";
+import { Eye, Send } from "lucide-react";
 import { cn } from "@/modules/crm/lib/utils";
 import { apiClient } from "@/modules/crm/lib/axios";
 import { emailAssetImageSource } from "@/modules/crm/lib/email-body";
 import { formatActivityTimestamp } from "@/modules/crm/lib/formatters";
 import { useLeadEmails } from "@/modules/crm/features/leads/hooks/use-lead-emails";
 import { useSendEmail } from "@/modules/crm/features/follow-ups/hooks/use-outreach-mutations";
+import { useEmailDesignOptions, useReplyDesignPreview } from "@/modules/crm/features/leads/hooks/use-reply-design";
+import { getApiErrorMessage } from "@/modules/crm/lib/api-error";
 import { Button } from "@/modules/crm/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/modules/crm/components/ui/select";
 import { EmptyState } from "@/modules/crm/components/shared/empty-state/empty-state";
 import { ErrorState } from "@/modules/crm/components/shared/error-state/error-state";
 import { EmailBody } from "@/modules/crm/components/shared/email-body/email-body";
 import { EmailRichEditor } from "@/modules/crm/features/leads/components/email-rich-editor";
+import { ReplyDesignPreviewDialog } from "@/modules/crm/features/leads/components/reply-design-preview-dialog";
 import type { EmailThreadMessage } from "@/modules/crm/features/leads/types/lead-detail-types";
 
 /**
@@ -25,6 +29,9 @@ function ownAssetSources(): string[] {
   const source = emailAssetImageSource(apiClient.defaults.baseURL ?? "");
   return source === null ? [] : [source];
 }
+
+/** The Reply design picker's "No design" — today's formatted reply. Never a design id (those are numeric). */
+const NO_DESIGN = "none";
 
 /** Human label for the delivery/lifecycle state stored on the email row. */
 function deliveryLabel(status: string): string {
@@ -109,9 +116,11 @@ function MessageCard({ message }: { message: EmailThreadMessage }) {
       {/* A formatted reply still renders through NoteBody (ProseMirror from JSON); a received HTML
           email, or a designed email exactly as it was sent, renders in a sandboxed frame; everything
           else as structured plain text. There is no dangerouslySetInnerHTML anywhere in the thread. */}
+      {/* A reply sent in a chosen design shows its sent HTML: that, not the document, is what the lead read.
+          Every other formatted reply keeps rendering from its document, exactly as before. */}
       <EmailBody
         body={message.body}
-        bodyDoc={message.bodyDoc}
+        bodyDoc={message.emailDesignId ? null : message.bodyDoc}
         bodyHtml={message.bodyHtml}
         trustedImageSources={inbound ? undefined : ownAssetSources()}
         className="mt-1"
@@ -157,7 +166,27 @@ export function EmailThread({ leadId }: Props) {
   const [subjectOverride, setSubjectOverride] = useState<string | null>(null);
   const subject = subjectOverride ?? replySubjectFor(data);
 
+  // The Email Design the reply is sent in. "No design" — the default — is today's formatted reply, unchanged.
+  // Designs are only chosen here, never created or edited: Settings → Email Designs owns them.
+  const designOptions = useEmailDesignOptions();
+  const [designId, setDesignId] = useState<string>(NO_DESIGN);
+  const design = designId === NO_DESIGN ? undefined : designOptions.data?.find((d) => d.id === designId);
+  const preview = useReplyDesignPreview();
+  const [previewOpen, setPreviewOpen] = useState(false);
+
   const canSend = editor !== null && hasBody && !!subject.trim() && !sendEmail.isPending;
+
+  function changeDesign(value: string | null) {
+    setDesignId(value ?? NO_DESIGN);
+    // An earlier refusal was about the earlier choice.
+    sendEmail.reset();
+  }
+
+  function openPreview() {
+    if (!editor || !design) return;
+    preview.mutate({ leadId, emailDesignId: design.id, bodyDoc: editor.getJSON() });
+    setPreviewOpen(true);
+  }
 
   function submit() {
     if (!canSend || !editor) return;
@@ -169,12 +198,14 @@ export function EmailThread({ leadId }: Props) {
         // the HTML part come from one source. Still sent because `body` is required for every caller.
         body: editor.getText({ blockSeparator: "\n" }).trim(),
         bodyDoc: editor.getJSON(),
+        ...(design ? { emailDesignId: design.id } : {}),
       },
       {
         onSuccess: () => {
           // The thread refreshes via useSendEmail's invalidation of leads.emails(leadId).
           editor.commands.clearContent(true);
           setSubjectOverride(null);
+          setDesignId(NO_DESIGN);
         },
       },
     );
@@ -248,6 +279,29 @@ export function EmailThread({ leadId }: Props) {
             className="h-10 w-full rounded-lg border border-border bg-card px-3.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
           />
 
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <span className="text-xs font-medium text-muted-foreground">Email Design</span>
+            <Select value={designId} onValueChange={changeDesign} disabled={sendEmail.isPending}>
+              <SelectTrigger aria-label="Email design" className="!h-9 min-w-48">
+                <SelectValue>{design?.name ?? "No design"}</SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={NO_DESIGN}>No design</SelectItem>
+                {(designOptions.data ?? []).map((d) => (
+                  <SelectItem key={d.id} value={d.id}>
+                    {d.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {design ? (
+              <Button type="button" variant="outline" size="sm" onClick={openPreview} disabled={!hasBody || !editor}>
+                <Eye aria-hidden />
+                Preview
+              </Button>
+            ) : null}
+          </div>
+
           <EmailRichEditor
             className="mt-2"
             ariaLabel="Reply message"
@@ -258,6 +312,12 @@ export function EmailThread({ leadId }: Props) {
             disabled={sendEmail.isPending}
           />
 
+          {design && sendEmail.isError ? (
+            <p role="alert" className="mt-2 text-xs text-destructive">
+              {getApiErrorMessage(sendEmail.error, "This reply could not be sent in the selected design.")}
+            </p>
+          ) : null}
+
           <div className="mt-3 flex justify-end">
             <Button size="sm" onClick={submit} disabled={!canSend}>
               <Send className="h-4 w-4" />
@@ -265,6 +325,18 @@ export function EmailThread({ leadId }: Props) {
             </Button>
           </div>
         </div>
+      ) : null}
+
+      {design ? (
+        <ReplyDesignPreviewDialog
+          open={previewOpen}
+          onOpenChange={setPreviewOpen}
+          subject={subject}
+          designName={design.name}
+          preview={{ isPending: preview.isPending, error: preview.error, data: preview.data }}
+          onRetry={openPreview}
+          trustedImageSources={ownAssetSources()}
+        />
       ) : null}
     </div>
   );

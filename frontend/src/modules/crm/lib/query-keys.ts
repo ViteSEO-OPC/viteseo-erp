@@ -260,6 +260,9 @@ export const queryKeys = {
     list: () => [...queryKeys.emailDesigns.all, "list"] as const,
     // What "Apply to all templates" would change for a design (null: one not saved yet). Always refetched.
     applySummary: (designId: string | null) => [...queryKeys.emailDesigns.all, "apply-summary", designId ?? "new"] as const,
+    // Lead Details → Reply's design picker (GET /email-designs/options): ids and names only. Under `all`, so a
+    // Settings change to the designs refreshes the picker by prefix.
+    options: () => [...queryKeys.emailDesigns.all, "options"] as const,
   },
   emailBranding: {
     // Settings → Email Designs → Organization logo (GET /settings/email-branding). A logo change also

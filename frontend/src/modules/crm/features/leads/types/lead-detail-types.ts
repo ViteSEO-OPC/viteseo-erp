@@ -94,6 +94,9 @@ export type EmailThreadMessage = {
   // An HTML part shown in a sandboxed frame: a received email's, or the exact HTML a designed email
   // the CRM sent went out with. Null when the email has none, which renders `body` as plain text.
   bodyHtml: string | null;
+  // The Email Design a reply was sent in, when the BD chose one: its `bodyHtml` is then what the recipient
+  // read, so the thread shows that rather than the document. Null for every other email.
+  emailDesignId: string | null;
   // Delivery/lifecycle state: sent · received · failed · draft.
   status: string;
   // Unified chronological key (inbound receipt / outbound send / row creation).

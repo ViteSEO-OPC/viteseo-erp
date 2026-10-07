@@ -3,6 +3,7 @@
 namespace App\Modules\Crm\Services\Outreach;
 
 use App\Models\User;
+use App\Modules\Crm\Models\EmailDesign;
 use App\Modules\Crm\Models\EmailTemplate;
 use App\Modules\Crm\Models\Lead;
 use App\Modules\Crm\Support\EmailDesign\EmailDesignContext;
@@ -44,6 +45,13 @@ class EmailTemplateDesignService
     public const TEXT_TOO_LONG = 'The plain-text version of this email is longer than 10,000 characters. Remove some text.';
 
     public const NO_READABLE_CONTENT = 'Add readable content — a heading, text or a button. Dividers, spacers and images alone are not an email.';
+
+    public const REPLY_TOO_LARGE = 'This reply is too large to send in the selected design. Shorten it or choose No design.';
+
+    public const REPLY_DESIGN_UNUSABLE = 'The selected design cannot be used right now. Choose another design or No design.';
+
+    /** A designed reply's text size: the design text block's usual size, as in the Settings sample. */
+    private const REPLY_FONT_SIZE = 14;
 
     /** The subject the design preview shows, since a design has no subject of its own. */
     public const PREVIEW_SUBJECT = 'A sample email';
@@ -263,23 +271,83 @@ class EmailTemplateDesignService
             return $refused('design_missing');
         }
 
+        return $this->renderChecked($design->layout, $template->content, $this->sendContext($lead, $sender));
+    }
+
+    /**
+     * A Lead Details reply's free-form document as design content: one text block, nothing else. The design
+     * supplies everything around it — header, logo, styles, signature, footer — exactly as it is saved.
+     *
+     * The reply's document is a strict subset of what a text block accepts (EmailDocument::NODES/MARKS ⊂
+     * EmailDesignSchema::TEXT_CHILDREN/MARK_TAGS), so a valid reply needs no conversion to fit.
+     *
+     * @param  array<string, mixed>  $doc  a reply document that passed EmailDocument::problem()
+     * @return array<string, mixed>
+     */
+    public function replyContent(array $doc): array
+    {
+        return [
+            'version' => EmailDesignSchema::VERSION,
+            'blocks' => [
+                ['type' => 'text', 'id' => 'reply', 'content' => $doc, 'align' => 'left', 'font_size' => self::REPLY_FONT_SIZE],
+            ],
+        ];
+    }
+
+    /**
+     * Both parts of a Lead Details reply sent in an existing Email Design — or nulls, and why not.
+     *
+     * THE ONE SEQUENCE FOR A DESIGNED REPLY, shared by the reply's preview and its send, so the preview IS
+     * the sent HTML: the same design layout and reply content, re-validated, rendered by the same renderer in
+     * the same {@see sendContext()}, and held to the same Gmail guard as a designed template
+     * ({@see designedHtml()}). The text/plain part is the renderer's text form of the same email, so the
+     * design's signature reaches a plain-text reader too.
+     *
+     * Reasons: `document_invalid`, `html_too_large` (with the size measured). Callers refuse the send on
+     * either — a BD who chose a design is never silently sent plain text.
+     *
+     * @param  array<string, mixed>  $doc  a reply document that passed EmailDocument::problem()
+     * @return array{html: string|null, text: string|null, reason: string|null, bytes: int|null}
+     */
+    public function designedReplyHtml(EmailDesign $design, array $doc, Lead $lead, ?User $sender): array
+    {
+        $content = $this->replyContent($doc);
+        $context = $this->sendContext($lead, $sender);
+        $rendered = $this->renderChecked($design->layout, $content, $context);
+
+        return [
+            ...$rendered,
+            'text' => $rendered['html'] === null ? null : $this->renderer->toText($design->layout, $content, $context),
+        ];
+    }
+
+    /** What a BD is told when the design they chose cannot carry this reply, by refusal reason. */
+    public static function replyRefusalMessage(string $reason): string
+    {
+        return $reason === 'html_too_large' ? self::REPLY_TOO_LARGE : self::REPLY_DESIGN_UNUSABLE;
+    }
+
+    /**
+     * Validate → render → Gmail guard, for a design layout and content in a real send context.
+     *
+     * @return array{html: string|null, reason: string|null, bytes: int|null}
+     */
+    private function renderChecked(mixed $layout, mixed $content, EmailDesignContext $context): array
+    {
         // The documents have been at rest in the database since they were accepted, so they are
         // re-validated rather than trusted.
-        $layout = $design->layout;
-        $content = $template->content;
-
         if ($this->validator->layoutProblem($layout) !== null || $this->validator->contentProblem($content) !== null) {
-            return $refused('document_invalid');
+            return ['html' => null, 'reason' => 'document_invalid', 'bytes' => null];
         }
 
-        $html = $this->renderer->toHtml($layout, $content, $this->sendContext($lead, $sender));
+        $html = $this->renderer->toHtml($layout, $content, $context);
 
         // THE GMAIL GUARD, RE-RUN WITH THIS LEAD'S REAL VALUES. Settings measures the same email with
         // sample values, and a real business name is often longer. Gmail clips over ~102 KB and hides
         // the rest behind "[Message clipped]", so an email that would be truncated is sent as plain
         // text instead: a complete message a person can read beats a designed one they cannot.
         if (strlen($html) > self::MAX_HTML_BYTES) {
-            return $refused('html_too_large', strlen($html));
+            return ['html' => null, 'reason' => 'html_too_large', 'bytes' => strlen($html)];
         }
 
         return ['html' => $html, 'reason' => null, 'bytes' => strlen($html)];
