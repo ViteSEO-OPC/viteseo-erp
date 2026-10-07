@@ -270,9 +270,121 @@ final class EmailDesignRenderer
             'divider' => $this->dividerRow($block, $this->blockColor($block, 'color', $theme), $inset),
             'spacer' => $this->spacerRow($block['height']),
             'footer' => $this->documentRow($block, $font, $this->blockColor($block, 'color', $theme), $theme['link_color'], $tokens, 8, $inset),
+            'card' => $this->cardRow($block, $theme, $extra, $font, $tokens, $context, $inset),
+            'rows' => $this->rowsRow($block, $theme, $font, $tokens, $inset),
             // Unreachable for a validated document, and deliberately renders nothing.
             default => '',
         };
+    }
+
+    /**
+     * A content card: a full-width panel in the card background, its corners, border and padding from the design,
+     * holding its eyebrow and title and then its own blocks. Its blocks are drawn by blockHtml() exactly as at the
+     * top level, inset by the card padding instead of the column's — and since a card never holds a card, this
+     * recursion is one level deep. Rounded corners need separate borders; Outlook desktop shows them square.
+     *
+     * @param  array<string, mixed>  $block
+     * @param  array<string, string>  $theme
+     * @param  array<string, string|int>  $extra
+     * @param  array<string, string>  $tokens
+     */
+    private function cardRow(array $block, array $theme, array $extra, string $font, array $tokens, EmailDesignContext $context, int $inset): string
+    {
+        $background = $this->styleValue('background_color', $block['background_color'] ?? null) ?? (string) $extra['card_background_color'];
+        $borderColor = $this->styleValue('border_color', $block['border_color'] ?? null) ?? (string) $extra['card_border_color'];
+        $padding = (int) $extra['card_padding'];
+        $radius = (int) $extra['card_radius'];
+        $borderWidth = (int) $extra['card_border_width'];
+
+        $rows = [];
+        $heading = $this->cardHeadingHtml($block, $theme, $extra, $font, $tokens);
+        if ($heading !== '') {
+            $rows[] = $this->row($block['align'], $heading, $padding);
+        }
+        foreach ($block['blocks'] as $inner) {
+            $rows[] = $this->blockHtml($inner, $theme, $extra, $font, $tokens, $context, $padding);
+        }
+        $rows = array_filter($rows, fn (string $row): bool => $row !== '');
+        if ($rows === []) {
+            return '';
+        }
+
+        $frame = 'width:100%;border-collapse:separate;border-spacing:0;background-color:'.$background.';'
+            .($radius > 0 ? 'border-radius:'.$radius.'px;' : '')
+            .($borderWidth > 0 ? 'border:'.$borderWidth.'px solid '.$borderColor.';' : '');
+
+        return '<tr><td style="'.$this->rowPadding($inset).'">'
+            .'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="'.$background.'" style="'.$frame.'">'
+            .'<tr><td style="padding:'.max($padding - self::ROW_VERTICAL_PADDING, 0).'px 0;">'
+            .'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;">'
+            .implode('', $rows)
+            .'</table></td></tr></table></td></tr>';
+    }
+
+    /**
+     * A card's eyebrow and title, or nothing when neither has visible text once its placeholders are filled in.
+     *
+     * @param  array<string, mixed>  $block
+     * @param  array<string, string>  $theme
+     * @param  array<string, string|int>  $extra
+     * @param  array<string, string>  $tokens
+     */
+    private function cardHeadingHtml(array $block, array $theme, array $extra, string $font, array $tokens): string
+    {
+        [$eyebrow, $title] = $this->cardHeadingText($block, $tokens);
+
+        $html = '';
+        if ($eyebrow !== '') {
+            $html .= '<p style="margin:'.($title !== '' ? '0 0 4px 0' : '0').';font-family:'.$font.';font-size:'.EmailDesignSchema::CARD_EYEBROW_SIZE.'px;'
+                .'line-height:1.4;font-weight:bold;color:'.$extra['eyebrow_color'].';">'.$this->escape($eyebrow).'</p>';
+        }
+        if ($title !== '') {
+            $html .= '<p style="margin:0;font-family:'.$font.';font-size:'.EmailDesignSchema::CARD_TITLE_SIZE.'px;'
+                .'line-height:1.3;font-weight:bold;color:'.$theme['text_color'].';">'.$this->escape($title).'</p>';
+        }
+
+        return $html;
+    }
+
+    /**
+     * A rows block: each item's title over its description, optionally with a rule between items. An item
+     * whose title and description are both blank once filled in is left out.
+     *
+     * @param  array<string, mixed>  $block
+     * @param  array<string, string>  $theme
+     * @param  array<string, string>  $tokens
+     */
+    private function rowsRow(array $block, array $theme, string $font, array $tokens, int $inset): string
+    {
+        $items = $this->rowsItems($block, $tokens);
+        if ($items === []) {
+            return '';
+        }
+
+        $align = $this->escape($block['align']);
+        $titleColor = $this->blockColor($block, 'title_color', $theme);
+        $descriptionColor = $this->blockColor($block, 'description_color', $theme);
+        $ruleColor = $this->blockColor($block, 'divider_color', $theme);
+        $last = count($items) - 1;
+
+        $html = '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;">';
+        foreach ($items as $i => [$title, $description]) {
+            if ($i > 0 && $block['dividers'] === true) {
+                $html .= '<tr><td height="1" bgcolor="'.$ruleColor.'" style="height:1px;font-size:0;line-height:0;background-color:'.$ruleColor.';">&nbsp;</td></tr>';
+            }
+            $html .= '<tr><td align="'.$align.'" style="padding:'.($i === 0 ? 0 : 10).'px 0 '.($i === $last ? 0 : 10).'px 0;text-align:'.$align.';">';
+            if ($title !== '') {
+                $html .= '<p style="margin:0;font-family:'.$font.';font-size:'.EmailDesignSchema::ROW_TITLE_SIZE.'px;line-height:1.4;font-weight:bold;color:'.$titleColor.';">'
+                    .$this->escape($title).'</p>';
+            }
+            if ($description !== '') {
+                $html .= '<p style="margin:'.($title !== '' ? '4px 0 0 0' : '0').';font-family:'.$font.';font-size:'.EmailDesignSchema::ROW_DESCRIPTION_SIZE.'px;line-height:1.5;color:'.$descriptionColor.';">'
+                    .$this->escape($description).'</p>';
+            }
+            $html .= '</td></tr>';
+        }
+
+        return $this->row($block['align'], $html.'</table>', $inset);
     }
 
     private function row(string $align, string $inner, int $inset): string
@@ -641,8 +753,72 @@ final class EmailDesignRenderer
                 ? ''
                 : ($block['alt'] === '' ? $block['link_url'] : $block['alt'].': '.$block['link_url']),
             'divider' => self::TEXT_RULE,
+            'card' => $this->cardText($block, $tokens),
+            'rows' => implode("\n\n", array_map(
+                fn (array $item): string => trim($item[0]."\n".$item[1], "\n"),
+                $this->rowsItems($block, $tokens),
+            )),
             default => '',
         };
+    }
+
+    /**
+     * A card as text: its eyebrow and title, then each of its blocks' text, a blank line apart.
+     *
+     * @param  array<string, mixed>  $block
+     * @param  array<string, string>  $tokens
+     */
+    private function cardText(array $block, array $tokens): string
+    {
+        [$eyebrow, $title] = $this->cardHeadingText($block, $tokens);
+        $heading = trim($eyebrow."\n".$title, "\n");
+
+        $parts = $heading === '' ? [] : [$heading];
+        foreach ($block['blocks'] as $inner) {
+            $part = trim($this->blockText($inner, $tokens), "\n");
+            if ($part !== '') {
+                $parts[] = $part;
+            }
+        }
+
+        return implode("\n\n", $parts);
+    }
+
+    /**
+     * A card's eyebrow and title with placeholders filled in and edges trimmed; '' for an absent one.
+     *
+     * @param  array<string, mixed>  $block
+     * @param  array<string, string>  $tokens
+     * @return array{string, string}
+     */
+    private function cardHeadingText(array $block, array $tokens): array
+    {
+        return [
+            trim($this->substitute((string) ($block['eyebrow'] ?? ''), $tokens)),
+            trim($this->substitute((string) ($block['title'] ?? ''), $tokens)),
+        ];
+    }
+
+    /**
+     * A rows block's items as [title, description], placeholders filled in and edges trimmed, leaving out an
+     * item that has neither.
+     *
+     * @param  array<string, mixed>  $block
+     * @param  array<string, string>  $tokens
+     * @return list<array{string, string}>
+     */
+    private function rowsItems(array $block, array $tokens): array
+    {
+        $items = [];
+        foreach ($block['items'] as $item) {
+            $title = trim($this->substitute($item['title'], $tokens));
+            $description = trim($this->substitute((string) ($item['description'] ?? ''), $tokens));
+            if ($title !== '' || $description !== '') {
+                $items[] = [$title, $description];
+            }
+        }
+
+        return $items;
     }
 
     /**

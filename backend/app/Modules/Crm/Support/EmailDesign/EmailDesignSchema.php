@@ -42,6 +42,15 @@ use App\Modules\Crm\Support\EmailTemplateCatalog;
  * every block row and `container_radius` rounds the email's corners; the card styles shape content cards. A
  * document that sets none of them renders exactly as it did before they existed.
  *
+ * ── Cards and rows ──
+ * A `card` is the one block that holds blocks: a framed panel in a template's content, with an optional small
+ * label (`eyebrow`) and `title` above its own `blocks`. Its look — background, border, radius, padding, the
+ * eyebrow's color — is the design's (ADDITIONAL_COLOR_STYLES, NUMERIC_STYLES), each overridable per card for
+ * the two colors. A card holds only CARD_BLOCKS, which never include another card, so nesting is one level by
+ * construction; its blocks count toward MAX_CONTENT_BLOCKS, and every id is unique across the whole document.
+ * `rows` is a list of `items`, each a `title` and an optional `description` — a quotation's lines, a package's
+ * features — drawn one under another, optionally with a rule between them. Text only: placeholders yes, markup no.
+ *
  * ── The signature area belongs to the design ──
  * The design decides whether a signature is shown, its sign-off and its alignment; the sender's name, title
  * and phone are filled in at render time. A template may override only the sign-off text: an absent
@@ -152,8 +161,16 @@ final class EmailDesignSchema
     public const REGION_BLOCKS = [
         'header' => ['logo', 'heading', 'text', 'button', 'image', 'divider', 'spacer'],
         'footer' => ['footer', 'text', 'logo', 'button', 'image', 'divider', 'spacer'],
-        'blocks' => ['heading', 'text', 'button', 'image', 'divider', 'spacer'],
+        'blocks' => ['heading', 'text', 'button', 'image', 'divider', 'spacer', 'card', 'rows'],
     ];
+
+    /**
+     * The blocks a card may hold. Never a card (one level of nesting), and never an image: a card's padding
+     * narrows the column, and an image sized for the column would not fit it.
+     *
+     * @var list<string>
+     */
+    public const CARD_BLOCKS = ['heading', 'text', 'rows', 'divider', 'button', 'spacer'];
 
     // ── Styles ───────────────────────────────────────────────────────────────────────────────
 
@@ -230,6 +247,8 @@ final class EmailDesignSchema
         'footer' => ['color' => 'muted_text_color'],
         'button' => ['background_color' => 'accent_color', 'text_color' => 'accent_text_color'],
         'divider' => ['color' => 'divider_color'],
+        'card' => ['background_color' => 'card_background_color', 'border_color' => 'card_border_color'],
+        'rows' => ['title_color' => 'text_color', 'description_color' => 'muted_text_color', 'divider_color' => 'divider_color'],
     ];
 
     /** @var list<string> */
@@ -251,7 +270,12 @@ final class EmailDesignSchema
         'divider' => ['required' => ['type', 'id', 'thickness'], 'optional' => ['color']],
         'spacer' => ['required' => ['type', 'id', 'height'], 'optional' => []],
         'footer' => ['required' => ['type', 'id', 'content', 'align', 'font_size'], 'optional' => ['color']],
+        'card' => ['required' => ['type', 'id', 'blocks', 'align'], 'optional' => ['eyebrow', 'title', 'background_color', 'border_color']],
+        'rows' => ['required' => ['type', 'id', 'items', 'align', 'dividers'], 'optional' => ['title_color', 'description_color', 'divider_color']],
     ];
+
+    /** A rows item's fields. */
+    public const ROWS_ITEM_FIELDS = ['required' => ['title'], 'optional' => ['description']];
 
     // ── Ranges: inclusive [min, max], whole numbers only ─────────────────────────────────────
 
@@ -296,6 +320,29 @@ final class EmailDesignSchema
     public const MAX_BLOCK_TEXT = 5000;
 
     public const MAX_URL = 2000;
+
+    public const MAX_CARD_EYEBROW = 100;
+
+    public const MAX_CARD_TITLE = 200;
+
+    public const MAX_ROW_TITLE = 200;
+
+    public const MAX_ROW_DESCRIPTION = 1000;
+
+    /** Blocks one card may hold. They also count toward MAX_CONTENT_BLOCKS. */
+    public const MAX_CARD_BLOCKS = 20;
+
+    /** Items one rows block may hold. */
+    public const MAX_ROWS_ITEMS = 30;
+
+    /** A card's title and a row's title and description, in px. */
+    public const CARD_EYEBROW_SIZE = 12;
+
+    public const CARD_TITLE_SIZE = 20;
+
+    public const ROW_TITLE_SIZE = 15;
+
+    public const ROW_DESCRIPTION_SIZE = 14;
 
     public const MAX_LINK_ATTRIBUTE = 200;
 
