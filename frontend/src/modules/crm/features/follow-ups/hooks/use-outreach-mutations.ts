@@ -61,6 +61,11 @@ export type DraftEmail = {
    * (and with them its design). Null when it was not composed from one, or its text was edited.
    */
   emailTemplateId?: string | null;
+  /**
+   * Set only on a structured draft (Lead Details → New designed email). Such a draft is edited only in its
+   * structured editor there; the composer never opens it as plain text.
+   */
+  content?: unknown;
 };
 
 /** What Save Draft writes. `emailTemplateId` follows the same rule as a send's: null once edited. */

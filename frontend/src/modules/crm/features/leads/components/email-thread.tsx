@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import type { Editor } from "@tiptap/react";
-import { Eye, Send } from "lucide-react";
+import { Eye, LayoutTemplate, Send } from "lucide-react";
 import { cn } from "@/modules/crm/lib/utils";
 import { apiClient } from "@/modules/crm/lib/axios";
 import { emailAssetImageSource } from "@/modules/crm/lib/email-body";
@@ -18,6 +18,8 @@ import { ErrorState } from "@/modules/crm/components/shared/error-state/error-st
 import { EmailBody } from "@/modules/crm/components/shared/email-body/email-body";
 import { EmailRichEditor } from "@/modules/crm/features/leads/components/email-rich-editor";
 import { ReplyDesignPreviewDialog } from "@/modules/crm/features/leads/components/reply-design-preview-dialog";
+import { StructuredEmailDialog } from "@/modules/crm/features/leads/components/structured-email-dialog";
+import type { StructuredEmail } from "@/modules/crm/features/leads/hooks/use-structured-email";
 import type { EmailThreadMessage } from "@/modules/crm/features/leads/types/lead-detail-types";
 
 /**
@@ -58,7 +60,7 @@ function DirectionBadge({ direction }: { direction: EmailThreadMessage["directio
   );
 }
 
-function MessageCard({ message }: { message: EmailThreadMessage }) {
+function MessageCard({ message, onContinue }: { message: EmailThreadMessage; onContinue?: (message: EmailThreadMessage) => void }) {
   const inbound = message.direction === "inbound";
 
   // from → to for BOTH directions, so the shared-mailbox identity is visible on every row:
@@ -95,9 +97,15 @@ function MessageCard({ message }: { message: EmailThreadMessage }) {
             {deliveryLabel(message.status)}
           </span>
         </div>
-        <time className="shrink-0 text-xs text-muted-foreground">
-          {formatActivityTimestamp(message.timestamp)}
-        </time>
+        <div className="flex shrink-0 items-center gap-2">
+          {/* A structured draft (New designed email) keeps being edited in its own editor, never as plain text. */}
+          {message.status === "draft" && message.content && onContinue ? (
+            <Button type="button" variant="outline" size="sm" onClick={() => onContinue(message)}>
+              Continue editing
+            </Button>
+          ) : null}
+          <time className="text-xs text-muted-foreground">{formatActivityTimestamp(message.timestamp)}</time>
+        </div>
       </div>
 
       <p className="mt-2 truncate text-xs text-muted-foreground">
@@ -165,6 +173,24 @@ export function EmailThread({ leadId }: Props) {
   // newly-arrived reply keeps the box in sync without an effect syncing state to props.
   const [subjectOverride, setSubjectOverride] = useState<string | null>(null);
   const subject = subjectOverride ?? replySubjectFor(data);
+
+  // Lead Details → New designed email: open, with the structured draft being continued (null starts a new one).
+  const [structured, setStructured] = useState<{ existing: StructuredEmail | null } | null>(null);
+  const continueStructured = (message: EmailThreadMessage) =>
+    message.content
+      ? setStructured({
+          existing: {
+            id: message.id,
+            leadId: message.leadId ?? leadId,
+            to: message.to ?? "",
+            subject: message.subject,
+            status: message.status,
+            content: message.content,
+            emailTemplateId: message.emailTemplateId ?? null,
+            emailDesignId: message.emailDesignId,
+          },
+        })
+      : undefined;
 
   // The Email Design the reply is sent in. "No design" — the default — is today's formatted reply, unchanged.
   // Designs are only chosen here, never created or edited: Settings → Email Designs owns them.
@@ -244,7 +270,7 @@ export function EmailThread({ leadId }: Props) {
         <div className="max-h-[440px] overflow-y-auto pr-1 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-teal-400 [&::-webkit-scrollbar-track]:bg-transparent">
           <ol className="flex flex-col gap-3">
             {data.map((message) => (
-              <MessageCard key={message.id} message={message} />
+              <MessageCard key={message.id} message={message} onContinue={continueStructured} />
             ))}
           </ol>
           {hasMore ? (
@@ -259,7 +285,14 @@ export function EmailThread({ leadId }: Props) {
           against an unknown subject. A failed LOAD still allows a send: the two are independent. */}
       {!isLoading ? (
         <div className="mt-5 border-t border-border pt-5">
-          <h4 className="mb-3 text-sm font-semibold text-card-foreground">Reply</h4>
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <h4 className="text-sm font-semibold text-card-foreground">Reply</h4>
+            {/* A separate flow from Reply: a designed Email Template copied for this lead, not a free-form reply. */}
+            <Button type="button" variant="outline" size="sm" onClick={() => setStructured({ existing: null })}>
+              <LayoutTemplate aria-hidden />
+              New designed email
+            </Button>
+          </div>
 
           {/* Labelled with `aria-label` rather than a visually-hidden <label>, matching
               DiscussionNotes. NOT a decorative choice: Tailwind's `sr-only` is `position:absolute`,
@@ -337,6 +370,10 @@ export function EmailThread({ leadId }: Props) {
           onRetry={openPreview}
           trustedImageSources={ownAssetSources()}
         />
+      ) : null}
+
+      {structured ? (
+        <StructuredEmailDialog leadId={leadId} existing={structured.existing} onClose={() => setStructured(null)} />
       ) : null}
     </div>
   );

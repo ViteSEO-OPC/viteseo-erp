@@ -32,25 +32,36 @@ export function DraftsList({ drafts, isLoading, onOpen, onSend, onDiscard, pendi
       <div className="min-h-0 flex-1 overflow-y-auto" role="list">
         {drafts.map((draft) => {
           const pending = pendingId === draft.id;
+          // A structured draft (New designed email) is never flattened into the plain-text composer.
+          const structured = draft.content != null;
+          const summary = (
+            <>
+              <span className="block truncate text-sm font-bold text-foreground">
+                {draft.subject || "(No subject)"}
+              </span>
+              <p className="truncate text-[11px] text-muted-foreground">To: {draft.to || "—"}</p>
+              <p className="mt-1 truncate text-[12px] text-secondary-foreground">
+                {structured ? "Designed email · edit it in Lead Details" : draft.body || "No content yet."}
+              </p>
+            </>
+          );
           return (
             <div
               key={draft.id}
               role="listitem"
               className="flex items-start gap-3 border-b border-border-subtle px-4 py-3.5 md:px-6"
             >
-              <button
-                type="button"
-                onClick={() => onOpen(draft)}
-                className="min-w-0 flex-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-              >
-                <span className="block truncate text-sm font-bold text-foreground">
-                  {draft.subject || "(No subject)"}
-                </span>
-                <p className="truncate text-[11px] text-muted-foreground">To: {draft.to || "—"}</p>
-                <p className="mt-1 truncate text-[12px] text-secondary-foreground">
-                  {draft.body || "No content yet."}
-                </p>
-              </button>
+              {structured ? (
+                <div className="min-w-0 flex-1">{summary}</div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => onOpen(draft)}
+                  className="min-w-0 flex-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                >
+                  {summary}
+                </button>
+              )}
               <div className="flex shrink-0 gap-2">
                 <Button variant="outline" size="sm" onClick={() => onSend(draft.id)} disabled={pending} aria-label="Send">
                   <SendIcon className="h-3.5 w-3.5" />

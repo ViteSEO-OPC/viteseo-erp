@@ -1,3 +1,4 @@
+import type { TemplateContent } from "@/modules/crm/features/email-templates/types/email-design-types";
 import type { JSONContent } from "@tiptap/react";
 import type { LeadRow, ActivityType } from "@/modules/crm/features/dashboard/types/dashboard-types";
 import type { LeadOutcome } from "@/modules/crm/features/leads/components/lead-score-ring";
@@ -97,6 +98,12 @@ export type EmailThreadMessage = {
   // The Email Design a reply was sent in, when the BD chose one: its `bodyHtml` is then what the recipient
   // read, so the thread shows that rather than the document. Null for every other email.
   emailDesignId: string | null;
+  // A per-lead structured email's content document (Lead Details → New designed email); null for every other
+  // email. A draft that has it reopens in the structured editor.
+  content?: TemplateContent | null;
+  // The template it started from, when it did.
+  emailTemplateId?: string | null;
+  leadId?: string | null;
   // Delivery/lifecycle state: sent · received · failed · draft.
   status: string;
   // Unified chronological key (inbound receipt / outbound send / row creation).

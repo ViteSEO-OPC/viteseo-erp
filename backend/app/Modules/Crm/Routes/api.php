@@ -27,6 +27,7 @@ use App\Modules\Crm\Controllers\EmailBrandingController;
 use App\Modules\Crm\Controllers\EmailDesignManagementController;
 use App\Modules\Crm\Controllers\EmailDesignOptionController;
 use App\Modules\Crm\Controllers\EmailTemplateController;
+use App\Modules\Crm\Controllers\StructuredEmailController;
 use App\Modules\Crm\Controllers\EmailTemplateManagementController;
 use App\Modules\Crm\Controllers\EmailTemplateOptionController;
 use App\Modules\Crm\Controllers\DiscoveryConfigController;
@@ -462,6 +463,19 @@ Route::middleware(['auth:sanctum', 'set-current-org', 'subscription-active', 'fe
         Route::post('/leads/{lead}/emails/drafts', [EmailController::class, 'storeDraft'])
             ->middleware('permission:crm.follow-ups.create')
             ->can('view', 'lead');
+        // Lead Details → New designed email: a per-lead copy of a designed Email Template. Same gates as drafts:
+        // starting one and previewing need the reply permission and the lead; saving and scheduling go through
+        // EmailPolicy (author/Admin, draft-only). Sending is POST /emails/{email}/send below.
+        Route::post('/leads/{lead}/emails/structured', [StructuredEmailController::class, 'store'])
+            ->middleware('permission:crm.follow-ups.create')
+            ->can('view', 'lead');
+        Route::post('/leads/{lead}/emails/structured-preview', [StructuredEmailController::class, 'preview'])
+            ->middleware(['permission:crm.follow-ups.create', 'throttle:60,1'])
+            ->can('view', 'lead');
+        Route::put('/emails/{email}/structured', [StructuredEmailController::class, 'update'])
+            ->can('update', 'email');
+        Route::post('/emails/{email}/schedule', [StructuredEmailController::class, 'schedule'])
+            ->can('send', 'email');
         Route::match(['put', 'patch'], '/emails/{email}', [EmailController::class, 'update'])
             ->can('update', 'email');
         Route::delete('/emails/{email}', [EmailController::class, 'destroy'])

@@ -22,8 +22,14 @@ import type {
   TemplateContent,
 } from "@/modules/crm/features/email-templates/types/email-design-types";
 
-/** The two server previews: a template's content in a design, and a design with sample content. */
-export type PreviewEndpoint = "/settings/email-templates/preview" | "/settings/email-designs/preview";
+/**
+ * The server previews: a template's content in a design and a design with sample content (Settings), and one
+ * lead's structured email in its design for that lead (Lead Details → New designed email).
+ */
+export type PreviewEndpoint =
+  | "/settings/email-templates/preview"
+  | "/settings/email-designs/preview"
+  | `/leads/${string}/emails/structured-preview`;
 
 /** Long enough that typing settles into one request; each endpoint allows 60 a minute. */
 const PREVIEW_DELAY_MS = 700;

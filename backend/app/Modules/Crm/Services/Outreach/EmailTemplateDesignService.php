@@ -339,6 +339,45 @@ class EmailTemplateDesignService
         ];
     }
 
+    /**
+     * Both parts of a per-lead structured email — a template's content copied onto one lead's email and edited
+     * for that lead — in its design, or nulls and why not.
+     *
+     * THE ONE SEQUENCE FOR A STRUCTURED EMAIL, shared by its preview, its send and its scheduled delivery, so the
+     * preview IS the sent HTML: the same design layout and content, re-validated, rendered by the same renderer in
+     * the same {@see sendContext()}, held to the same Gmail guard. Content with nothing readable is refused too,
+     * exactly as Settings refuses it on a template. The text/plain part is the renderer's text form.
+     *
+     * Reasons: `document_invalid`, `html_too_large` (with the size measured), `no_readable_content`. Callers
+     * refuse the send on any of them — structured content is never silently sent as plain text.
+     *
+     * @param  array<string, mixed>  $content
+     * @return array{html: string|null, text: string|null, reason: string|null, bytes: int|null}
+     */
+    public function structuredHtml(EmailDesign $design, array $content, Lead $lead, ?User $sender): array
+    {
+        $context = $this->sendContext($lead, $sender);
+        $rendered = $this->renderChecked($design->layout, $content, $context);
+        if ($rendered['html'] !== null && ! $this->hasReadableContent($content)) {
+            $rendered = ['html' => null, 'reason' => 'no_readable_content', 'bytes' => null];
+        }
+
+        return [
+            ...$rendered,
+            'text' => $rendered['html'] === null ? null : $this->renderer->toText($design->layout, $content, $context),
+        ];
+    }
+
+    /** What a BD is told when a structured email cannot be shown in its design, by refusal reason. */
+    public static function structuredRefusalMessage(string $reason): string
+    {
+        return match ($reason) {
+            'html_too_large' => self::HTML_TOO_LARGE,
+            'no_readable_content' => self::NO_READABLE_CONTENT,
+            default => 'This email cannot be shown in the selected design. Check its content or choose another design.',
+        };
+    }
+
     /** What a BD is told when the design they chose cannot carry this reply, by refusal reason. */
     public static function replyRefusalMessage(string $reason): string
     {
