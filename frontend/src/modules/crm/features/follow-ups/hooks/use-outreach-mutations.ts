@@ -30,6 +30,11 @@ export type SendEmailVars = {
    * usual case — sends plain text exactly as before. An id, never HTML: the server renders.
    */
   emailTemplateId?: string;
+  /**
+   * The Email Design a Lead Details reply is sent in, when the BD chose one. Sent as `email_design_id`
+   * alongside `bodyDoc`; omitted — every other caller, and Reply's "No design" — sends exactly as before.
+   */
+  emailDesignId?: string;
 };
 
 export type SentEmail = {
@@ -84,7 +89,7 @@ const draftsKey = [...queryKeys.followUps.all, "drafts"] as const;
 export function useSendEmail() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ leadId, subject, body, to, scheduledAt, bodyDoc, emailTemplateId }: SendEmailVars) =>
+    mutationFn: ({ leadId, subject, body, to, scheduledAt, bodyDoc, emailTemplateId, emailDesignId }: SendEmailVars) =>
       apiClient
         .post(`/leads/${leadId}/emails`, {
           subject,
@@ -97,6 +102,8 @@ export function useSendEmail() {
           ...(scheduledAt ? { scheduled_at: scheduledAt } : {}),
           // Only an unedited designed template carries one; its absence is the plain-text send.
           ...(emailTemplateId ? { email_template_id: emailTemplateId } : {}),
+          // Only a Lead Details reply sent in a chosen design carries one.
+          ...(emailDesignId ? { email_design_id: emailDesignId } : {}),
         })
         .then((r) => r.data.data as SentEmail),
     onSuccess: (email, variables) => {

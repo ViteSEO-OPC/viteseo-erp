@@ -25,6 +25,7 @@ use App\Modules\Crm\Controllers\EmailController;
 use App\Modules\Crm\Controllers\EmailAssetController;
 use App\Modules\Crm\Controllers\EmailBrandingController;
 use App\Modules\Crm\Controllers\EmailDesignManagementController;
+use App\Modules\Crm\Controllers\EmailDesignOptionController;
 use App\Modules\Crm\Controllers\EmailTemplateController;
 use App\Modules\Crm\Controllers\EmailTemplateManagementController;
 use App\Modules\Crm\Controllers\EmailTemplateOptionController;
@@ -433,6 +434,16 @@ Route::middleware(['auth:sanctum', 'set-current-org', 'subscription-active', 'fe
         // Activity that surfaces on the Dashboard via GET /activities.
         Route::post('/leads/{lead}/emails', [EmailController::class, 'store'])
             ->middleware('permission:crm.follow-ups.create')
+            ->can('view', 'lead');
+
+        // Lead Details → Reply in an existing Email Design. Read-only for the people who send replies — the same
+        // gates as sending one; Settings → Email Designs stays the only place designs are managed. `options`
+        // lists ids and names only; `design-preview` renders the reply through the call the send makes, so it
+        // is the sent HTML, and writes nothing.
+        Route::get('/email-designs/options', [EmailDesignOptionController::class, 'index'])
+            ->middleware('permission:crm.follow-ups.create');
+        Route::post('/leads/{lead}/emails/design-preview', [EmailController::class, 'replyPreview'])
+            ->middleware(['permission:crm.follow-ups.create', 'throttle:60,1'])
             ->can('view', 'lead');
 
         // Schedule a follow-up for a lead (Lead Details "Schedule follow-up" Quick Action). Delegates

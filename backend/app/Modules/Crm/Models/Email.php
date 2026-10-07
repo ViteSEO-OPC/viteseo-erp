@@ -40,6 +40,8 @@ use Illuminate\Support\Carbon;
     // part is rendered from at send time. Null for every other email — `body` stays canonical.
     'body_doc',
     'email_template_id',
+    // The Email Design a Lead Details reply was sent in, when the BD chose one. Null for everything else.
+    'email_design_id',
     // The text/html part exactly as it was sent, written once by OutreachEmailService::sendExisting()
     // on a successful send. Null when the email went out as plain text (or did not go out at all).
     // Never accepted from a request: no request field carries markup.
@@ -100,6 +102,19 @@ class Email extends Model
     public function emailTemplate(): BelongsTo
     {
         return $this->belongsTo(EmailTemplate::class, 'email_template_id');
+    }
+
+    /**
+     * The Email Design a Lead Details reply was sent in, when the BD chose one — NULL for every other email.
+     *
+     * Includes soft-deleted designs: the id records what was chosen, and a design deleted afterwards does not
+     * change what was sent (the `body_html` snapshot holds that).
+     *
+     * @return BelongsTo<EmailDesign, $this>
+     */
+    public function emailDesign(): BelongsTo
+    {
+        return $this->belongsTo(EmailDesign::class, 'email_design_id')->withTrashed();
     }
 
     public function lead(): BelongsTo

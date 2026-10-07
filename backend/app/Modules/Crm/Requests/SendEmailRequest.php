@@ -2,6 +2,7 @@
 
 namespace App\Modules\Crm\Requests;
 
+use App\Modules\Crm\Requests\Concerns\ValidatesDesignedReply;
 use App\Modules\Crm\Services\Mail\EmailDocument;
 use App\Support\CurrentOrg;
 use Illuminate\Foundation\Http\FormRequest;
@@ -10,6 +11,8 @@ use Illuminate\Validation\Validator;
 
 class SendEmailRequest extends FormRequest
 {
+    use ValidatesDesignedReply;
+
     public function authorize(): bool
     {
         return true;
@@ -55,6 +58,17 @@ class SendEmailRequest extends FormRequest
                 Rule::exists('crm_email_templates', 'id')
                     ->where(fn ($query) => $query->where('org_id', CurrentOrg::id())->whereNull('deleted_at')),
             ],
+            // THE EMAIL DESIGN A LEAD DETAILS REPLY IS SENT IN, when the BD chose one. An id, never markup.
+            // Absent or null — every existing caller, and Reply's "No design" — sends exactly as before.
+            //
+            // A designed reply is send-now only and is never also a template send: both combinations are
+            // refused rather than quietly ignored.
+            'email_design_id' => [
+                'sometimes',
+                'nullable',
+                ...$this->emailDesignIdRules(),
+                'prohibits:scheduled_at,email_template_id',
+            ],
         ];
     }
 
@@ -66,20 +80,27 @@ class SendEmailRequest extends FormRequest
     {
         $validator->after(function (Validator $validator): void {
             $doc = $this->emailDocument();
-            if ($doc === null) {
-                return; // plain-text send — nothing more to check.
+
+            if ($doc !== null) {
+                $problem = EmailDocument::problem($doc);
+                if ($problem !== null) {
+                    $validator->errors()->add('body_doc', $problem);
+
+                    return;
+                }
+
+                // Structurally fine but reads as nothing (only empty paragraphs): no message to send.
+                if (EmailDocument::toText($doc) === '') {
+                    $validator->errors()->add('body_doc', 'Write a message before sending.');
+
+                    return;
+                }
             }
 
-            $problem = EmailDocument::problem($doc);
-            if ($problem !== null) {
-                $validator->errors()->add('body_doc', $problem);
-
-                return;
-            }
-
-            // Structurally fine but reads as nothing (only empty paragraphs): no message to send.
-            if (EmailDocument::toText($doc) === '') {
-                $validator->errors()->add('body_doc', 'Write a message before sending.');
+            // A Lead Details reply sent in a design: its (otherwise sendable) document must also fit the
+            // design. Checked only once the design id itself has validated.
+            if ($this->emailDesignId() !== null && ! $validator->errors()->has('email_design_id')) {
+                $this->validateDesignedReplyDocument($validator, $doc);
             }
         });
     }
@@ -97,6 +118,14 @@ class SendEmailRequest extends FormRequest
         $doc = $this->input('body_doc');
 
         return is_array($doc) && $doc !== [] ? $doc : null;
+    }
+
+    /** The Email Design a Lead Details reply is to be sent in, or null for every other send. */
+    public function emailDesignId(): ?int
+    {
+        $id = $this->input('email_design_id');
+
+        return is_numeric($id) ? (int) $id : null;
     }
 
     /**

@@ -30,6 +30,9 @@ class EmailResource extends JsonResource
             // Additive. The template the email was composed from, so a saved draft reopens on that
             // template's Purpose + Tone and its design. An id only; null when it was not.
             'emailTemplateId' => $this->email_template_id !== null ? (string) $this->email_template_id : null,
+            // Additive. The Email Design a Lead Details reply was sent in, when the BD chose one — the signal the
+            // thread uses to show that reply's sent HTML rather than its document. Null for every other email.
+            'emailDesignId' => $this->email_design_id !== null ? (string) $this->email_design_id : null,
             'provider' => $this->provider,
             'sentAt' => $this->sent_at?->toIso8601String(),
             'updatedAt' => $this->updated_at?->toIso8601String(),

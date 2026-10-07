@@ -5,19 +5,23 @@ namespace App\Modules\Crm\Controllers;
 use App\Http\Controllers\Controller;
 
 use App\Modules\Crm\Requests\IndexEmailRequest;
+use App\Modules\Crm\Requests\PreviewReplyDesignRequest;
 use App\Modules\Crm\Requests\RescheduleEmailRequest;
 use App\Modules\Crm\Requests\SaveDraftRequest;
 use App\Modules\Crm\Requests\SendEmailRequest;
 use App\Modules\Crm\Resources\EmailResource;
 use App\Modules\Crm\Models\Email;
+use App\Modules\Crm\Models\EmailDesign;
 use App\Modules\Crm\Models\Lead;
 use App\Models\User;
+use App\Modules\Crm\Services\Outreach\EmailTemplateDesignService;
 use App\Modules\Crm\Services\Outreach\OutreachEmailService;
 use App\Modules\Crm\Services\Outreach\ScheduledEmailService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Support\Carbon;
+use Illuminate\Validation\ValidationException;
 
 /**
  * Outreach email — the whole Email lifecycle lives here (draft → sent → failed). A draft is
@@ -58,9 +62,36 @@ class EmailController extends Controller
         // RC3 Send-Later: a future `scheduled_at` schedules the email (no send now); otherwise send now.
         $email = isset($data['scheduled_at'])
             ? $scheduled->schedule($lead, $sender, (string) $data['subject'], $body, Carbon::parse((string) $data['scheduled_at']), $to, $bodyDoc, $emailTemplateId)
-            : $service->sendToLead($lead, $sender, (string) $data['subject'], $body, $to, $bodyDoc, $emailTemplateId);
+            : $service->sendToLead($lead, $sender, (string) $data['subject'], $body, $to, $bodyDoc, $emailTemplateId, $request->emailDesignId());
 
         return (new EmailResource($email))->response()->setStatusCode(201);
+    }
+
+    /**
+     * Preview a Lead Details reply in an existing Email Design: the HTML this lead would receive from this
+     * sender if the reply were sent now. Rendered by EmailTemplateDesignService::designedReplyHtml() — the
+     * call the send makes — so the preview is the sent HTML, byte for byte. Writes nothing.
+     *
+     * Authorization on the route (view lead + follow-ups.create, the same gates as sending the reply).
+     */
+    public function replyPreview(PreviewReplyDesignRequest $request, Lead $lead, EmailTemplateDesignService $designs): JsonResponse
+    {
+        /** @var User $sender */
+        $sender = $request->user();
+        $design = EmailDesign::query()->findOrFail((int) $request->validated('email_design_id'));
+
+        $rendered = $designs->designedReplyHtml($design, (array) $request->emailDocument(), $lead, $sender);
+
+        if ($rendered['html'] === null) {
+            throw ValidationException::withMessages([
+                'email_design_id' => EmailTemplateDesignService::replyRefusalMessage((string) $rendered['reason']),
+            ]);
+        }
+
+        return response()->json(['data' => [
+            'html' => $rendered['html'],
+            'htmlBytes' => $rendered['bytes'],
+        ]]);
     }
 
     /** Cancel a still-scheduled email (author/Admin; scheduled-only — EmailPolicy@cancel). */
