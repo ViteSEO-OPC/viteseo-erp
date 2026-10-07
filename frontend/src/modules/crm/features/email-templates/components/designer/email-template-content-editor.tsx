@@ -21,7 +21,7 @@ import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetT
 import { FormField } from "@/modules/crm/components/forms/form-field/form-field";
 import { FIELD } from "@/modules/crm/features/settings/components/form-styles";
 import { cn } from "@/modules/crm/lib/utils";
-import { DesignBlockList } from "@/modules/crm/features/email-templates/components/designer/design-block-list";
+import { StructuredEmailEditor } from "@/modules/crm/features/email-templates/components/designer/structured-email-editor";
 import { AddCustomOptionDialog } from "@/modules/crm/features/email-templates/components/add-custom-option-dialog";
 import {
   CustomPurposeItems,
@@ -44,14 +44,12 @@ import {
   useUpdateEmailTemplate,
 } from "@/modules/crm/features/email-templates/hooks/use-email-templates-admin";
 import {
-  ADDABLE_BLOCKS,
   ADDITIONAL_COLOR_FIELDS,
   ADDITIONAL_STYLE_LABELS,
   BLOCK_LABELS,
   BOOLEAN_STYLE_LABELS,
   COLOR_STYLE_FIELDS,
   FONT_OPTIONS,
-  MAX_CONTENT_BLOCKS,
   NUMERIC_STYLES,
   NUMERIC_STYLE_FIELDS,
   STYLE_LABELS,
@@ -661,18 +659,13 @@ export function EmailTemplateContentEditor({ template, seed, catalog, onClose }:
                 </div>
               </section>
 
-              <DesignBlockList
-                title="Content"
-                description="This template's message, between the design's header and its signature area."
-                blocks={content.blocks}
-                onChange={(next) => changeContent((current) => ({ ...current, blocks: next(current.blocks) }))}
-                addable={ADDABLE_BLOCKS.blocks}
-                max={MAX_CONTENT_BLOCKS}
+              <StructuredEmailEditor
+                content={content}
+                onChange={changeContent}
                 problems={problems.blocks}
                 tokens={catalog.tokens}
                 styleChain={styleChain}
                 disabled={pending}
-                emptyMessage="No content yet. Add a heading, some text or a card below."
                 initiallyExpanded={seed.content.blocks[0]?.id ?? null}
               />
             </div>

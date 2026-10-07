@@ -39,6 +39,9 @@ use Illuminate\Support\Carbon;
     // Formatted replies only (Lead Detail's composer): the validated Tiptap document the text/html
     // part is rendered from at send time. Null for every other email — `body` stays canonical.
     'body_doc',
+    // A per-lead structured email: the template content document copied onto this draft and edited for one lead
+    // (see the 2026_10_08 migration). Null for every other email.
+    'content',
     'email_template_id',
     // The Email Design a Lead Details reply was sent in, when the BD chose one. Null for everything else.
     'email_design_id',
@@ -82,6 +85,7 @@ class Email extends Model
             'received_at' => 'datetime',
             'raw_headers' => 'array',
             'body_doc' => 'array',
+            'content' => 'array',
             'scheduled_at' => 'datetime',
             'queued_at' => 'datetime',
             'failed_at' => 'datetime',

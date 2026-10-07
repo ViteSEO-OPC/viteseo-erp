@@ -68,6 +68,19 @@ class ScheduledEmailService
     }
 
     /**
+     * Schedule an existing draft — a per-lead structured email the BD has saved — for later delivery. The SAME row
+     * moves draft → scheduled, so delivery, cancel, reschedule and send-now are the existing ones, and delivery
+     * renders it through sendExisting() exactly as a Send-Now would.
+     */
+    public function scheduleDraft(Email $email, Carbon $scheduledAt): Email
+    {
+        $email->update(['status' => self::PENDING, 'scheduled_at' => $scheduledAt]);
+        $this->record($email, 'scheduled', ['scheduled_at' => $scheduledAt->toIso8601String()]);
+
+        return $email;
+    }
+
+    /**
      * Schedule an email whose schedule is owned by a Planner "Email Task" event (RC3 Planner ↔ Outreach
      * link). The email carries NO independent `scheduled_at` — its execution schedule DERIVES from the
      * linked event's `starts_at` (Planner is the scheduling authority). Outreach still owns the content

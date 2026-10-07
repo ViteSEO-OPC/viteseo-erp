@@ -167,9 +167,11 @@ class OutreachEmailService
         // A designed reply sends both parts from its design — the text part is the design's text form, so
         // its signature reaches a plain-text reader too — while `body` stays the reply the BD wrote, which is
         // what CRM lists and notifications show. Every other email takes htmlFor() and `body`, as before.
-        $designedReply = $this->designedReplyParts($email, $lead, $sender);
-        $html = $designedReply['html'] ?? $this->htmlFor($email, $sender);
-        $sent = $this->dispatch($lead, $toEmail, $subject, $designedReply['text'] ?? (string) $email->body, $html);
+        // A per-lead structured email (Lead Details → New designed email) renders its own content in its design —
+        // checked FIRST, so it can never reach the reply or template paths below, or fall back to plain text.
+        $designed = $this->structuredParts($email, $lead, $sender) ?? $this->designedReplyParts($email, $lead, $sender);
+        $html = $designed['html'] ?? $this->htmlFor($email, $sender);
+        $sent = $this->dispatch($lead, $toEmail, $subject, $designed['text'] ?? (string) $email->body, $html);
 
         $email = DB::transaction(function () use ($email, $lead, $sender, $subject, $toEmail, $sent, $html): Email {
             $email->update([
@@ -198,6 +200,46 @@ class OutreachEmailService
         $this->announceIfSent($email);
 
         return $email;
+    }
+
+    /**
+     * Both parts of a per-lead structured email, or null when this email is not one.
+     *
+     * Rendered through EmailTemplateDesignService::structuredHtml() — the call its preview makes — so the sent
+     * HTML is the previewed HTML. FAIL CLOSED: a design that is gone, content that no longer validates or an email
+     * too large for Gmail refuses the send (a 422 for a Send-Now; a failed row for a scheduled delivery). The BD
+     * chose a structured email, so it is never quietly sent as plain text instead.
+     *
+     * @return array{html: string, text: string}|null
+     */
+    private function structuredParts(Email $email, Lead $lead, User $sender): ?array
+    {
+        if ($email->content === null) {
+            return null;
+        }
+
+        // The relation also returns a soft-deleted design (the thread still shows what was sent in one); a deleted
+        // design must not send.
+        $design = $email->emailDesign;
+        if ($design === null || $design->trashed()) {
+            throw ValidationException::withMessages(['email_design_id' => 'This email\'s design is no longer available. Choose another design and send again.']);
+        }
+
+        $rendered = $this->designs->structuredHtml($design, (array) $email->content, $lead, $sender);
+        if ($rendered['html'] === null || $rendered['text'] === null) {
+            Log::warning('outreach.structured_email.refused', [
+                'email_id' => $email->id,
+                'email_design_id' => $design->id,
+                'reason' => $rendered['reason'],
+                'bytes' => $rendered['bytes'],
+            ]);
+
+            throw ValidationException::withMessages([
+                'content' => EmailTemplateDesignService::structuredRefusalMessage((string) $rendered['reason']),
+            ]);
+        }
+
+        return ['html' => $rendered['html'], 'text' => $rendered['text']];
     }
 
     /**

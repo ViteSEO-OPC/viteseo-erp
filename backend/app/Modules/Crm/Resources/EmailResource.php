@@ -33,6 +33,9 @@ class EmailResource extends JsonResource
             // Additive. The Email Design a Lead Details reply was sent in, when the BD chose one — the signal the
             // thread uses to show that reply's sent HTML rather than its document. Null for every other email.
             'emailDesignId' => $this->email_design_id !== null ? (string) $this->email_design_id : null,
+            // Additive. A per-lead structured email's content document (cards, rows, actions…), JSON never HTML;
+            // null for every other email. Present so the structured editor can reopen the draft.
+            'content' => $this->content,
             'provider' => $this->provider,
             'sentAt' => $this->sent_at?->toIso8601String(),
             'updatedAt' => $this->updated_at?->toIso8601String(),

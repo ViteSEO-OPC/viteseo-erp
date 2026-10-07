@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { JSONContent } from "@tiptap/react";
 import { apiClient } from "@/modules/crm/lib/axios";
 import { queryKeys } from "@/modules/crm/lib/query-keys";
+import type { TemplateContent } from "@/modules/crm/features/email-templates/types/email-design-types";
 import type { EmailThreadMessage } from "@/modules/crm/features/leads/types/lead-detail-types";
 
 /**
@@ -21,6 +22,10 @@ type EmailApi = {
   bodyHtml?: string | null;
   /** Optional too: absent or null means the email was not a reply sent in a chosen design. */
   emailDesignId?: string | null;
+  /** Optional too: set only on a structured email (Lead Details → New designed email). */
+  content?: TemplateContent | null;
+  emailTemplateId?: string | null;
+  leadId?: string | null;
   status: string;
   timestamp: string | null;
   sentAt: string | null;
@@ -56,6 +61,9 @@ export function useLeadEmails(id: string) {
     bodyDoc: api.bodyDoc ?? null,
     bodyHtml: api.bodyHtml ?? null,
     emailDesignId: api.emailDesignId ?? null,
+    content: api.content ?? null,
+    emailTemplateId: api.emailTemplateId ?? null,
+    leadId: api.leadId ?? null,
     status: api.status,
     timestamp: api.timestamp ?? api.receivedAt ?? api.sentAt ?? "",
     fromName: api.fromName,
