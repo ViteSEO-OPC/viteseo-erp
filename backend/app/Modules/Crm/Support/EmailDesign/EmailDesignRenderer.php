@@ -19,8 +19,9 @@ use InvalidArgumentException;
  * A table-based, single-column layout: a full-width page table, then a content table that is 100% wide up
  * to 600px (with a fixed 600px ghost table for Outlook desktop, which ignores max-width). Every style is
  * inline; there is no <style> element, no class, no script and no external resource except images the
- * context resolved. Each block is one row with 24px side padding, so images and buttons scale down on a
- * phone without a media query. A preheader, when set, is the first thing in <body>: hidden text that inbox
+ * context resolved. Each block is one row inset from the column's sides (EmailDesignSchema::CONTENT_PADDING,
+ * resolved once per render and passed down to every row), so images and buttons scale down on a phone without
+ * a media query. A preheader, when set, is the first thing in <body>: hidden text that inbox
  * lists show beside the subject.
  *
  * ── Styles ──
@@ -56,6 +57,9 @@ final class EmailDesignRenderer
 
     /** Vertical space above the first block and below the last. */
     private const CANVAS_PADDING = 16;
+
+    /** Vertical padding above and below every block row. */
+    private const ROW_VERTICAL_PADDING = 8;
 
     /** Invisible characters after the preheader, so a client does not fill the preview with body text. */
     private const PREHEADER_FILLER = '&#847;&zwnj;&nbsp;';
@@ -115,13 +119,17 @@ final class EmailDesignRenderer
             $this->spacerRow(self::CANVAS_PADDING),
         );
 
+        // The side inset of every block row. One value for the whole email today; resolved here, once, so a row
+        // never reaches for the schema constant itself.
+        $inset = EmailDesignSchema::CONTENT_PADDING;
+
         $rows = [];
         foreach ([...$layout['header'], ...$content['blocks']] as $block) {
-            $rows[] = $this->blockHtml($block, $theme, $font, $tokens, $context);
+            $rows[] = $this->blockHtml($block, $theme, $font, $tokens, $context, $inset);
         }
-        $rows[] = $this->signatureRow($layout['signature'], $content, $font, $theme['text_color'], $tokens);
+        $rows[] = $this->signatureRow($layout['signature'], $content, $font, $theme['text_color'], $tokens, $inset);
         foreach ($layout['footer'] as $block) {
-            $rows[] = $this->blockHtml($block, $theme, $font, $tokens, $context);
+            $rows[] = $this->blockHtml($block, $theme, $font, $tokens, $context, $inset);
         }
 
         foreach ($rows as $row) {
@@ -206,28 +214,35 @@ final class EmailDesignRenderer
      * @param  array<string, mixed>  $block
      * @param  array<string, string>  $theme
      * @param  array<string, string>  $tokens
+     * @param  int  $inset  the row's side padding in px
      */
-    private function blockHtml(array $block, array $theme, string $font, array $tokens, EmailDesignContext $context): string
+    private function blockHtml(array $block, array $theme, string $font, array $tokens, EmailDesignContext $context, int $inset): string
     {
         return match ($block['type']) {
-            'logo' => $this->imageRow($context->logoUrl, $block['width'], $this->cleanValue($context->logoAlt), $block['align'], $this->logoLink($block, $context), $context),
-            'heading' => $this->headingRow($block, $font, $tokens, $this->blockColor($block, 'color', $theme)),
-            'text' => $this->documentRow($block, $font, $this->blockColor($block, 'color', $theme), $theme['link_color'], $tokens, 12),
-            'button' => $this->buttonRow($block, $font, $tokens, $this->blockColor($block, 'background_color', $theme), $this->blockColor($block, 'text_color', $theme)),
-            'image' => $this->imageRow($context->assetUrls[$block['asset_id']] ?? null, $block['width'], $block['alt'], $block['align'], $block['link_url'] ?? null, $context),
-            'divider' => $this->dividerRow($block, $this->blockColor($block, 'color', $theme)),
+            'logo' => $this->imageRow($context->logoUrl, $block['width'], $this->cleanValue($context->logoAlt), $block['align'], $this->logoLink($block, $context), $context, $inset),
+            'heading' => $this->headingRow($block, $font, $tokens, $this->blockColor($block, 'color', $theme), $inset),
+            'text' => $this->documentRow($block, $font, $this->blockColor($block, 'color', $theme), $theme['link_color'], $tokens, 12, $inset),
+            'button' => $this->buttonRow($block, $font, $tokens, $this->blockColor($block, 'background_color', $theme), $this->blockColor($block, 'text_color', $theme), $inset),
+            'image' => $this->imageRow($context->assetUrls[$block['asset_id']] ?? null, $block['width'], $block['alt'], $block['align'], $block['link_url'] ?? null, $context, $inset),
+            'divider' => $this->dividerRow($block, $this->blockColor($block, 'color', $theme), $inset),
             'spacer' => $this->spacerRow($block['height']),
-            'footer' => $this->documentRow($block, $font, $this->blockColor($block, 'color', $theme), $theme['link_color'], $tokens, 8),
+            'footer' => $this->documentRow($block, $font, $this->blockColor($block, 'color', $theme), $theme['link_color'], $tokens, 8, $inset),
             // Unreachable for a validated document, and deliberately renders nothing.
             default => '',
         };
     }
 
-    private function row(string $align, string $inner): string
+    private function row(string $align, string $inner, int $inset): string
     {
         $align = $this->escape($align);
 
-        return '<tr><td align="'.$align.'" style="padding:8px '.EmailDesignSchema::CONTENT_PADDING.'px;text-align:'.$align.';">'.$inner.'</td></tr>';
+        return '<tr><td align="'.$align.'" style="'.$this->rowPadding($inset).'text-align:'.$align.';">'.$inner.'</td></tr>';
+    }
+
+    /** A block row's padding declaration: the fixed vertical padding and the given side inset. */
+    private function rowPadding(int $inset): string
+    {
+        return 'padding:'.self::ROW_VERTICAL_PADDING.'px '.$inset.'px;';
     }
 
     private function spacerRow(int $height): string
@@ -258,7 +273,7 @@ final class EmailDesignRenderer
      * @param  array<string, mixed>  $block
      * @param  array<string, string>  $tokens
      */
-    private function headingRow(array $block, string $font, array $tokens, string $color): string
+    private function headingRow(array $block, string $font, array $tokens, string $color, int $inset): string
     {
         $level = (int) $block['level'];
         $style = 'margin:0;font-family:'.$font.';font-size:'.EmailDesignSchema::HEADING_SIZES[$level].'px;line-height:1.25;'
@@ -267,6 +282,7 @@ final class EmailDesignRenderer
         return $this->row(
             $block['align'],
             '<h'.$level.' style="'.$style.'">'.$this->escape($this->substitute($block['text'], $tokens)).'</h'.$level.'>',
+            $inset,
         );
     }
 
@@ -277,7 +293,7 @@ final class EmailDesignRenderer
      * @param  array<string, mixed>  $block
      * @param  array<string, string>  $tokens
      */
-    private function documentRow(array $block, string $font, string $color, string $linkColor, array $tokens, int $gap): string
+    private function documentRow(array $block, string $font, string $color, string $linkColor, array $tokens, int $gap, int $inset): string
     {
         $base = 'font-family:'.$font.';font-size:'.(int) $block['font_size'].'px;line-height:1.5;color:'.$color.';';
         $nodes = $block['content']['content'];
@@ -291,7 +307,7 @@ final class EmailDesignRenderer
                 : $this->listHtml($node, $margin, $base, $linkColor, $tokens);
         }
 
-        return $this->row($block['align'], $html);
+        return $this->row($block['align'], $html, $inset);
     }
 
     /**
@@ -373,7 +389,7 @@ final class EmailDesignRenderer
      * @param  array<string, mixed>  $block
      * @param  array<string, string>  $tokens
      */
-    private function buttonRow(array $block, string $font, array $tokens, string $background, string $labelColor): string
+    private function buttonRow(array $block, string $font, array $tokens, string $background, string $labelColor, int $inset): string
     {
         $radius = (int) $block['radius'];
 
@@ -386,6 +402,7 @@ final class EmailDesignRenderer
             .'text-decoration:none;border-radius:'.$radius.'px;">'
             .$this->escape($this->substitute($block['label'], $tokens))
             .'</a></td></tr></table>',
+            $inset,
         );
     }
 
@@ -396,7 +413,7 @@ final class EmailDesignRenderer
      * image is then inlined as a data URI — but only once the URL itself passed the same check, and only when
      * the bytes are a PNG. A data URI is never accepted AS a URL from the context.
      */
-    private function imageRow(mixed $url, int $width, string $alt, string $align, ?string $link, EmailDesignContext $context): string
+    private function imageRow(mixed $url, int $width, string $alt, string $align, ?string $link, EmailDesignContext $context, int $inset): string
     {
         $src = $this->safeImageUrl($url);
         if ($src === null) {
@@ -419,7 +436,7 @@ final class EmailDesignRenderer
             $image = '<a href="'.$this->escape($link).'" target="_blank" rel="noopener noreferrer" style="display:block;text-decoration:none;">'.$image.'</a>';
         }
 
-        return $this->row($align, $image);
+        return $this->row($align, $image, $inset);
     }
 
     /**
@@ -440,11 +457,11 @@ final class EmailDesignRenderer
     }
 
     /** @param  array<string, mixed>  $block */
-    private function dividerRow(array $block, string $color): string
+    private function dividerRow(array $block, string $color, int $inset): string
     {
         $thickness = (int) $block['thickness'];
 
-        return '<tr><td style="padding:8px '.EmailDesignSchema::CONTENT_PADDING.'px;">'
+        return '<tr><td style="'.$this->rowPadding($inset).'">'
             .'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;">'
             .'<tr><td height="'.$thickness.'" bgcolor="'.$color.'" style="height:'.$thickness.'px;font-size:0;line-height:0;background-color:'.$color.';">&nbsp;</td></tr>'
             .'</table></td></tr>';
@@ -457,7 +474,7 @@ final class EmailDesignRenderer
      * @param  array<string, mixed>  $content
      * @param  array<string, string>  $tokens
      */
-    private function signatureRow(array $signature, array $content, string $font, string $textColor, array $tokens): string
+    private function signatureRow(array $signature, array $content, string $font, string $textColor, array $tokens, int $inset): string
     {
         $lines = $this->signatureLines($signature, $content, $tokens);
         if ($lines === []) {
@@ -472,7 +489,7 @@ final class EmailDesignRenderer
             $html .= '<p style="margin:'.$margin.';'.$base.'">'.($isName ? '<strong>'.$escaped.'</strong>' : $escaped).'</p>';
         }
 
-        return $this->row($signature['align'], $html);
+        return $this->row($signature['align'], $html, $inset);
     }
 
     // ── Text blocks ──────────────────────────────────────────────────────────────────────────
