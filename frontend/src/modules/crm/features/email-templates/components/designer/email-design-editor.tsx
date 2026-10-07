@@ -17,6 +17,8 @@ import { DesignBlockList } from "@/modules/crm/features/email-templates/componen
 import {
   AlignmentControl,
   ColorControl,
+  OptionalRangeControl,
+  SwitchControl,
   TextLineControl,
 } from "@/modules/crm/features/email-templates/components/designer/design-controls";
 import { DesignPreviewPanel, type PreviewDevice } from "@/modules/crm/features/email-templates/components/designer/design-preview-panel";
@@ -25,6 +27,7 @@ import { useCreateEmailDesign, useUpdateEmailDesign } from "@/modules/crm/featur
 import { apiFieldErrors } from "@/modules/crm/features/email-templates/hooks/use-email-templates-admin";
 import {
   ADDABLE_BLOCKS,
+  ADDITIONAL_STYLE_LABELS,
   BLOCK_LABELS,
   COLOR_STYLE_FIELDS,
   FONT_OPTIONS,
@@ -34,22 +37,29 @@ import {
   STYLE_LABELS,
   TEXT_LIMITS,
   blockIds,
+  NUMERIC_STYLES,
   defaultLayout,
   documentProblems,
   documentRegions,
+  effectiveAdditionalColor,
+  effectiveNumericStyle,
   effectiveStyle,
   mergeProblems,
   serializeDocument,
+  withNumericStyle,
   withStyle,
 } from "@/modules/crm/features/email-templates/lib/email-design";
 import type {
+  AdditionalColorStyleKey,
   DesignBlock,
   DesignFont,
   DesignProblems,
   DesignStyleKey,
   EmailDesign,
   EmailDesignLayout,
+  NumericStyleKey,
   SignatureArea,
+  SignatureOption,
 } from "@/modules/crm/features/email-templates/types/email-design-types";
 import type { TemplateToken } from "@/modules/crm/features/email-templates/types/email-template-types";
 
@@ -58,7 +68,35 @@ const PREVIEW_ENDPOINT = "/settings/email-designs/preview";
 /** The Font select's value for "not set here". Never sent: an unset font is simply absent. */
 const DEFAULT_FONT = "default";
 
-const SIGNATURE_LABELS: Record<string, string> = { enabled: "On or off", sign_off: "Sign-off", align: "Alignment" };
+const SIGNATURE_LABELS: Record<string, string> = {
+  enabled: "On or off",
+  sign_off: "Sign-off",
+  align: "Alignment",
+  show_company: "Company name",
+  show_email: "Email address",
+  show_phone: "Phone number",
+};
+
+/** The signature switches: what each adds, and where its value comes from. */
+const SIGNATURE_SWITCHES: readonly { key: SignatureOption; label: string; description: string }[] = [
+  { key: "show_company", label: "Company name", description: "Your organization's name, under the sender's name." },
+  {
+    key: "show_email",
+    label: "Email address",
+    description: "The CRM mailbox every email is sent from — where the lead's reply arrives.",
+  },
+  {
+    key: "show_phone",
+    label: "Phone number",
+    description: "The sending person's own phone number from their profile. Left out for anyone without one.",
+  },
+];
+
+/** The design-wide sizes and the colors cards and secondary buttons use, grouped as the editor shows them. */
+const LAYOUT_SIZES: readonly NumericStyleKey[] = ["content_padding", "container_radius"];
+const CARD_SIZES: readonly NumericStyleKey[] = ["card_padding", "card_radius", "card_border_width"];
+const CARD_COLORS: readonly AdditionalColorStyleKey[] = ["card_background_color", "card_border_color", "eyebrow_color"];
+const SECONDARY_COLORS: readonly AdditionalColorStyleKey[] = ["secondary_color", "secondary_text_color"];
 
 const schema = z.object({
   name: z
@@ -129,9 +167,47 @@ export function EmailDesignEditor({ design, tokens, onClose }: Props) {
     setSaveFailure(null);
   }
 
-  function changeStyle(key: DesignStyleKey, value: string | undefined) {
+  function changeStyle(key: DesignStyleKey | AdditionalColorStyleKey, value: string | undefined) {
     changeLayout((current) => ({ ...current, styles: withStyle(current.styles, key, value) }));
   }
+
+  function changeSize(key: NumericStyleKey, value: number | undefined) {
+    changeLayout((current) => ({ ...current, styles: withNumericStyle(current.styles, key, value) }));
+  }
+
+  /** A signature switch on, or removed — off is its default, and absent is how every older design stores it. */
+  function changeSignatureOption(key: SignatureOption, on: boolean) {
+    changeLayout((current) => {
+      const signature: SignatureArea = { ...current.signature, [key]: true };
+      if (!on) delete signature[key];
+      return { ...current, signature };
+    });
+  }
+
+  const sizeControl = (key: NumericStyleKey) => (
+    <OptionalRangeControl
+      key={key}
+      label={ADDITIONAL_STYLE_LABELS[key]}
+      value={layout.styles[key]}
+      inherited={effectiveNumericStyle([], key)}
+      range={NUMERIC_STYLES[key][1]}
+      onChange={(value) => changeSize(key, value)}
+      disabled={pending}
+      error={problems.fields[`styles.${key}`]}
+    />
+  );
+
+  const additionalColorControl = (key: AdditionalColorStyleKey) => (
+    <ColorControl
+      key={key}
+      label={ADDITIONAL_STYLE_LABELS[key]}
+      value={layout.styles[key]}
+      inherited={effectiveAdditionalColor(styleChain, key)}
+      onChange={(value) => changeStyle(key, value)}
+      disabled={pending}
+      error={problems.fields[`styles.${key}`]}
+    />
+  );
 
   function changeSignature(patch: Partial<SignatureArea>) {
     changeLayout((current) => ({ ...current, signature: { ...current.signature, ...patch } }));
@@ -147,7 +223,11 @@ export function EmailDesignEditor({ design, tokens, onClose }: Props) {
 
   const fieldLabel = (field: string) => {
     const [root, key = ""] = field.split(".");
-    if (root === "styles") return key in STYLE_LABELS ? `Page style · ${STYLE_LABELS[key as DesignStyleKey]}` : "Page style";
+    if (root === "styles") {
+      if (key in STYLE_LABELS) return `Page style · ${STYLE_LABELS[key as DesignStyleKey]}`;
+      if (key in ADDITIONAL_STYLE_LABELS) return `Page style · ${ADDITIONAL_STYLE_LABELS[key as keyof typeof ADDITIONAL_STYLE_LABELS]}`;
+      return "Page style";
+    }
     if (root === "signature") return SIGNATURE_LABELS[key] ? `Signature · ${SIGNATURE_LABELS[key]}` : "Signature";
     return field;
   };
@@ -270,6 +350,26 @@ export function EmailDesignEditor({ design, tokens, onClose }: Props) {
                     />
                   ))}
                 </div>
+                <div className="flex flex-col gap-1">
+                  <h4 className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">Layout</h4>
+                  <p className="text-xs text-muted-foreground">
+                    Side padding is the space between the email&apos;s edge and its content; it stays the same on phones.
+                  </p>
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2">{LAYOUT_SIZES.map(sizeControl)}</div>
+                <div className="flex flex-col gap-1">
+                  <h4 className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">Cards</h4>
+                  <p className="text-xs text-muted-foreground">
+                    How every card in a template&apos;s content looks. A card may still choose its own background and border color.
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-4">{CARD_COLORS.map(additionalColorControl)}</div>
+                <div className="grid gap-4 sm:grid-cols-2">{CARD_SIZES.map(sizeControl)}</div>
+                <div className="flex flex-col gap-1">
+                  <h4 className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">Secondary buttons</h4>
+                  <p className="text-xs text-muted-foreground">Buttons set to the Secondary style, such as a quieter second call to action.</p>
+                </div>
+                <div className="flex flex-wrap gap-4">{SECONDARY_COLORS.map(additionalColorControl)}</div>
               </section>
 
               <DesignBlockList
@@ -293,8 +393,8 @@ export function EmailDesignEditor({ design, tokens, onClose }: Props) {
                     Signature area
                   </h3>
                   <p className="text-xs text-muted-foreground">
-                    After the content: a sign-off, then the sender&apos;s name. Their title and phone number will appear here
-                    once sender profiles are available. A template may use its own sign-off.
+                    After the content: a sign-off, then the sender&apos;s name, and any of the details switched on below. A
+                    template may use its own sign-off.
                   </p>
                 </div>
                 <FormField label="Signature" error={problems.fields["signature.enabled"]}>
@@ -326,6 +426,19 @@ export function EmailDesignEditor({ design, tokens, onClose }: Props) {
                       disabled={pending}
                       error={problems.fields["signature.align"]}
                     />
+                    <div className="flex flex-col gap-3">
+                      {SIGNATURE_SWITCHES.map((option) => (
+                        <SwitchControl
+                          key={option.key}
+                          label={option.label}
+                          description={option.description}
+                          checked={layout.signature[option.key] === true}
+                          onChange={(on) => changeSignatureOption(option.key, on)}
+                          disabled={pending}
+                          error={problems.fields[`signature.${option.key}`]}
+                        />
+                      ))}
+                    </div>
                   </>
                 ) : null}
               </section>

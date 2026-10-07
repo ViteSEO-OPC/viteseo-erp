@@ -46,6 +46,11 @@
  * P  CUSTOM PURPOSES AND TONES — the add rules equal EmailTemplateOptionService (PHP): limits, messages, cleaning,
  *    normalization, invalid characters, duplicates however spelled; the composer keeps its fixed purposes and adds
  *    custom ones through the same exact filter; both template editors offer "+ Add custom purpose/tone".
+ * Q  CARDS, ROWS AND ADDITIONAL STYLES — the additional colors and sizes, signature switches, button variants, card
+ *    blocks, rows items and their limits equal EmailDesignSchema (PHP); ids are unique across a card's blocks too,
+ *    and duplicating a card gives its blocks fresh ids; the content count includes a card's blocks; the server's
+ *    problems for a card's block land on that block and a row's on that row; the additional colors fall back to
+ *    the system style they name and the sizes to their defaults; a card is edited with the shared block list.
  */
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import {
@@ -57,8 +62,18 @@ import {
 } from "@/modules/crm/features/email-templates/lib/email-template-text";
 import {
   ADDABLE_BLOCKS,
+  ADDABLE_CARD_BLOCKS,
+  ADDITIONAL_COLOR_STYLES,
   ALIGNMENTS,
   BLOCK_COLOR_FALLBACKS,
+  BUTTON_VARIANTS,
+  CARD_BLOCKS,
+  HEADING_SIZES,
+  MAX_CARD_BLOCKS,
+  MAX_ROWS_ITEMS,
+  NUMERIC_STYLES,
+  ROWS_ITEM_FIELDS,
+  SIGNATURE_OPTIONS,
   BLOCK_CONTROL_FIELDS,
   BLOCK_FIELDS,
   CONTENT_FIELDS,
@@ -73,6 +88,7 @@ import {
   STYLE_DEFAULTS,
   STYLE_FIELDS,
   TEXT_LIMITS,
+  blockCount,
   blockIds,
   contentFromPlainText,
   createBlock,
@@ -81,8 +97,11 @@ import {
   documentProblems,
   documentRegions,
   duplicateBlock,
+  effectiveAdditionalColor,
+  effectiveNumericStyle,
   effectiveStyle,
   inheritedBlockColor,
+  inheritedButtonColor,
   isAllowedLinkUrl,
   logoLinkTarget,
   mergeProblems,
@@ -96,6 +115,10 @@ import {
   trailingSignOff,
   withPreheader,
   withSignOff,
+  withCardText,
+  withNumericOverride,
+  withNumericStyle,
+  withRowDescription,
   withStyle,
   withStyleOverride,
 } from "@/modules/crm/features/email-templates/lib/email-design";
@@ -132,12 +155,16 @@ import {
   optionValueProblem,
 } from "@/modules/crm/features/email-templates/lib/template-options";
 import type {
+  ButtonBlock,
+  CardBlock,
   DesignBlock,
   DesignBlockType,
   DesignRegion,
+  DesignStyles,
   EmailDesignLayout,
   HeadingBlock,
   LogoBlock,
+  RowsBlock,
   TemplateContent,
   TextBlock,
 } from "@/modules/crm/features/email-templates/types/email-design-types";
@@ -346,7 +373,7 @@ gate("E  caret insertion", [
   const start = defaultLayout();
 
   gate("G  schema parity", [
-    ["the PHP schema was read", Object.keys(phpBlocks).length === 8],
+    ["the PHP schema was read", Object.keys(phpBlocks).length === 10],
     ["block types and fields match BLOCK_FIELDS", same(phpBlocks, BLOCK_FIELDS)],
     ["regions and the blocks they hold match REGION_BLOCKS", same(phpRegions, REGION_BLOCKS)],
     ["layout fields match", same(listConst("LAYOUT_FIELDS"), LAYOUT_FIELDS)],
@@ -357,7 +384,7 @@ gate("E  caret insertion", [
     ],
     ["system style defaults match STYLE_DEFAULTS", Object.keys(phpDefaults).length === 9 && same(phpDefaults, STYLE_DEFAULTS)],
     ["style fields keep the PHP order", same(Object.keys(phpDefaults), STYLE_FIELDS)],
-    ["block color fallbacks match", Object.keys(phpFallbacks).length === 5 && same(phpFallbacks, BLOCK_COLOR_FALLBACKS)],
+    ["block color fallbacks match", Object.keys(phpFallbacks).length === 7 && same(phpFallbacks, BLOCK_COLOR_FALLBACKS)],
     ["logo link targets match", same(listConst("LOGO_LINK_TARGETS"), LOGO_LINK_TARGETS)],
     ["fonts match", same(phpFonts, FONT_OPTIONS.map((font) => font.value))],
     ["alignments match", same(listConst("ALIGNMENTS"), ALIGNMENTS)],
@@ -432,6 +459,10 @@ gate("E  caret insertion", [
         return within(block.thickness, RANGES.dividerThickness);
       case "button":
         return within(block.radius, RANGES.buttonRadius);
+      case "rows":
+        return block.items.length >= 1 && block.items.length <= MAX_ROWS_ITEMS;
+      case "card":
+        return block.blocks.length >= 1 && block.blocks.length <= MAX_CARD_BLOCKS && block.blocks.every((inner) => CARD_BLOCKS.includes(inner.type) && inRange(inner));
     }
   };
   const validIds = (blocks: readonly DesignBlock[]) =>
@@ -898,6 +929,96 @@ gate("E  caret insertion", [
     ],
     ["the add dialog never submits the editor's form", feature("components/add-custom-option-dialog.tsx").includes("event.stopPropagation()")],
     ["options go to the organization-scoped endpoint", feature("hooks/use-email-template-options.ts").includes('const ENDPOINT = "/settings/email-template-options"')],
+  ]);
+}
+
+// ── Q  cards, rows and additional styles ────────────────────────────────────────────────────
+{
+  const php = readFileSync(new URL("../../../backend/app/Modules/Crm/Support/EmailDesign/EmailDesignSchema.php", import.meta.url), "utf8");
+  const names = (text: string) => [...text.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
+  const listConst = (name: string) => names(php.match(new RegExp(`public const ${name} = \\[([^\\]]*)\\]`))?.[1] ?? "");
+  const constant = (name: string) => Number(php.match(new RegExp(`public const ${name} = ([\\d_]+);`))?.[1]?.replaceAll("_", ""));
+  const pairs = (name: string) =>
+    Object.fromEntries(
+      [...(php.match(new RegExp(`public const ${name} = \\[([\\s\\S]*?)\\];`))?.[1] ?? "").matchAll(/'(\w+)' => '(\w+)'/g)].map((m) => [m[1], m[2]]),
+    );
+  const phpNumeric = Object.fromEntries(
+    [...(php.match(/public const NUMERIC_STYLES = \[([\s\S]*?)\n    \];/)?.[1] ?? "").matchAll(/'(\w+)' => \[([\w:_]+), \[(\d+), (\d+)\]\]/g)].map((m) => [
+      m[1],
+      [m[2] === "self::CONTENT_PADDING" ? constant("CONTENT_PADDING") : Number(m[2]), [Number(m[3]), Number(m[4])]],
+    ]),
+  );
+  const headingRange = php.match(/public const HEADING_FONT_SIZE = \[(\d+), (\d+)\];/);
+  const headingSizes = Object.fromEntries([...(php.match(/public const HEADING_SIZES = \[([^\]]*)\]/)?.[1] ?? "").matchAll(/(\d) => (\d+)/g)].map((m) => [m[1], Number(m[2])]));
+  const rowsFields = php.match(/public const ROWS_ITEM_FIELDS = \['required' => \[([^\]]*)\], 'optional' => \[([^\]]*)\]\];/);
+
+  // Ids are unique across a card's blocks, and a duplicated card's blocks get fresh ones.
+  const card = createBlock("card", "card-1") as CardBlock;
+  const list: DesignBlock[] = [createBlock("text", "t"), card];
+  const duplicated = duplicateBlock(list, "card-1", { random: () => 0.5 });
+  const copy = duplicated.blocks[2] as CardBlock;
+  const allIds = [...blockIds(duplicated.blocks)];
+
+  // A card's block's problem lands on that block; a row's on that row.
+  const rows = createBlock("rows", "r") as RowsBlock;
+  const content: TemplateContent = { version: 1, blocks: [createBlock("heading", "h"), { ...card, blocks: [createBlock("text", "inner-t"), rows] }] };
+  const placed = documentProblems(
+    {
+      "content.blocks.1.blocks.0.content": "Inner text problem.",
+      "content.blocks.1.blocks.1.items.0.title": "Row title problem.",
+      "content.blocks.1.blocks": "Card blocks problem.",
+      "content.blocks.1.title": "Card title problem.",
+      "content.blocks.1.blocks.9.url": "A block that is not there.",
+    },
+    "content",
+    documentRegions(content),
+  );
+
+  const chain: DesignStyles[] = [{}, { background_color: "#eeeeee", text_color: "#111111", muted_text_color: "#777777" }];
+  const secondary = { ...(createBlock("button", "b") as ButtonBlock), variant: "secondary" as const };
+
+  gate("Q  cards, rows and additional styles", [
+    ["additional colors match the PHP, in order", same(pairs("ADDITIONAL_COLOR_STYLES"), ADDITIONAL_COLOR_STYLES) && same(Object.keys(pairs("ADDITIONAL_COLOR_STYLES")), Object.keys(ADDITIONAL_COLOR_STYLES))],
+    ["numeric styles, defaults and ranges match the PHP", Object.keys(phpNumeric).length === 5 && same(phpNumeric, NUMERIC_STYLES)],
+    ["signature switches match", same(listConst("SIGNATURE_OPTIONS"), SIGNATURE_OPTIONS)],
+    ["button variants match", same(listConst("BUTTON_VARIANTS"), BUTTON_VARIANTS)],
+    ["card blocks match", same(listConst("CARD_BLOCKS"), CARD_BLOCKS)],
+    ["a card never holds a card or an image", !CARD_BLOCKS.includes("card") && !CARD_BLOCKS.includes("image")],
+    ["everything addable in a card is allowed in a card", ADDABLE_CARD_BLOCKS.every((type) => CARD_BLOCKS.includes(type))],
+    ["rows item fields match", rowsFields !== null && same({ required: names(rowsFields[1]), optional: names(rowsFields[2]) }, ROWS_ITEM_FIELDS)],
+    ["heading font size range matches", headingRange !== null && same([Number(headingRange[1]), Number(headingRange[2])], RANGES.headingFontSize)],
+    ["heading level sizes match", same(headingSizes, { "1": HEADING_SIZES[1], "2": HEADING_SIZES[2], "3": HEADING_SIZES[3] })],
+    ["card block limit matches", constant("MAX_CARD_BLOCKS") === MAX_CARD_BLOCKS],
+    ["rows item limit matches", constant("MAX_ROWS_ITEMS") === MAX_ROWS_ITEMS],
+    ["card label limit matches", constant("MAX_CARD_EYEBROW") === TEXT_LIMITS.cardEyebrow],
+    ["card title limit matches", constant("MAX_CARD_TITLE") === TEXT_LIMITS.cardTitle],
+    ["row title limit matches", constant("MAX_ROW_TITLE") === TEXT_LIMITS.rowTitle],
+    ["row description limit matches", constant("MAX_ROW_DESCRIPTION") === TEXT_LIMITS.rowDescription],
+    ["a new card holds one rows block whose id differs from the card's", card.blocks.length === 1 && card.blocks[0].type === "rows" && card.blocks[0].id !== card.id],
+    ["block ids include a card's blocks", blockIds(list).has(card.blocks[0].id)],
+    ["the content count includes a card's blocks", blockCount(list) === 3],
+    ["a duplicated card lands after the original with a fresh id", duplicated.id !== null && copy.type === "card" && copy.id !== card.id],
+    ["a duplicated card's blocks get fresh ids", copy.blocks[0].id !== card.blocks[0].id && new Set(allIds).size === allIds.length],
+    ["a duplicated card is a deep copy", copy.blocks !== card.blocks && card.blocks.length === 1],
+    ["a card's block's problem lands on that block", placed.blocks["inner-t"]?.[0]?.field === "content"],
+    ["a row's problem keeps its row and field", placed.blocks["r"]?.[0]?.field === "items.0.title"],
+    ["a card's own problems stay on the card", same(placed.blocks["card-1"]?.map((p) => p.field), ["blocks", "title", "blocks"])],
+    ["card and rows controls are fields of their block", ["card", "rows"].every((type) => BLOCK_CONTROL_FIELDS[type as "card"].every((field) => [...BLOCK_FIELDS[type as "card"].required, ...BLOCK_FIELDS[type as "card"].optional].includes(field)))],
+    ["an unset additional color takes the system style it names", effectiveAdditionalColor(chain, "card_background_color") === "#eeeeee" && effectiveAdditionalColor(chain, "eyebrow_color") === "#777777" && effectiveAdditionalColor(chain, "secondary_color") === "#111111"],
+    ["a set additional color wins, nearest first", effectiveAdditionalColor([{ card_background_color: "#abcdef" }, { card_background_color: "#000000" }], "card_background_color") === "#abcdef"],
+    ["an unset size takes its default", effectiveNumericStyle([{}, {}], "content_padding") === 24 && effectiveNumericStyle([], "card_radius") === 12],
+    ["a set size wins, nearest first, zero included", effectiveNumericStyle([{ card_radius: 0 }, { card_radius: 20 }], "card_radius") === 0],
+    ["a card's colors inherit the card styles", inheritedBlockColor("card", "background_color", chain) === "#eeeeee"],
+    ["a secondary button inherits the secondary colors", inheritedButtonColor(secondary, "background_color", chain) === "#111111"],
+    ["a primary button still inherits the accent", inheritedButtonColor({ ...secondary, variant: "primary" }, "background_color", []) === STYLE_DEFAULTS.accent_color],
+    ["setting and clearing a size", same(withNumericStyle({}, "card_padding", 30), { card_padding: 30 }) && same(withNumericStyle({ card_padding: 30 }, "card_padding", undefined), {})],
+    ["clearing the last size override removes style_overrides", !("style_overrides" in withNumericOverride({ version: 1, blocks: [], style_overrides: { card_radius: 4 } }, "card_radius", undefined))],
+    ["a blank description is removed, not stored as empty", same(withRowDescription({ title: "A", description: "x" }, ""), { title: "A" })],
+    ["a blank card title is removed", !("title" in withCardText(card, "title", ""))],
+    [
+      "a card is edited with the shared block list, not a second editor",
+      readFileSync(new URL("../../src/modules/crm/features/email-templates/components/designer/design-block-card.tsx", import.meta.url), "utf8").includes("<DesignBlockList"),
+    ],
   ]);
 }
 

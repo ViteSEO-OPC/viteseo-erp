@@ -2,33 +2,48 @@
 
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { AlertCircle, ChevronDown, ChevronRight, ChevronUp, Copy, GripVertical, Info, Trash2 } from "lucide-react";
+import { AlertCircle, ChevronDown, ChevronRight, ChevronUp, Copy, GripVertical, Info, Plus, Trash2 } from "lucide-react";
 import { cn } from "@/modules/crm/lib/utils";
+import { Button } from "@/modules/crm/components/ui/button";
 import {
   AlignmentControl,
   ColorControl,
   LinkControl,
+  OptionalRangeControl,
   RangeControl,
   SegmentedChoice,
+  SwitchControl,
   TextLineControl,
 } from "@/modules/crm/features/email-templates/components/designer/design-controls";
+import { DesignBlockList } from "@/modules/crm/features/email-templates/components/designer/design-block-list";
 import { DesignRichText } from "@/modules/crm/features/email-templates/components/designer/design-rich-text";
 import {
+  ADDABLE_CARD_BLOCKS,
   BLOCK_CONTROL_FIELDS,
   BLOCK_LABELS,
+  HEADING_SIZES,
+  MAX_CARD_BLOCKS,
+  MAX_ROWS_ITEMS,
   RANGES,
   TEXT_LIMITS,
   blockSummary,
   inheritedBlockColor,
+  inheritedButtonColor,
   logoLinkTarget,
   optionalLink,
+  withCardText,
+  withRowDescription,
 } from "@/modules/crm/features/email-templates/lib/email-design";
 import type {
+  ButtonBlock,
+  ButtonVariant,
+  CardBlock,
   DesignBlock,
   DesignProblem,
   DesignStyles,
   LogoBlock,
   LogoLinkTarget,
+  RowsBlock,
 } from "@/modules/crm/features/email-templates/types/email-design-types";
 import type { TemplateToken } from "@/modules/crm/features/email-templates/types/email-template-types";
 
@@ -36,6 +51,16 @@ const ICON_BUTTON =
   "inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-30";
 
 const HEADING_LEVELS = ([1, 2, 3] as const).map((level) => ({ value: level, label: `H${level}`, title: `Heading ${level}` }));
+
+const BUTTON_VARIANT_OPTIONS = [
+  { value: "primary", label: "Primary", title: "The design's button colors" },
+  { value: "secondary", label: "Secondary", title: "The design's secondary button colors" },
+] as const satisfies readonly { value: ButtonVariant; label: string; title: string }[];
+
+/** Whether a problem's field is one this block's panel shows: the field itself, or a part of it (`items.2.title`). */
+function isPlaced(type: DesignBlock["type"], field: string): boolean {
+  return BLOCK_CONTROL_FIELDS[type].some((control) => field === control || field.startsWith(`${control}.`));
+}
 
 const LOGO_LINK_OPTIONS = [
   { value: "website", label: "Website", title: "Link to the organization website" },
@@ -57,6 +82,10 @@ type Props = {
   count: number;
   expanded: boolean;
   problems: readonly DesignProblem[];
+  /** Every block's problems, by id — a card hands them to its own blocks. */
+  allProblems: Record<string, DesignProblem[]>;
+  /** Every id in the document, which a card's new or duplicated block must not reuse. */
+  takenIds: ReadonlySet<string>;
   tokens: readonly TemplateToken[];
   /**
    * Where an unset block color comes from, nearest first: a template's style overrides then its design's
@@ -84,6 +113,8 @@ export function DesignBlockCard({
   count,
   expanded,
   problems,
+  allProblems,
+  takenIds,
   tokens,
   styleChain,
   disabled,
@@ -100,7 +131,7 @@ export function DesignBlockCard({
   const bodyId = `design-block-${block.id}`;
 
   const error = (field: string) => problems.find((problem) => problem.field === field)?.message;
-  const unplaced = problems.filter((problem) => !BLOCK_CONTROL_FIELDS[block.type].includes(problem.field));
+  const unplaced = problems.filter((problem) => !isPlaced(block.type, problem.field));
 
   return (
     <div
@@ -173,7 +204,16 @@ export function DesignBlockCard({
               ))}
             </ul>
           ) : null}
-          <BlockSettings block={block} onChange={onChange} tokens={tokens} styleChain={styleChain} disabled={disabled} error={error} />
+          <BlockSettings
+            block={block}
+            onChange={onChange}
+            tokens={tokens}
+            styleChain={styleChain}
+            disabled={disabled}
+            error={error}
+            allProblems={allProblems}
+            takenIds={takenIds}
+          />
         </div>
       ) : null}
     </div>
@@ -196,6 +236,8 @@ function BlockSettings({
   styleChain,
   disabled,
   error,
+  allProblems,
+  takenIds,
 }: {
   block: DesignBlock;
   onChange: (block: DesignBlock) => void;
@@ -203,6 +245,8 @@ function BlockSettings({
   styleChain: readonly DesignStyles[];
   disabled: boolean;
   error: (field: string) => string | undefined;
+  allProblems: Record<string, DesignProblem[]>;
+  takenIds: ReadonlySet<string>;
 }) {
   switch (block.type) {
     case "heading":
@@ -230,6 +274,19 @@ function BlockSettings({
               error={error("color")}
             />
           </div>
+          <OptionalRangeControl
+            label="Custom font size"
+            value={block.font_size}
+            inherited={HEADING_SIZES[block.level]}
+            range={RANGES.headingFontSize}
+            onChange={(font_size) => {
+              const next = { ...block, font_size };
+              if (font_size === undefined) delete next.font_size;
+              onChange(next);
+            }}
+            disabled={disabled}
+            error={error("font_size")}
+          />
         </>
       );
 
@@ -289,12 +346,25 @@ function BlockSettings({
             error={error("label")}
           />
           <LinkControl label="Link" value={block.url} onChange={(url) => onChange({ ...block, url })} disabled={disabled} error={error("url")} />
+          <SegmentedChoice
+            label="Style"
+            value={block.variant ?? "primary"}
+            options={BUTTON_VARIANT_OPTIONS}
+            onChange={(variant) => {
+              // Primary is the default: it is stored as no variant at all, as every button before variants was.
+              const next: ButtonBlock = { ...block, variant };
+              if (variant === "primary") delete next.variant;
+              onChange(next);
+            }}
+            disabled={disabled}
+            error={error("variant")}
+          />
           <div className="flex flex-wrap gap-4">
             <AlignmentControl value={block.align} onChange={(align) => onChange({ ...block, align })} disabled={disabled} error={error("align")} />
             <ColorControl
               label="Button color"
               value={block.background_color}
-              inherited={inheritedBlockColor("button", "background_color", styleChain)}
+              inherited={inheritedButtonColor(block, "background_color", styleChain)}
               onChange={(background_color) => onChange({ ...block, background_color })}
               disabled={disabled}
               error={error("background_color")}
@@ -302,7 +372,7 @@ function BlockSettings({
             <ColorControl
               label="Label color"
               value={block.text_color}
-              inherited={inheritedBlockColor("button", "text_color", styleChain)}
+              inherited={inheritedButtonColor(block, "text_color", styleChain)}
               onChange={(text_color) => onChange({ ...block, text_color })}
               disabled={disabled}
               error={error("text_color")}
@@ -399,5 +469,261 @@ function BlockSettings({
 
     case "spacer":
       return <RangeControl label="Height" value={block.height} range={RANGES.spacerHeight} onChange={(height) => onChange({ ...block, height })} disabled={disabled} error={error("height")} />;
+
+    case "card":
+      return (
+        <CardSettings
+          block={block}
+          onChange={onChange}
+          tokens={tokens}
+          styleChain={styleChain}
+          disabled={disabled}
+          error={error}
+          allProblems={allProblems}
+          takenIds={takenIds}
+        />
+      );
+
+    case "rows":
+      return <RowsSettings block={block} onChange={onChange} tokens={tokens} styleChain={styleChain} disabled={disabled} error={error} />;
   }
+}
+
+/**
+ * A card: its label and title, its own colors, and its blocks — edited with the same block list as the content
+ * around it. The frame (corners, padding, border width) is the design's, under Settings → Email Designs.
+ */
+function CardSettings({
+  block,
+  onChange,
+  tokens,
+  styleChain,
+  disabled,
+  error,
+  allProblems,
+  takenIds,
+}: {
+  block: CardBlock;
+  onChange: (block: DesignBlock) => void;
+  tokens: readonly TemplateToken[];
+  styleChain: readonly DesignStyles[];
+  disabled: boolean;
+  error: (field: string) => string | undefined;
+  allProblems: Record<string, DesignProblem[]>;
+  takenIds: ReadonlySet<string>;
+}) {
+  // The card's own blocks may not reuse any other id in the document; their own ids are the list's to manage.
+  const ownIds = new Set(block.blocks.map((inner) => inner.id));
+  const otherIds = new Set([...takenIds].filter((id) => !ownIds.has(id)));
+
+  return (
+    <>
+      <TextLineControl
+        label="Label"
+        value={block.eyebrow ?? ""}
+        onChange={(value) => onChange(withCardText(block, "eyebrow", value))}
+        tokens={tokens}
+        maxLength={TEXT_LIMITS.cardEyebrow}
+        placeholder="Small text above the title, e.g. Quotation summary"
+        disabled={disabled}
+        error={error("eyebrow")}
+      />
+      <TextLineControl
+        label="Title"
+        value={block.title ?? ""}
+        onChange={(value) => onChange(withCardText(block, "title", value))}
+        tokens={tokens}
+        maxLength={TEXT_LIMITS.cardTitle}
+        placeholder="e.g. Basic website. ₱35,000, one-time."
+        disabled={disabled}
+        error={error("title")}
+      />
+      <div className="flex flex-wrap gap-4">
+        <AlignmentControl value={block.align} onChange={(align) => onChange({ ...block, align })} disabled={disabled} error={error("align")} />
+        <ColorControl
+          label="Background"
+          value={block.background_color}
+          inherited={inheritedBlockColor("card", "background_color", styleChain)}
+          onChange={(background_color) => onChange({ ...block, background_color })}
+          disabled={disabled}
+          error={error("background_color")}
+        />
+        <ColorControl
+          label="Border"
+          value={block.border_color}
+          inherited={inheritedBlockColor("card", "border_color", styleChain)}
+          onChange={(border_color) => onChange({ ...block, border_color })}
+          disabled={disabled}
+          error={error("border_color")}
+        />
+      </div>
+      <p className="text-xs text-muted-foreground">
+        The card&apos;s corners, padding and border width come from the email design. The border shows only when the design
+        gives cards a border width.
+      </p>
+      <div className="rounded-lg border border-dashed border-border p-3">
+        <DesignBlockList
+          nested
+          title="Inside the card"
+          blocks={block.blocks}
+          onChange={(update) => onChange({ ...block, blocks: update(block.blocks) })}
+          addable={ADDABLE_CARD_BLOCKS}
+          max={MAX_CARD_BLOCKS}
+          otherIds={otherIds}
+          problems={allProblems}
+          tokens={tokens}
+          styleChain={styleChain}
+          disabled={disabled}
+          emptyMessage="A card needs at least one block. Add rows, text or a button."
+        />
+        {error("blocks") ? (
+          <p role="alert" className="mt-2 text-xs text-red-500">
+            {error("blocks")}
+          </p>
+        ) : null}
+      </div>
+    </>
+  );
+}
+
+/** A rows block: its items, each a title and an optional description, plus how they are drawn. */
+function RowsSettings({
+  block,
+  onChange,
+  tokens,
+  styleChain,
+  disabled,
+  error,
+}: {
+  block: RowsBlock;
+  onChange: (block: DesignBlock) => void;
+  tokens: readonly TemplateToken[];
+  styleChain: readonly DesignStyles[];
+  disabled: boolean;
+  error: (field: string) => string | undefined;
+}) {
+  const items = block.items;
+  const full = items.length >= MAX_ROWS_ITEMS;
+  const setItems = (next: RowsBlock["items"]) => onChange({ ...block, items: next });
+
+  function move(index: number, direction: -1 | 1) {
+    const to = index + direction;
+    if (to < 0 || to >= items.length) return;
+    const next = [...items];
+    [next[index], next[to]] = [next[to], next[index]];
+    setItems(next);
+  }
+
+  return (
+    <>
+      <div className="flex flex-col gap-2">
+        <div className="flex items-baseline justify-between">
+          <span className="text-sm font-medium text-foreground">Rows</span>
+          <span className="text-xs text-muted-foreground">
+            {items.length} of {MAX_ROWS_ITEMS}
+          </span>
+        </div>
+        {items.map((item, index) => (
+          <div key={index} className="flex flex-col gap-2 rounded-lg border border-border p-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-muted-foreground">Row {index + 1}</span>
+              <div className="flex items-center">
+                <button type="button" className={ICON_BUTTON} onClick={() => move(index, -1)} disabled={disabled || index === 0} aria-label={`Move row ${index + 1} up`}>
+                  <ChevronUp className="size-4" aria-hidden />
+                </button>
+                <button type="button" className={ICON_BUTTON} onClick={() => move(index, 1)} disabled={disabled || index === items.length - 1} aria-label={`Move row ${index + 1} down`}>
+                  <ChevronDown className="size-4" aria-hidden />
+                </button>
+                <button
+                  type="button"
+                  className={cn(ICON_BUTTON, "hover:text-destructive")}
+                  onClick={() => setItems(items.filter((_, i) => i !== index))}
+                  disabled={disabled || items.length === 1}
+                  aria-label={`Remove row ${index + 1}`}
+                  title={items.length === 1 ? "A rows block needs at least one row" : undefined}
+                >
+                  <Trash2 className="size-4" aria-hidden />
+                </button>
+              </div>
+            </div>
+            <TextLineControl
+              label="Title"
+              required
+              value={item.title}
+              onChange={(title) => setItems(items.map((current, i) => (i === index ? { ...current, title } : current)))}
+              tokens={tokens}
+              tokensOnFocus
+              maxLength={TEXT_LIMITS.rowTitle}
+              placeholder="e.g. Website"
+              disabled={disabled}
+              error={error(`items.${index}.title`) ?? error(`items.${index}`)}
+            />
+            <TextLineControl
+              label="Description"
+              value={item.description ?? ""}
+              onChange={(description) => setItems(items.map((current, i) => (i === index ? withRowDescription(current, description) : current)))}
+              tokens={tokens}
+              tokensOnFocus
+              maxLength={TEXT_LIMITS.rowDescription}
+              placeholder="Optional, e.g. 5 pages, with a contact form."
+              disabled={disabled}
+              error={error(`items.${index}.description`)}
+            />
+          </div>
+        ))}
+        {error("items") ? (
+          <p role="alert" className="text-xs text-red-500">
+            {error("items")}
+          </p>
+        ) : null}
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="w-fit"
+          onClick={() => setItems([...items, { title: "Item" }])}
+          disabled={disabled || full}
+        >
+          <Plus aria-hidden />
+          Add row
+        </Button>
+      </div>
+      <SwitchControl
+        label="Lines between rows"
+        checked={block.dividers}
+        onChange={(dividers) => onChange({ ...block, dividers })}
+        disabled={disabled}
+        error={error("dividers")}
+      />
+      <div className="flex flex-wrap gap-4">
+        <AlignmentControl value={block.align} onChange={(align) => onChange({ ...block, align })} disabled={disabled} error={error("align")} />
+        <ColorControl
+          label="Titles"
+          value={block.title_color}
+          inherited={inheritedBlockColor("rows", "title_color", styleChain)}
+          onChange={(title_color) => onChange({ ...block, title_color })}
+          disabled={disabled}
+          error={error("title_color")}
+        />
+        <ColorControl
+          label="Descriptions"
+          value={block.description_color}
+          inherited={inheritedBlockColor("rows", "description_color", styleChain)}
+          onChange={(description_color) => onChange({ ...block, description_color })}
+          disabled={disabled}
+          error={error("description_color")}
+        />
+        {block.dividers ? (
+          <ColorControl
+            label="Lines"
+            value={block.divider_color}
+            inherited={inheritedBlockColor("rows", "divider_color", styleChain)}
+            onChange={(divider_color) => onChange({ ...block, divider_color })}
+            disabled={disabled}
+            error={error("divider_color")}
+          />
+        ) : null}
+      </div>
+    </>
+  );
 }
